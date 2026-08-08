@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  :root{
+    --ink:#1b2333; --muted:#5c6676; --soft:#8a93a3;
+    --page:#f5f4ef; --card:#ffffff; --line:#e7e4db;
+    --blue:#2f74b5; --blueBg:#e8f1fa;
+    --purple:#6a49a8; --purpleBg:#efeafa;
+    --teal:#159c78; --tealBg:#e2f4ee;
+    --amber:#c07c14; --amberBg:#fbefd8;
+    --rose:#d15540; --roseBg:#fbe9e4;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
+  @page{ size:letter; margin:0; }
+  body{
+    font-family:-apple-system,"Helvetica Neue",Arial,sans-serif;
+    color:var(--ink); background:var(--page);
+    font-size:12.5px; line-height:1.5;
+  }
+  .page{ width:8.5in; min-height:11in; padding:0.6in 0.7in; page-break-after:always; position:relative; }
+  .page:last-child{ page-break-after:auto; }
+  h1{ font-size:40px; font-weight:800; letter-spacing:-.5px; line-height:1.05; }
+  h2{ font-size:22px; font-weight:800; letter-spacing:-.3px; }
+  .kicker{ font-size:11px; font-weight:800; letter-spacing:2px; text-transform:uppercase; color:var(--soft); }
+  .lede{ font-size:14px; color:var(--muted); line-height:1.55; }
+  b,strong{ font-weight:700; }
+  .hl{ background:linear-gradient(transparent 55%, #ffe7a8 55%); padding:0 2px; font-weight:700; }
+
+  /* Cover */
+  .cover{ background:var(--ink); color:#fff; display:flex; flex-direction:column; justify-content:space-between; }
+  .cover h1{ color:#fff; }
+  .cover .kicker{ color:#8ea6c6; }
+  .dot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:7px; }
+  .legend{ background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.14); border-radius:14px; padding:18px 20px; }
+  .legend .row{ display:flex; align-items:center; gap:10px; font-size:12.5px; color:#dfe6f0; margin:7px 0; }
+  .legend .tag{ font-weight:800; }
+
+  /* Glossary cards */
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .gcard{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+  .gcard .term{ font-weight:800; font-size:14px; display:flex; align-items:center; gap:8px; }
+  .gcard .emoji{ font-size:18px; }
+  .gcard p{ font-size:12px; color:var(--muted); margin-top:5px; }
+
+  /* Pipeline */
+  .pipe{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:6px; }
+  .pchip{ display:flex; align-items:center; gap:11px; background:var(--card); border:1px solid var(--line); border-left-width:6px; border-radius:10px; padding:10px 12px; }
+  .pnum{ font-weight:800; font-size:15px; width:22px; }
+  .pttl{ font-weight:700; font-size:12.5px; }
+  .pdesc{ font-size:10.5px; color:var(--soft); }
+
+  /* Phase banner */
+  .phase{ display:flex; align-items:center; gap:14px; border-radius:14px; padding:16px 20px; color:#fff; margin-bottom:16px; }
+  .phase .pn{ font-size:30px; font-weight:800; opacity:.85; }
+  .phase .pk{ font-size:11px; font-weight:800; letter-spacing:2px; text-transform:uppercase; opacity:.9; }
+  .phase .pt{ font-size:20px; font-weight:800; }
+
+  /* Stage card */
+  .stage{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; margin-bottom:14px; page-break-inside:avoid; }
+  .shead{ display:flex; align-items:center; gap:12px; }
+  .sbadge{ width:40px; height:40px; border-radius:11px; display:flex; align-items:center; justify-content:center; font-size:20px; flex:none; }
+  .snum{ font-size:10px; font-weight:800; letter-spacing:1.5px; text-transform:uppercase; }
+  .stitle{ font-size:17px; font-weight:800; letter-spacing:-.2px; }
+  .tldr{ font-size:12.5px; font-style:italic; color:var(--muted); margin:9px 0 10px; }
+  .stage ul{ margin:2px 0 0 2px; list-style:none; }
+  .stage li{ font-size:12px; color:#2a3446; padding-left:16px; position:relative; margin:5px 0; line-height:1.5; }
+  .stage li:before{ content:"›"; position:absolute; left:2px; font-weight:800; color:var(--soft); }
+  .does{ margin-top:11px; border-radius:10px; padding:9px 12px; font-size:11.5px; }
+  .does b{ font-weight:800; }
+  .cask{ margin-top:8px; font-size:11.5px; color:var(--muted); border-left:3px solid var(--line); padding-left:10px; }
+  .cask b{ color:var(--ink); }
+
+  .foot{ position:absolute; bottom:0.35in; left:0.7in; right:0.7in; display:flex; justify-content:space-between; font-size:10px; color:var(--soft); }
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<section class="page cover">
+  <div>
+    <div class="kicker">Plain-English playbook · built for trustedcaskets.com</div>
+    <div style="height:26px"></div>
+    <h1>The SEO Content<br>Engine, A→Z</h1>
+    <div style="height:16px"></div>
+    <p class="lede" style="color:#c8d3e2; max-width:5.2in;">How a website goes from invisible to found — every step, front to back, explained like you've never done SEO before. Twelve stages, five phases, zero jargon left undefined.</p>
+  </div>
+
+  <div class="legend">
+    <div style="font-weight:800; font-size:13px; margin-bottom:8px; color:#fff;">How to read this — 5 color-coded phases</div>
+    <div class="row"><span class="dot" style="background:var(--blue)"></span><span class="tag" style="color:#9dc2e8">FOUNDATION</span> — plug in the data &amp; find what people search</div>
+    <div class="row"><span class="dot" style="background:var(--purple)"></span><span class="tag" style="color:#c2acec">INTELLIGENCE</span> — study competitors &amp; make the plan</div>
+    <div class="row"><span class="dot" style="background:var(--teal)"></span><span class="tag" style="color:#8fdcc4">CREATION</span> — write it, grade it, add the human touch</div>
+    <div class="row"><span class="dot" style="background:var(--amber)"></span><span class="tag" style="color:#e6c583">LAUNCH</span> — link it, publish it, get it seen by Google</div>
+    <div class="row"><span class="dot" style="background:var(--rose)"></span><span class="tag" style="color:#eaa393">GROWTH</span> — improve on autopilot &amp; scale to cities</div>
+  </div>
+
+  <div style="font-size:11px; color:#8ea6c6;">Each stage tells you: the one-line gist · what happens in plain English · what it does for you · a real casket example.</div>
+</section>
+
+<!-- SEO IN 60 SECONDS -->
+<section class="page">
+  <div class="kicker">Start here</div>
+  <h2 style="margin:4px 0 6px;">SEO in 60 seconds</h2>
+  <p class="lede" style="margin-bottom:16px;">Five words explain almost everything. Learn these and the rest clicks into place.</p>
+
+  <div class="grid2">
+    <div class="gcard"><div class="term"><span class="emoji">🔎</span> Search engine</div><p>Google (or an AI like ChatGPT). Someone types a question; it shows a ranked list of pages. Being near the top = getting found.</p></div>
+    <div class="gcard"><div class="term"><span class="emoji">🕷️</span> Crawl</div><p>A bot visits your page and reads it. If it never visits, you don't exist to Google. Step one, always.</p></div>
+    <div class="gcard"><div class="term"><span class="emoji">📇</span> Index</div><p>Google files your crawled page in its giant library. Only indexed pages can ever be shown to searchers.</p></div>
+    <div class="gcard"><div class="term"><span class="emoji">🔑</span> Keyword</div><p>The exact phrase a person searches, e.g. <i>"how much does a casket cost."</i> You write pages that answer specific keywords.</p></div>
+    <div class="gcard"><div class="term"><span class="emoji">📊</span> Rank / SERP</div><p>SERP = the results page. Your "rank" is your spot on it. Page 1 gets almost all the clicks; page 2 is a ghost town.</p></div>
+    <div class="gcard"><div class="term"><span class="emoji">🤖</span> AEO / GEO</div><p>Getting AI answers to <b>quote your page</b> as their source. Huge now — many people read the AI answer and never click.</p></div>
+  </div>
+
+  <div style="background:var(--ink); color:#fff; border-radius:14px; padding:18px 20px; margin-top:18px;">
+    <div style="font-weight:800; font-size:14px; margin-bottom:6px;">The one big idea 💡</div>
+    <p style="font-size:13px; color:#d8e0ec; line-height:1.55;">Your Shopify store sells caskets. But a grieving family at 2am isn't typing "oak casket" — they're typing <span class="hl" style="color:#1b2333;">"what do I do when someone dies."</span> The engine's whole job is to answer <b style="color:#fff;">those</b> questions, become the helpful authority, and let the sale follow.</p>
+  </div>
+
+  <div class="foot"><span>The SEO Content Engine · A→Z</span><span>trustedcaskets.com</span></div>
+</section>
+
+<!-- BIG PICTURE -->
+<section class="page">
+  <div class="kicker">The big picture</div>
+  <h2 style="margin:4px 0 6px;">All 12 stages on one page</h2>
+  <p class="lede" style="margin-bottom:14px;">Read it top to bottom, left to right. Every stage feeds the next — and the last one loops back to the start, forever.</p>
+
+  <div class="pipe">
+    <div class="pchip" style="border-left-color:var(--blue)"><span class="pnum" style="color:var(--blue)">1</span><div><div class="pttl">🔌 Connect the data</div><div class="pdesc">Give the engine eyes</div></div></div>
+    <div class="pchip" style="border-left-color:var(--blue)"><span class="pnum" style="color:var(--blue)">2</span><div><div class="pttl">🔑 Keyword research</div><div class="pdesc">Find what people type</div></div></div>
+    <div class="pchip" style="border-left-color:var(--purple)"><span class="pnum" style="color:var(--purple)">3</span><div><div class="pttl">🔍 Gap map</div><div class="pdesc">Beat the competition</div></div></div>
+    <div class="pchip" style="border-left-color:var(--purple)"><span class="pnum" style="color:var(--purple)">4</span><div><div class="pttl">📋 Content brief</div><div class="pdesc">The recipe to win</div></div></div>
+    <div class="pchip" style="border-left-color:var(--teal)"><span class="pnum" style="color:var(--teal)">5</span><div><div class="pttl">✍️ Write the page</div><div class="pdesc">Proven template</div></div></div>
+    <div class="pchip" style="border-left-color:var(--teal)"><span class="pnum" style="color:var(--teal)">6</span><div><div class="pttl">🎯 Grade 0–100</div><div class="pdesc">Quality gate</div></div></div>
+    <div class="pchip" style="border-left-color:var(--teal)"><span class="pnum" style="color:var(--teal)">7</span><div><div class="pttl">🧠 Human touch</div><div class="pdesc">Real experience</div></div></div>
+    <div class="pchip" style="border-left-color:var(--amber)"><span class="pnum" style="color:var(--amber)">8</span><div><div class="pttl">🔗 Internal links</div><div class="pdesc">Connect the pages</div></div></div>
+    <div class="pchip" style="border-left-color:var(--amber)"><span class="pnum" style="color:var(--amber)">9</span><div><div class="pttl">🚀 Publish</div><div class="pdesc">Live on Shopify</div></div></div>
+    <div class="pchip" style="border-left-color:var(--amber)"><span class="pnum" style="color:var(--amber)">10</span><div><div class="pttl">📇 Get indexed</div><div class="pdesc">Make Google see it</div></div></div>
+    <div class="pchip" style="border-left-color:var(--rose)"><span class="pnum" style="color:var(--rose)">11</span><div><div class="pttl">📈 Monitor &amp; improve</div><div class="pdesc">Auto self-tuning</div></div></div>
+    <div class="pchip" style="border-left-color:var(--rose)"><span class="pnum" style="color:var(--rose)">12</span><div><div class="pttl">🗺️ Scale to cities</div><div class="pdesc">Thousands of pages</div></div></div>
+  </div>
+
+  <div style="display:flex; gap:12px; margin-top:18px;">
+    <div style="flex:1; background:var(--tealBg); border-radius:12px; padding:14px 16px;">
+      <div style="font-weight:800; font-size:13px; color:var(--teal);">The whole thing in one breath</div>
+      <p style="font-size:12px; color:#2a3446; margin-top:6px; line-height:1.55;">Connect data → find what families search → find the gap rivals miss → write a complete, quotable page → grade it to 90+ → add your human touch → link it in → publish → get indexed → watch &amp; auto-improve → repeat at city scale. <b>Every cycle compounds.</b></p>
+    </div>
+  </div>
+
+  <div style="background:var(--amberBg); border-radius:12px; padding:12px 16px; margin-top:12px;">
+    <p style="font-size:12px; color:#5a4410;"><b>⏱️ ADHD-friendly promise:</b> you only ever touch <b>one</b> button — approving briefs at Stage 4. Everything else runs itself.</p>
+  </div>
+
+  <div class="foot"><span>The SEO Content Engine · A→Z</span><span>Overview</span></div>
+</section>
+
+<!-- PHASE 1: FOUNDATION -->
+<section class="page">
+  <div class="phase" style="background:var(--blue)"><span class="pn">01</span><div><div class="pk">Phase one</div><div class="pt">Foundation — give it eyes</div></div></div>
+
+  <div class="stage" style="border-left:6px solid var(--blue)">
+    <div class="shead"><div class="sbadge" style="background:var(--blueBg)">🔌</div><div><div class="snum" style="color:var(--blue)">Stage 1</div><div class="stitle">Connect the data</div></div></div>
+    <div class="tldr">Before writing a word, plug in the facts — so the AI analyzes instead of guesses.</div>
+    <ul>
+      <li><b>Google Search Console (GSC)</b> — your free report card from Google: which searches showed your pages, how many saw you (impressions), clicked (clicks), and your average rank.</li>
+      <li><b>DataForSEO</b> — a cheap pay-as-you-go data pipe to spy on the whole market: search volumes and which competitor pages rank.</li>
+      <li><b>Google Analytics (GA4)</b> — what visitors do after they land (read, leave, or buy).</li>
+    </ul>
+    <div class="does" style="background:var(--blueBg); color:#123a5e;"><b>What it does:</b> turns a confident guesser into an informed analyst. Everything downstream depends on this.</div>
+    <div class="cask"><b>Caskets:</b> GSC instantly reveals searches you already show up for but nobody clicks — the fastest money on the table.</div>
+  </div>
+
+  <div class="stage" style="border-left:6px solid var(--blue)">
+    <div class="shead"><div class="sbadge" style="background:var(--blueBg)">🔑</div><div><div class="snum" style="color:var(--blue)">Stage 2</div><div class="stitle">Keyword research</div></div></div>
+    <div class="tldr">Find the exact phrases real people type — ranked by opportunity, not vibes.</div>
+    <ul>
+      <li>Each keyword has a <b>volume</b> (how often it's searched) and an <b>intent</b> (what they actually want).</li>
+      <li><b>Long-tail</b> = longer, specific phrases like <i>"cremation casket rental"</i> — lower volume but high intent, they convert best.</li>
+      <li>Cross-checks your GSC to find <b>"striking distance"</b> keywords (you're on page 2 — a small push wins page 1).</li>
+    </ul>
+    <div class="does" style="background:var(--blueBg); color:#123a5e;"><b>What it does:</b> produces a prioritized map of what to write, ordered by easiest, biggest wins.</div>
+    <div class="cask"><b>Caskets:</b> "how much does a casket cost" (researching) vs "metal vs wood casket" (comparing) vs "what to do when someone dies" (scared, early, huge volume).</div>
+  </div>
+
+  <div class="foot"><span>Phase 1 · Foundation</span><span>Stages 1–2</span></div>
+</section>
+
+<!-- PHASE 2: INTELLIGENCE -->
+<section class="page">
+  <div class="phase" style="background:var(--purple)"><span class="pn">02</span><div><div class="pk">Phase two</div><div class="pt">Intelligence — the plan</div></div></div>
+
+  <div class="stage" style="border-left:6px solid var(--purple)">
+    <div class="shead"><div class="sbadge" style="background:var(--purpleBg)">🔍</div><div><div class="snum" style="color:var(--purple)">Stage 3</div><div class="stitle">Deep competitive research — the gap map</div></div></div>
+    <div class="tldr">Study who's winning, then find the hole they all left open. That hole is your win.</div>
+    <ul>
+      <li>Pulls the <b>top 10 pages</b> currently ranking for your topic.</li>
+      <li><b>Reads each one</b> — length, subtopics, questions answered, data cited.</li>
+      <li>Grabs Google's <b>"People Also Ask"</b> questions.</li>
+      <li>Finds what everyone covers <b>and what nobody does</b> — your wedge.</li>
+    </ul>
+    <div class="does" style="background:var(--purpleBg); color:#3a2568;"><b>What it does:</b> guarantees your page is more complete than what's ranking — which is literally how you outrank it.</div>
+    <div class="cask"><b>Caskets:</b> "All 10 rivals list prices, but none break cost down by material or mention cremation-rental savings." → that's your page.</div>
+  </div>
+
+  <div class="stage" style="border-left:6px solid var(--purple)">
+    <div class="shead"><div class="sbadge" style="background:var(--purpleBg)">📋</div><div><div class="snum" style="color:var(--purple)">Stage 4</div><div class="stitle">The content brief — the recipe</div></div></div>
+    <div class="tldr">Turn the research into a spec so the draft is engineered to win, not random.</div>
+    <ul>
+      <li>Defines: target keyword, the angle, length, subtopics, questions to answer, data to include, and which labels (schema) to add.</li>
+      <li>This same brief becomes the <b>yardstick</b> the grader measures against later.</li>
+      <li><b>This is the one place you click "approve."</b></li>
+    </ul>
+    <div class="does" style="background:var(--purpleBg); color:#3a2568;"><b>What it does:</b> locks in a winning plan before any writing — and it's your single point of control.</div>
+    <div class="cask"><b>Caskets:</b> approve "Casket cost guide — by material + rental option, 1,800 words, FAQ + how-to schema" and walk away.</div>
+  </div>
+
+  <div class="foot"><span>Phase 2 · Intelligence</span><span>Stages 3–4</span></div>
+</section>
+
+<!-- PHASE 3: CREATION -->
+<section class="page">
+  <div class="phase" style="background:var(--teal)"><span class="pn">03</span><div><div class="pk">Phase three</div><div class="pt">Creation — build &amp; check</div></div></div>
+
+  <div class="stage" style="border-left:6px solid var(--teal)">
+    <div class="shead"><div class="sbadge" style="background:var(--tealBg)">✍️</div><div><div class="snum" style="color:var(--teal)">Stage 5</div><div class="stitle">Write the page</div></div></div>
+    <div class="tldr">Draft in a structure tuned for both Google and AI.</div>
+    <ul>
+      <li>Answer-first intro · table of contents · step-by-step how-tos · authoritative links · FAQ · gentle calls-to-action.</li>
+      <li><b>Schema markup</b> = invisible labels telling Google "this is a FAQ / how-to / price" — like labeled tabs on a folder.</li>
+      <li><b>Citable passages</b> = tight ~130–170-word chunks AI loves to quote. Ramble and you get skipped.</li>
+    </ul>
+    <div class="does" style="background:var(--tealBg); color:#0e5a44;"><b>What it does:</b> produces a draft structurally ready to rank <i>and</i> to be quoted by AI.</div>
+  </div>
+
+  <div class="stage" style="border-left:6px solid var(--teal)">
+    <div class="shead"><div class="sbadge" style="background:var(--tealBg)">🎯</div><div><div class="snum" style="color:var(--teal)">Stage 6</div><div class="stitle">The 0–100 quality grade</div></div></div>
+    <div class="tldr">A rubric scores every draft. Below 85? It fixes its weak spots and re-grades — automatically.</div>
+    <ul>
+      <li>Scores intent match, depth vs rivals, experience, schema/AEO, originality, linking, readability, conversion.</li>
+      <li>Loops "revise the weakest part → re-grade" until it passes.</li>
+      <li><b>Every score is logged with the reason</b> — so you learn what "great" looks like over time.</li>
+    </ul>
+    <div class="does" style="background:var(--tealBg); color:#0e5a44;"><b>What it does:</b> no thin "AI slop" ever reaches your site — only pages that clear the bar.</div>
+  </div>
+
+  <div class="stage" style="border-left:6px solid var(--teal)">
+    <div class="shead"><div class="sbadge" style="background:var(--tealBg)">🧠</div><div><div class="snum" style="color:var(--teal)">Stage 7</div><div class="stitle">You add the human touch (E-E-A-T)</div></div></div>
+    <div class="tldr">Google rewards content from someone who clearly knows the subject. That's you.</div>
+    <ul>
+      <li><b>E-E-A-T</b> = Experience, Expertise, Authoritativeness, Trust.</li>
+      <li>Add the 10% only you have: a real price you've seen, a common mistake families make, a genuine tip, a photo.</li>
+    </ul>
+    <div class="does" style="background:var(--tealBg); color:#0e5a44;"><b>What it does:</b> turns a good draft into a <i>trusted</i> one — the #1 reason real content beats pure AI slop.</div>
+    <div class="cask"><b>Caskets:</b> "Families often overpay the funeral home 3–5× for the same casket." One true line like that lifts the whole page.</div>
+  </div>
+
+  <div class="foot"><span>Phase 3 · Creation</span><span>Stages 5–7</span></div>
+</section>
+
+<!-- PHASE 4: LAUNCH -->
+<section class="page">
+  <div class="phase" style="background:var(--amber)"><span class="pn">04</span><div><div class="pk">Phase four</div><div class="pt">Launch — ship &amp; get seen</div></div></div>
+
+  <div class="stage" style="border-left:6px solid var(--amber)">
+    <div class="shead"><div class="sbadge" style="background:var(--amberBg)">🔗</div><div><div class="snum" style="color:var(--amber)">Stage 8</div><div class="stitle">Internal linking</div></div></div>
+    <div class="tldr">Link your pages to each other so Google can find them all and understand your site.</div>
+    <ul>
+      <li>Google's crawler follows links — good linking helps it discover and index every page.</li>
+      <li>3–5 relevant links per page, forward and backward, with anti-spam rules.</li>
+    </ul>
+    <div class="does" style="background:var(--amberBg); color:#6a4708;"><b>What it does:</b> turns loose pages into a connected web Google ranks as a whole.</div>
+    <div class="cask"><b>Caskets:</b> the cost guide links to "metal vs wood" and to the actual product collection — readers and crawlers flow through.</div>
+  </div>
+
+  <div class="stage" style="border-left:6px solid var(--amber)">
+    <div class="shead"><div class="sbadge" style="background:var(--amberBg)">🚀</div><div><div class="snum" style="color:var(--amber)">Stage 9</div><div class="stitle">Publish to Shopify</div></div></div>
+    <div class="tldr">The finished post goes live automatically through Shopify's native blog.</div>
+    <ul>
+      <li>Pushed straight in via Shopify's Admin API — the clean path, no messy theme hacking.</li>
+      <li>On a schedule (a few posts a week) or on your click — your choice.</li>
+    </ul>
+    <div class="does" style="background:var(--amberBg); color:#6a4708;"><b>What it does:</b> gets the page onto the live site with zero manual copy-paste.</div>
+  </div>
+
+  <div class="stage" style="border-left:6px solid var(--amber)">
+    <div class="shead"><div class="sbadge" style="background:var(--amberBg)">📇</div><div><div class="snum" style="color:var(--amber)">Stage 10</div><div class="stitle">Get indexed</div></div></div>
+    <div class="tldr">Published ≠ findable. Now we make Google actually crawl and file it.</div>
+    <ul>
+      <li>Your <b>sitemap</b> (a list of all URLs) tells Google what exists.</li>
+      <li>For top pages, <b>request indexing</b> in GSC (~10/day) to jump the line.</li>
+      <li>Strong internal links speed up discovery of the rest.</li>
+    </ul>
+    <div class="does" style="background:var(--amberBg); color:#6a4708;"><b>What it does:</b> moves the page from "published but invisible" to "in Google's library, eligible to rank."</div>
+  </div>
+
+  <div class="foot"><span>Phase 4 · Launch</span><span>Stages 8–10</span></div>
+</section>
+
+<!-- PHASE 5: GROWTH -->
+<section class="page">
+  <div class="phase" style="background:var(--rose)"><span class="pn">05</span><div><div class="pk">Phase five</div><div class="pt">Growth — compound it</div></div></div>
+
+  <div class="stage" style="border-left:6px solid var(--rose)">
+    <div class="shead"><div class="sbadge" style="background:var(--roseBg)">📈</div><div><div class="snum" style="color:var(--rose)">Stage 11</div><div class="stitle">Monitor &amp; self-improve</div></div></div>
+    <div class="tldr">Once live, the engine watches GSC and keeps making pages better on its own.</div>
+    <ul>
+      <li><b>Striking distance</b> (rank 11–15) → push that page harder.</li>
+      <li><b>High views, low clicks</b> → rewrite the title &amp; meta description (the headline + summary in results) for an instant click lift.</li>
+      <li><b>Decaying</b> old posts → refresh with new info.</li>
+    </ul>
+    <div class="does" style="background:var(--roseBg); color:#8a2f1e;"><b>What it does:</b> your content keeps getting better instead of going stale.</div>
+  </div>
+
+  <div class="stage" style="border-left:6px solid var(--rose)">
+    <div class="shead"><div class="sbadge" style="background:var(--roseBg)">🗺️</div><div><div class="snum" style="color:var(--rose)">Stage 12</div><div class="stitle">Scale with geo pages — the casket superpower</div></div></div>
+    <div class="tldr">One template becomes thousands of unique, ranking city pages.</div>
+    <ul>
+      <li>A page per city: "When a loved one passes in [City]: first steps, local funeral homes, what to expect."</li>
+      <li>Pulls <b>vetted local data</b> (Google Maps API, filtered to 4.4★ / 20+ reviews) so you never list junk.</li>
+      <li>Genuinely helpful + a soft "compare casket prices" nudge.</li>
+    </ul>
+    <div class="does" style="background:var(--roseBg); color:#8a2f1e;"><b>What it does:</b> you become the helpful authority in a moment of real need — Google &amp; AI start recommending you, and families find you first.</div>
+    <div class="cask"><b>Proof:</b> Ryan's version hit 2,625 pages → 1.5M impressions → 5%+ conversion, one product line running with zero employees.</div>
+  </div>
+
+  <div style="background:var(--ink); color:#fff; border-radius:14px; padding:16px 20px; margin-top:4px;">
+    <div style="font-weight:800; font-size:14px;">▶ Your next step</div>
+    <p style="font-size:12.5px; color:#d8e0ec; margin-top:6px; line-height:1.55;">Start Stage 1 on <b style="color:#fff;">trustedcaskets.com</b> as the testbed — wire up GSC + DataForSEO and run the first live keyword + gap analysis. Prove it on the low-risk site, then bring the whole engine to overnightcaskets.com.</p>
+  </div>
+
+  <div class="foot"><span>Phase 5 · Growth</span><span>Stages 11–12</span></div>
+</section>
+
+</body>
+</html>
