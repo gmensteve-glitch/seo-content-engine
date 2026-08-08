@@ -1,0 +1,326 @@
+// SEO Content Engine — multi-tenant data model
+// One shared engine + one config bundle per business. Everything is scoped by businessId.
+// Provider is Postgres; swap to sqlite for local dev if desired.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Auth & tenancy
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id          String       @id @default(cuid())
+  email       String       @unique
+  name        String?
+  memberships Membership[]
+  createdAt   DateTime     @default(now())
+}
+
+model Membership {
+  id         String   @id @default(cuid())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+  role       Role     @default(OWNER)
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, businessId])
+}
+
+enum Role {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+// ─────────────────────────────────────────────────────────────
+// Business (workspace) — the "config bundle" that makes it pluggable
+// ─────────────────────────────────────────────────────────────
+
+model Business {
+  id          String   @id @default(cuid())
+  name        String
+  domain      String // e.g. trustedcaskets.com
+  cmsPlatform Cms      @default(SHOPIFY)
+  // Profile = the generated client.md (who they are, audience, offering)
+  profileMd   String?  @db.Text
+  brandVoice  String?  @db.Text
+  status      BizStatus @default(ONBOARDING)
+  // Per-business rules the engine obeys
+  qualityThreshold Int    @default(85) // min grade to auto-queue
+  linksPerPage     Int    @default(4)
+  cadencePerWeek   Int    @default(5)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  memberships  Membership[]
+  connectors   Connector[]
+  pillars      Pillar[]
+  keywords     Keyword[]
+  ideas        Idea[]
+  briefs       Brief[]
+  drafts       Draft[]
+  pages        Page[]
+  schedules    Schedule[]
+
+  @@index([domain])
+}
+
+enum BizStatus {
+  ONBOARDING
+  ACTIVE
+  PAUSED
+}
+
+enum Cms {
+  SHOPIFY
+  WORDPRESS
+  WEBFLOW
+  CUSTOM
+}
+
+// ─────────────────────────────────────────────────────────────
+// Connectors — data + publishing hookups (secrets stored encrypted)
+// ─────────────────────────────────────────────────────────────
+
+model Connector {
+  id         String        @id @default(cuid())
+  business   Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+  type       ConnectorType
+  // Encrypted JSON blob: tokens, property ids, api keys. Never plaintext in logs.
+  configEnc  String        @db.Text
+  status     ConnStatus    @default(DISCONNECTED)
+  lastSyncAt DateTime?
+  createdAt  DateTime      @default(now())
+
+  @@unique([businessId, type])
+}
+
+enum ConnectorType {
+  GSC // Google Search Console
+  GA4 // Google Analytics 4
+  DATAFORSEO
+  GOOGLE_MAPS
+  SHOPIFY
+  WORDPRESS
+  WEBFLOW
+}
+
+enum ConnStatus {
+  DISCONNECTED
+  CONNECTED
+  ERROR
+}
+
+// ─────────────────────────────────────────────────────────────
+// Strategy: pillars + keyword map
+// ─────────────────────────────────────────────────────────────
+
+model Pillar {
+  id          String   @id @default(cuid())
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId  String
+  name        String // e.g. "Pre-planning", "Costs", "Local resources"
+  description String?
+  ideas       Idea[]
+  createdAt   DateTime @default(now())
+}
+
+model Keyword {
+  id              String   @id @default(cuid())
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId      String
+  phrase          String
+  volume          Int?
+  intent          Intent?
+  difficulty      Int? // 0-100
+  currentPosition Float? // from GSC if we already rank
+  source          String? // dataforseo | gsc
+  createdAt       DateTime @default(now())
+
+  @@index([businessId, phrase])
+}
+
+enum Intent {
+  INFORMATIONAL
+  COMMERCIAL
+  TRANSACTIONAL
+  NAVIGATIONAL
+}
+
+// ─────────────────────────────────────────────────────────────
+// Content lifecycle: Idea → Brief → Draft (+ Grades) → Page
+// ─────────────────────────────────────────────────────────────
+
+model Idea {
+  id         String     @id @default(cuid())
+  business   Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+  pillar     Pillar?    @relation(fields: [pillarId], references: [id])
+  pillarId   String?
+  title      String
+  score      Int? // auto-scored 0-100
+  rationale  String?    @db.Text
+  status     IdeaStatus @default(PROPOSED)
+  brief      Brief?
+  createdAt  DateTime   @default(now())
+}
+
+enum IdeaStatus {
+  PROPOSED
+  BRIEFED
+  DISMISSED
+}
+
+model Brief {
+  id             String      @id @default(cuid())
+  business       Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId     String
+  idea           Idea        @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+  ideaId         String      @unique
+  targetKeyword  String
+  angle          String?     @db.Text // the wedge
+  wordTarget     Int?
+  outline        Json? // section plan
+  questions      Json? // People-Also-Ask to answer
+  requiredSchema String[] // e.g. ["FAQPage","HowTo"]
+  gapMap         Json? // competitor coverage vs the hole we fill
+  contentType    ContentType @default(BLOG)
+  status         BriefStatus @default(PENDING_APPROVAL)
+  draft          Draft?
+  createdAt      DateTime    @default(now())
+}
+
+enum ContentType {
+  BLOG
+  LANDING
+  GEO
+  COMPARISON
+  NEWSLETTER
+}
+
+enum BriefStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+model Draft {
+  id           String      @id @default(cuid())
+  business     Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId   String
+  brief        Brief       @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  briefId      String      @unique
+  title        String
+  bodyMd       String      @db.Text
+  version      Int         @default(1)
+  status       DraftStatus @default(RESEARCHING)
+  grades       Grade[]
+  page         Page?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+enum DraftStatus {
+  RESEARCHING
+  DRAFTED
+  GRADING
+  REVISING
+  PASSED // cleared threshold, awaiting human/publish
+  PUBLISHED
+  FAILED // couldn't reach threshold after N loops -> flag human
+}
+
+// Grade history — every pass is stored so trends are visible (the learning loop)
+model Grade {
+  id         String   @id @default(cuid())
+  draft      Draft    @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  draftId    String
+  overall    Int // 0-100
+  passed     Boolean
+  dimensions Json // { intentMatch: {score, max, note}, depth: {...}, eeat: {...}, ... }
+  feedback   String?  @db.Text // what to fix next loop
+  version    Int // which draft version this grades
+  createdAt  DateTime @default(now())
+
+  @@index([draftId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Live pages + performance + internal linking
+// ─────────────────────────────────────────────────────────────
+
+model Page {
+  id          String            @id @default(cuid())
+  business    Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId  String
+  draft       Draft?            @relation(fields: [draftId], references: [id])
+  draftId     String?           @unique
+  url         String
+  cmsId       String? // the id in Shopify/WP/Webflow
+  contentType ContentType       @default(BLOG)
+  publishedAt DateTime?
+  perf        PagePerformance[]
+  linksOut    LinkEdge[]        @relation("from")
+  linksIn     LinkEdge[]        @relation("to")
+
+  @@index([businessId, url])
+}
+
+model PagePerformance {
+  id          String   @id @default(cuid())
+  page        Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  pageId      String
+  date        DateTime
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  ctr         Float    @default(0)
+  position    Float?
+  conversions Int      @default(0)
+
+  @@unique([pageId, date])
+}
+
+model LinkEdge {
+  id         String @id @default(cuid())
+  businessId String
+  from       Page   @relation("from", fields: [fromId], references: [id], onDelete: Cascade)
+  fromId     String
+  to         Page   @relation("to", fields: [toId], references: [id], onDelete: Cascade)
+  toId       String
+
+  @@unique([fromId, toId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Scheduling (Inngest/Trigger.dev fire these; we record intent + runs)
+// ─────────────────────────────────────────────────────────────
+
+model Schedule {
+  id         String       @id @default(cuid())
+  business   Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+  type       ScheduleType
+  cron       String // e.g. "0 9 */3 * *"
+  nextRunAt  DateTime?
+  enabled    Boolean      @default(true)
+  config     Json?
+  createdAt  DateTime     @default(now())
+}
+
+enum ScheduleType {
+  PUBLISH_QUEUE
+  GSC_SYNC
+  KEYWORD_REFRESH
+  IMPROVE_SWEEP
+  IDEA_GENERATION
+}

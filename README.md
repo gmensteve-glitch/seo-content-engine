@@ -55,4 +55,4 @@ docs/                 Strategy, plans, the A→Z guide
 
 ## Status
 
-🟢 Project initialized. Docs in place. App scaffold next.
+🟢 Foundation authored: data model, architecture, agent pipeline, CMS adapter interface, grader rubric. See `docs/BUILD-PLAN.md` for what's next. App scaffold (needs Node) + GitHub link are the next steps.
