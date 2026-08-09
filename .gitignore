@@ -36,3 +36,6 @@ prisma/*.db
 .cache/
 coverage/
 .tmp/
+
+# TypeScript build cache
+*.tsbuildinfo
