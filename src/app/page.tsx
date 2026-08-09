@@ -1,69 +1,125 @@
-import Image from "next/image";
+import type { ReactNode } from "react";
+import Link from "next/link";
+import { Shell } from "@/components/shell";
+import { PageHeader, Card, StatTile } from "@/components/ui";
+import {
+  getBusiness,
+  getKpis,
+  getPendingBriefs,
+  getLivePages,
+  getPipeline,
+} from "@/lib/data/repo";
+import { ClipboardCheck, TrendingUp, PenLine, ArrowRight } from "lucide-react";
 
-export default function Home() {
+export default async function OverviewPage() {
+  const biz = await getBusiness();
+  const kpis = await getKpis();
+  const briefs = await getPendingBriefs();
+  const pages = await getLivePages();
+  const pipeline = await getPipeline();
+
+  const boosts = pages.filter((p) => p.flag === "boost").length;
+  const rewrites = pages.filter((p) => p.flag === "rewrite").length;
+  const inProgress = pipeline.filter((c) => c.stage === "in_progress").length;
+  const scheduled = pipeline.filter((c) => c.stage === "scheduled").length;
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
+    <Shell>
+      <PageHeader title="Overview" subtitle={biz.domain} />
+
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <StatTile label="Live pages" value={kpis.livePages} />
+        <StatTile label="Indexed" value={kpis.indexed} />
+        <StatTile label="Impressions 28d" value={kpis.impressions28d.toLocaleString()} />
+        <StatTile label="Clicks 28d" value={kpis.clicks28d} />
+        <StatTile label="Avg quality" value={kpis.avgQuality || "—"} accent="success" />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <div className="mb-3 flex items-center gap-2">
+            <ClipboardCheck size={17} className="text-[var(--accent)]" />
+            <h2 className="text-[15px] font-medium">Needs you today</h2>
+          </div>
+          <div className="space-y-2.5">
+            <Row
+              icon={<ClipboardCheck size={15} />}
+              label={`${briefs.length} briefs awaiting approval`}
+              href="/briefs"
+              tone="warn"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            <Row
+              icon={<TrendingUp size={15} />}
+              label={`${boosts} page at striking distance`}
+              href="/performance"
+              tone="accent"
+            />
+            <Row
+              icon={<PenLine size={15} />}
+              label={`${rewrites} page needs a title rewrite`}
+              href="/performance"
+              tone="accent"
+            />
+          </div>
+        </Card>
+
+        <Card>
+          <h2 className="mb-3 text-[15px] font-medium">Pipeline snapshot</h2>
+          <div className="grid grid-cols-2 gap-2.5">
+            <Snap label="Ideas" n={pipeline.filter((c) => c.stage === "ideas").length} />
+            <Snap label="Awaiting approval" n={briefs.length} />
+            <Snap label="In progress" n={inProgress} />
+            <Snap label="Scheduled" n={scheduled} />
+          </div>
+          <Link
+            href="/pipeline"
+            className="mt-3 flex items-center gap-1 text-[13px] font-medium text-[var(--accent)]"
           >
-            Documentation
-          </a>
-        </div>
-      </main>
+            Open pipeline <ArrowRight size={14} />
+          </Link>
+        </Card>
+      </div>
+
+      <p className="mt-6 text-[12px] text-[var(--subtle)]">
+        Autopilot {kpis.autopilot ? "on" : "off"} · data shown is seeded sample data until
+        connectors and the database are live.
+      </p>
+    </Shell>
+  );
+}
+
+function Row({
+  icon,
+  label,
+  href,
+  tone,
+}: {
+  icon: ReactNode;
+  label: string;
+  href: string;
+  tone: "warn" | "accent";
+}) {
+  return (
+    <Link
+      href={href}
+      className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-2.5 hover:bg-[var(--surface-2)]"
+    >
+      <span className="flex items-center gap-2.5 text-[13px]">
+        <span className={tone === "warn" ? "text-[var(--warn)]" : "text-[var(--accent)]"}>
+          {icon}
+        </span>
+        {label}
+      </span>
+      <ArrowRight size={14} className="text-[var(--subtle)]" />
+    </Link>
+  );
+}
+
+function Snap({ label, n }: { label: string; n: number }) {
+  return (
+    <div className="rounded-lg bg-[var(--surface-2)] px-3 py-2.5">
+      <div className="text-[20px] font-medium">{n}</div>
+      <div className="text-[12px] text-[var(--muted)]">{label}</div>
     </div>
   );
 }

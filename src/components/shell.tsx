@@ -1,0 +1,126 @@
+"use client";
+
+import { useState, type ReactNode } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  LayoutDashboard,
+  Target,
+  Lightbulb,
+  ClipboardCheck,
+  Columns3,
+  Gauge,
+  LineChart,
+  MapPin,
+  Plug,
+  Plus,
+  ChevronDown,
+  Layers,
+} from "lucide-react";
+import { BUSINESSES } from "@/lib/mock/seed";
+
+const NAV = [
+  { href: "/", label: "Overview", icon: LayoutDashboard },
+  { href: "/strategy", label: "Strategy", icon: Target },
+  { href: "/ideas", label: "Ideas", icon: Lightbulb },
+  { href: "/briefs", label: "Briefs", icon: ClipboardCheck, badge: 2 },
+  { href: "/pipeline", label: "Pipeline", icon: Columns3 },
+  { href: "/quality", label: "Quality", icon: Gauge },
+  { href: "/performance", label: "Performance", icon: LineChart },
+  { href: "/geo", label: "Geo", icon: MapPin },
+  { href: "/connectors", label: "Connectors", icon: Plug },
+];
+
+export function Shell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const [bizId, setBizId] = useState(BUSINESSES[0].id);
+  const [open, setOpen] = useState(false);
+  const biz = BUSINESSES.find((b) => b.id === bizId) ?? BUSINESSES[0];
+
+  return (
+    <div className="flex h-screen flex-col">
+      {/* Top bar */}
+      <header className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface-1)] px-4 py-2.5">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <button
+              onClick={() => setOpen((v) => !v)}
+              className="flex items-center gap-2.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-2)] px-2.5 py-1.5 text-left hover:bg-[var(--surface-1)]"
+            >
+              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--accent-bg)] text-xs font-medium text-[var(--accent)]">
+                {biz.short}
+              </span>
+              <span>
+                <span className="block text-[13px] font-medium leading-tight">{biz.name}</span>
+                <span className="block text-[10px] capitalize text-[var(--subtle)]">
+                  {biz.cms} · {biz.status}
+                </span>
+              </span>
+              <ChevronDown size={15} className="text-[var(--subtle)]" />
+            </button>
+            {open && (
+              <div className="absolute z-20 mt-1 w-64 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-1 shadow-lg">
+                {BUSINESSES.map((b) => (
+                  <button
+                    key={b.id}
+                    onClick={() => {
+                      setBizId(b.id);
+                      setOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-[var(--surface-2)]"
+                  >
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--accent-bg)] text-xs font-medium text-[var(--accent)]">
+                      {b.short}
+                    </span>
+                    <span className="text-[13px]">{b.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <span className="hidden items-center gap-1.5 text-[11px] text-[var(--subtle)] sm:flex">
+            <Layers size={13} /> {BUSINESSES.length} businesses
+          </span>
+        </div>
+        <button className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-2.5 py-1.5 text-[12px] hover:bg-[var(--surface-2)]">
+          <Plus size={14} /> Add business
+        </button>
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        {/* Sidebar */}
+        <nav className="w-52 shrink-0 border-r border-[var(--border)] bg-[var(--surface-1)] p-2">
+          {NAV.map((item) => {
+            const active =
+              item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`mb-0.5 flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] ${
+                  active
+                    ? "bg-[var(--accent-bg)] font-medium text-[var(--accent)]"
+                    : "text-[var(--muted)] hover:bg-[var(--surface-2)]"
+                }`}
+              >
+                <Icon size={16} />
+                <span className="flex-1">{item.label}</span>
+                {item.badge && (
+                  <span className="rounded-full bg-[var(--warn-bg)] px-1.5 text-[10px] font-medium text-[var(--warn)]">
+                    {item.badge}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Main */}
+        <main className="min-w-0 flex-1 overflow-y-auto bg-[var(--surface-0)] p-6">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
