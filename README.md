@@ -55,4 +55,12 @@ docs/                 Strategy, plans, the A→Z guide
 
 ## Status
 
-🟢 Foundation authored: data model, architecture, agent pipeline, CMS adapter interface, grader rubric. See `docs/BUILD-PLAN.md` for what's next. App scaffold (needs Node) + GitHub link are the next steps.
+🟢 Scaffolded & running. Next.js (TS + Tailwind + App Router) app boots; Prisma 6 client generated; foundation code type-checks clean; linked to GitHub. Next: local Postgres + connectors, then the first single-business vertical slice on trustedcaskets. See `docs/BUILD-PLAN.md`.
+
+## Run it locally
+
+```bash
+npm install
+npm run dev        # http://localhost:3000
+```
+Copy `.env.example` → `.env` and fill in keys as you connect each service.

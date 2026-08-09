@@ -16,11 +16,12 @@
 - Create a `repo`-scoped access token.
 - Give me your GitHub username → I wire the remote → you push once (token cached in keychain).
 
-### Step 1 — Install Node (5 min)
-- Install Node 20+ (via nvm, no admin password needed).
-- Then I scaffold: `create-next-app` (TS, App Router, src dir) + install deps
-  (`prisma @prisma/client`, `inngest`, `next-auth`, `@anthropic-ai/sdk`, UI libs).
-- The pre-written `prisma/` and `src/lib/` files slot straight in.
+### Step 1 — Install Node + scaffold ✅ DONE
+- [x] Node v24.19.0 installed via nvm (no admin needed).
+- [x] `create-next-app` scaffolded (TS, App Router, src dir, Tailwind, ESLint) and merged with our foundation files.
+- [x] Deps installed: `@prisma/client`, `prisma` (pinned to v6 — v7 dropped the classic `url` datasource), `@anthropic-ai/sdk`, `inngest`, `zod`.
+- [x] `prisma generate` OK. Dev server boots + serves. `tsc --noEmit` clean.
+- Note: `next-auth` deferred until we build the auth/multi-tenant step.
 
 ### Step 2 — Validate before deep build (Claude Desktop, parallel)
 - Run keyword research + gap-map on **trustedcaskets.com** by hand in Claude Desktop.
