@@ -28,14 +28,18 @@
 - Confirms data quality + output quality before we invest in the full app.
 
 ### Step 3 — Single-business vertical slice
-Build the smallest end-to-end path that actually works:
-- [ ] DB up (local Postgres or Supabase) + `prisma migrate`
-- [ ] Connectors: GSC (free MCP/OAuth) + DataForSEO
-- [ ] Intake agent → generate trustedcaskets `client.md`
-- [ ] Deep-research agent → one real gap-map brief
-- [ ] Writer → grader loop → one PASSED draft
-- [ ] Shopify adapter wired → publish ONE post to trustedcaskets
-- [ ] Pipeline board UI showing that item move across columns
+Code is written & compiles (`tsc` clean, `next build` passes). Runtime steps below need a DB + API keys.
+- [x] **Dashboard UI** — shell, business switcher, pipeline board, briefs, quality scorecard, overview, connectors, performance, ideas, strategy, geo (seeded trustedcaskets mock data)
+- [x] **Backend modules (code-complete):**
+  - [x] Claude wrapper (`ai/claude.ts`)
+  - [x] Connectors: DataForSEO, Firecrawl, GSC (+striking-distance), Google Maps
+  - [x] Agents: intake, deep-research (gap-map brief), writer (+revise), grader (0–100 + revise-until-pass loop)
+  - [x] Shopify adapter (real Admin API publish/update/list/healthCheck)
+  - [x] Inngest content pipeline job + serve route
+  - [x] Secret encryption (AES-256-GCM)
+- [ ] **Wire to real data (needs your input):** local Postgres + `prisma migrate`; add API keys (Anthropic, DataForSEO, Firecrawl, GSC OAuth, Maps) to `.env`
+- [ ] Swap the repository layer (`data/repo.ts`) from mock seed → Prisma queries
+- [ ] Run intake on trustedcaskets → real `client.md`; then one brief → draft → grade → publish end-to-end
 
 ### Step 4 — Results tab
 - [ ] Build a Looker Studio report (GSC + GA4) → embed in Performance tab.
