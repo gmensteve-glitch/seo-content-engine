@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git add -A; git diff --cached --quiet || git commit -q -m \"auto: checkpoint $(date '+%Y-%m-%d %H:%M:%S')\"; git push -q 2>/dev/null; true",
+            "async": true,
+            "timeout": 60,
+            "statusMessage": "Auto-pushing to GitHub"
+          }
+        ]
+      }
+    ]
+  }
+}
