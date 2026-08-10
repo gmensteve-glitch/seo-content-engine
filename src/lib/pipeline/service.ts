@@ -15,7 +15,8 @@ import { inngest } from "@/lib/jobs/client";
 import { inngestEnabled, encryptionEnabled } from "@/lib/env";
 import { buildBrief, type BriefSpec } from "@/lib/agents/research";
 import { writeDraft, reviseDraft } from "@/lib/agents/writer";
-import { gradeUntilPass } from "@/lib/agents/grader";
+import { gradeDraft } from "@/lib/agents/grader";
+import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
 import { decryptJson } from "@/lib/crypto/secrets";
 
@@ -195,41 +196,55 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
     data: { bodyMd: body, status: "GRADING" },
   });
 
-  // Grade until it passes (or exhausts loops), persisting every pass.
-  const result = await gradeUntilPass(body, JSON.stringify(spec), reviseDraft, { threshold });
-  let version = 0;
-  for (const g of result.grades) {
-    version += 1;
+  // Grade → revise → re-grade, persisting each pass immediately so partial
+  // progress survives (and the dashboard updates live) even if the run is long.
+  const briefContext = JSON.stringify(spec);
+  let currentDraft = body;
+  let loop = 0;
+  let passed = false;
+  let overall = 0;
+
+  for (loop = 1; loop <= MAX_REVISION_LOOPS; loop++) {
+    const grade = await gradeDraft(currentDraft, briefContext, threshold);
+    passed = grade.passed;
+    overall = grade.overall;
+
     await prisma.grade.create({
       data: {
         draftId: draft.id,
-        overall: g.overall,
-        passed: g.passed,
-        dimensions: g.dimensions as unknown as Prisma.InputJsonValue,
-        feedback: g.feedback,
-        version,
+        overall: grade.overall,
+        passed: grade.passed,
+        dimensions: grade.dimensions as unknown as Prisma.InputJsonValue,
+        feedback: grade.feedback,
+        version: loop,
       },
     });
-  }
+    await prisma.draft.update({
+      where: { id: draft.id },
+      data: {
+        bodyMd: currentDraft,
+        version: loop,
+        status: passed ? "PASSED" : loop === MAX_REVISION_LOOPS ? "FAILED" : "REVISING",
+      },
+    });
 
-  const passed = result.grade.passed;
-  await prisma.draft.update({
-    where: { id: draft.id },
-    data: { bodyMd: result.draft, status: passed ? "PASSED" : "FAILED", version: result.loops },
-  });
+    if (passed || loop === MAX_REVISION_LOOPS) break;
+
+    // Revise the weakest dimensions, then loop back to re-grade.
+    const weakest = weakestDimensions(grade.dimensions).slice(0, 3);
+    currentDraft = await reviseDraft(currentDraft, grade.feedback, weakest);
+    await prisma.draft.update({
+      where: { id: draft.id },
+      data: { bodyMd: currentDraft, status: "GRADING" },
+    });
+  }
 
   let pageUrl: string | undefined;
   if (passed) {
     pageUrl = await publishDraft(draft.id);
   }
 
-  return {
-    draftId: draft.id,
-    passed,
-    overall: result.grade.overall,
-    loops: result.loops,
-    pageUrl,
-  };
+  return { draftId: draft.id, passed, overall, loops: loop, pageUrl };
 }
 
 /**

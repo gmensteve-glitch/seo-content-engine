@@ -36,7 +36,8 @@ export interface CompleteOpts {
 /** Free-form text generation (e.g. the writer). */
 export async function completeText(opts: CompleteOpts): Promise<string> {
   const body = {
-    model: opts.model ?? MODELS.writer,
+    // PIPELINE_MODEL (if set) overrides every stage — a global cost/speed lever.
+    model: process.env.PIPELINE_MODEL || opts.model || MODELS.writer,
     max_tokens: opts.maxTokens ?? 16000,
     thinking: { type: "adaptive" },
     system: opts.system,
@@ -58,7 +59,7 @@ export interface StructuredOpts<_T> extends CompleteOpts {
 /** Schema-constrained JSON output (research, grader). Returns the parsed object. */
 export async function structured<T>(opts: StructuredOpts<T>): Promise<T> {
   const body = {
-    model: opts.model ?? MODELS.grader,
+    model: process.env.PIPELINE_MODEL || opts.model || MODELS.grader,
     max_tokens: opts.maxTokens ?? 16000,
     thinking: { type: "adaptive" },
     system: opts.system,
