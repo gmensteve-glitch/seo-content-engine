@@ -2,6 +2,8 @@
 // shared RUBRIC using the research brief as the benchmark.
 
 import { structured, MODELS } from "@/lib/ai/claude";
+import { aiEnabled } from "@/lib/env";
+import { offlineGrade } from "@/lib/ai/offline";
 import {
   RUBRIC,
   DEFAULT_THRESHOLD,
@@ -54,6 +56,8 @@ export async function gradeDraft(
   briefContext: string,
   threshold = DEFAULT_THRESHOLD
 ): Promise<GradeResult> {
+  if (!aiEnabled()) return offlineGrade(draftMarkdown, threshold);
+
   const rubricText = RUBRIC.map(
     (d) => `- ${d.key} (max ${d.max}): ${d.label} — ${d.criteria}`
   ).join("\n");

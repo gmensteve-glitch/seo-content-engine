@@ -1,5 +1,5 @@
 import { Shell } from "@/components/shell";
-import { PageHeader, Card, Bar, Pill } from "@/components/ui";
+import { PageHeader, Card, Bar } from "@/components/ui";
 import { getLatestScorecard } from "@/lib/data/repo";
 import { MessageSquare } from "lucide-react";
 

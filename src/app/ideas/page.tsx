@@ -1,6 +1,7 @@
 import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
 import { getIdeas } from "@/lib/data/repo";
+import { buildBriefAction, dismissIdeaAction } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -27,9 +28,18 @@ export default async function IdeasPage() {
             </div>
             <div className="flex shrink-0 flex-col items-end gap-2">
               <Pill tone={i.score >= 90 ? "success" : "warn"}>{i.score}</Pill>
-              <button className="rounded-md border border-[var(--border-strong)] px-2.5 py-1 text-[12px] hover:bg-[var(--surface-2)]">
-                Build brief
-              </button>
+              <form action={buildBriefAction}>
+                <input type="hidden" name="ideaId" value={i.id} />
+                <button className="rounded-md border border-[var(--border-strong)] px-2.5 py-1 text-[12px] hover:bg-[var(--surface-2)]">
+                  Build brief
+                </button>
+              </form>
+              <form action={dismissIdeaAction}>
+                <input type="hidden" name="ideaId" value={i.id} />
+                <button className="rounded-md px-2.5 py-1 text-[11px] text-[var(--subtle)] hover:text-[var(--muted)]">
+                  Dismiss
+                </button>
+              </form>
             </div>
           </Card>
         ))}

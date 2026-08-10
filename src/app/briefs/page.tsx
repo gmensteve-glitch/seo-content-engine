@@ -1,6 +1,7 @@
 import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
 import { getPendingBriefs } from "@/lib/data/repo";
+import { approveBriefAction, rejectBriefAction } from "@/app/actions";
 import { Check, X, MapPin, HelpCircle, Tag } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -32,12 +33,18 @@ export default async function BriefsPage() {
                 </div>
               </div>
               <div className="flex shrink-0 gap-2">
-                <button className="flex items-center gap-1.5 rounded-lg bg-[var(--success-bg)] px-3 py-1.5 text-[13px] font-medium text-[var(--success)]">
-                  <Check size={14} /> Approve
-                </button>
-                <button className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-1.5 text-[13px] text-[var(--muted)]">
-                  <X size={14} /> Skip
-                </button>
+                <form action={approveBriefAction}>
+                  <input type="hidden" name="briefId" value={b.id} />
+                  <button className="flex items-center gap-1.5 rounded-lg bg-[var(--success-bg)] px-3 py-1.5 text-[13px] font-medium text-[var(--success)]">
+                    <Check size={14} /> Approve
+                  </button>
+                </form>
+                <form action={rejectBriefAction}>
+                  <input type="hidden" name="briefId" value={b.id} />
+                  <button className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-1.5 text-[13px] text-[var(--muted)]">
+                    <X size={14} /> Skip
+                  </button>
+                </form>
               </div>
             </div>
 

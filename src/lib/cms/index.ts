@@ -1,7 +1,7 @@
 // Adapter registry — resolve the right CMS adapter for a business.
 // This is the single place the rest of the app asks "how do I publish for this business?"
 
-import type { CmsAdapter, CmsPlatform } from "./types";
+import type { CmsAdapter, CmsPlatform, ShopifyConfig } from "./types";
 import { ShopifyAdapter } from "./shopify";
 
 /**
@@ -11,7 +11,7 @@ import { ShopifyAdapter } from "./shopify";
 export function getCmsAdapter(platform: CmsPlatform, config: unknown): CmsAdapter {
   switch (platform) {
     case "shopify":
-      return new ShopifyAdapter(config as any);
+      return new ShopifyAdapter(config as ShopifyConfig);
     // case "wordpress": return new WordPressAdapter(config as any);
     // case "webflow":   return new WebflowAdapter(config as any);
     default:

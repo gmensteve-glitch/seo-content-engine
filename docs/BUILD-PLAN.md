@@ -39,8 +39,9 @@ Code is written & compiles (`tsc` clean, `next build` passes). Runtime steps bel
   - [x] Secret encryption (AES-256-GCM)
 - [x] **DB layer wired:** Prisma client singleton (`src/lib/db.ts`), initial migration (`prisma/migrations/`), and a seed (`prisma/seed.mjs`, `npm run seed`) that mirrors the sample businesses into real tables. Verified end-to-end against a local Postgres: every dashboard page renders from the DB.
 - [x] Swapped the repository layer (`data/repo.ts`) from mock seed → Prisma queries. KPIs/flags/scorecard are now **derived** from rows. Falls back to the mock automatically when `DATABASE_URL` is unset, so `npm run dev` still works with zero setup.
-- [ ] **Still needs your input:** add real API keys (Anthropic, DataForSEO, Firecrawl, GSC OAuth, Maps) to `.env`, point `DATABASE_URL` at a real Postgres.
-- [ ] Run intake on trustedcaskets → real `client.md`; then one brief → draft → grade → publish end-to-end
+- [x] **Pipeline wired through the DB:** `src/lib/pipeline/service.ts` moves state Idea → Brief → Draft → Grade history → published Page. The human-gate buttons (Ideas “Build brief”, Briefs “Approve/Skip”) are real server actions. Runs **offline with zero credentials** — every agent falls back to clearly-labeled placeholder output when its API key is absent, and publishing falls back to a local URL when no CMS connector is configured. Verified end-to-end: an idea goes to a PUBLISHED page and the dashboard updates. Drive it manually with `POST /api/dev/pipeline {ideaId}`.
+- [ ] **Still needs your input:** add real API keys (Anthropic, DataForSEO, Firecrawl, GSC OAuth, Maps) to `.env` to swap placeholder output for real research/writing/grading, and point `DATABASE_URL` at a durable Postgres.
+- [ ] Real end-to-end run on trustedcaskets with live keys (intake → real `client.md` → publish to Shopify).
 
 ### Step 4 — Results tab
 - [ ] Build a Looker Studio report (GSC + GA4) → embed in Performance tab.

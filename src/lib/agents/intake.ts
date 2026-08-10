@@ -3,6 +3,8 @@
 
 import { structured, MODELS } from "@/lib/ai/claude";
 import { scrapeMany } from "@/lib/connectors/firecrawl";
+import { aiEnabled, firecrawlEnabled } from "@/lib/env";
+import { offlineProfile } from "@/lib/ai/offline";
 
 export interface BusinessProfile {
   profileMd: string; // the client.md body
@@ -24,9 +26,11 @@ const INTAKE_SCHEMA: Record<string, unknown> = {
 const INTAKE_SYSTEM = `You are an onboarding analyst. From a company's own pages, capture who they are, what they sell, who their audience is, and how they sound — so downstream content agents write on-brand and on-target. Be concrete; infer only what the pages support.`;
 
 export async function runIntake(domain: string, seedPaths: string[] = ["/"]): Promise<BusinessProfile> {
+  if (!aiEnabled()) return offlineProfile(domain);
+
   const base = domain.startsWith("http") ? domain : `https://${domain}`;
   const urls = seedPaths.map((p) => new URL(p, base).toString());
-  const pages = await scrapeMany(urls);
+  const pages = firecrawlEnabled() ? await scrapeMany(urls) : [];
 
   const corpus = pages
     .map((p) => `URL: ${p.url}\nTITLE: ${p.title}\n${p.markdown.slice(0, 3000)}`)

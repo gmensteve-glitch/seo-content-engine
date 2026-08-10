@@ -5,6 +5,8 @@
 import { structured, MODELS } from "@/lib/ai/claude";
 import { serpTop } from "@/lib/connectors/dataforseo";
 import { scrapeMany } from "@/lib/connectors/firecrawl";
+import { aiEnabled, dataforseoEnabled, firecrawlEnabled } from "@/lib/env";
+import { offlineBrief } from "@/lib/ai/offline";
 
 export interface BriefSpec {
   title: string;
@@ -41,8 +43,12 @@ export interface ResearchInput {
 }
 
 export async function buildBrief(input: ResearchInput): Promise<BriefSpec> {
-  const serp = await serpTop(input.targetKeyword, { limit: input.serpLimit ?? 10 });
-  const pages = await scrapeMany(serp.slice(0, 6).map((r) => r.url));
+  if (!aiEnabled()) return offlineBrief(input.targetKeyword);
+
+  const serp = dataforseoEnabled()
+    ? await serpTop(input.targetKeyword, { limit: input.serpLimit ?? 10 })
+    : [];
+  const pages = firecrawlEnabled() ? await scrapeMany(serp.slice(0, 6).map((r) => r.url)) : [];
 
   const competitorSummary = pages
     .map(

@@ -1,39 +1,19 @@
 // The content pipeline job: fires when a brief is approved, then runs
-// research → write → grade-until-pass as durable, retryable steps.
+// write → grade-until-pass → publish as a durable, retryable step. The actual
+// work lives in the pipeline service so the UI (synchronous) and Inngest
+// (durable) share one implementation that persists to the DB.
 
 import { inngest } from "@/lib/jobs/client";
-import { buildBrief } from "@/lib/agents/research";
-import { writeDraft, reviseDraft } from "@/lib/agents/writer";
-import { gradeUntilPass } from "@/lib/agents/grader";
+import { runPipelineForBrief } from "@/lib/pipeline/service";
 
 interface BriefApprovedEvent {
-  targetKeyword: string;
-  businessContext: string;
-  brandVoice: string;
-  threshold?: number;
+  briefId: string;
 }
 
 export const runContentPipeline = inngest.createFunction(
   { id: "run-content-pipeline", retries: 2, triggers: [{ event: "content/brief.approved" }] },
   async ({ event, step }) => {
-    const data = event.data as BriefApprovedEvent;
-
-    const brief = await step.run("research", () =>
-      buildBrief({ targetKeyword: data.targetKeyword, businessContext: data.businessContext })
-    );
-
-    const draft = await step.run("write", () => writeDraft(brief, data.brandVoice));
-
-    const result = await step.run("grade-loop", () =>
-      gradeUntilPass(draft, JSON.stringify(brief), reviseDraft, { threshold: data.threshold })
-    );
-
-    // Next steps (not yet wired): internal-linking pass → publish via CMS adapter → index.
-    return {
-      title: brief.title,
-      passed: result.grade.passed,
-      overall: result.grade.overall,
-      loops: result.loops,
-    };
+    const { briefId } = event.data as BriefApprovedEvent;
+    return step.run("write-grade-publish", () => runPipelineForBrief(briefId));
   }
 );

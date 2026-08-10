@@ -8,6 +8,7 @@ An autonomous, multi-business SEO content engine (dashboard + agents). Full visi
 ## Where we are (as of this commit)
 - ✅ Next.js 16 + Tailwind v4 + React 19 app. Dashboard UI complete (shell + business switcher; pages: overview, pipeline board, briefs, quality scorecard, performance, connectors, ideas, strategy, geo).
 - ✅ Data layer is **Prisma-backed** (`src/lib/data/repo.ts` → `src/lib/db.ts`). Set `DATABASE_URL` + `npx prisma migrate deploy` + `npm run seed` and the whole dashboard renders from Postgres. With no `DATABASE_URL` it falls back to `src/lib/mock/seed.ts` so `npm run dev` works with zero setup.
+- ✅ **Pipeline runs end-to-end, offline** (`src/lib/pipeline/service.ts`). The human-gate buttons work (server actions in `src/app/actions.ts`); approving a brief writes → grades → publishes a Page, all persisted. Every agent degrades to labeled placeholder output when its key is missing (`src/lib/env.ts` + `src/lib/ai/offline.ts`), so no credentials are needed to exercise the full loop. Manual trigger: `POST /api/dev/pipeline {ideaId}` (needs `ENABLE_DEV_ROUTES=1` in a prod build).
 - ✅ Backend modules complete & type-checked: `src/lib/ai/claude.ts`, connectors (`dataforseo`, `firecrawl`, `gsc`, `maps`), agents (`intake`, `research` gap-map, `writer`+revise, `grader` 0–100 loop), `cms/shopify.ts` (real Admin API), Inngest `jobs/` + `/api/inngest` route, `crypto/secrets.ts`.
 - ✅ `npx tsc --noEmit` clean, `npm run build` passes.
 

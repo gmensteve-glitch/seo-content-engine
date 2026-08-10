@@ -3,6 +3,8 @@
 
 import { completeText, MODELS } from "@/lib/ai/claude";
 import type { BriefSpec } from "@/lib/agents/research";
+import { aiEnabled } from "@/lib/env";
+import { offlineDraft, offlineRevise } from "@/lib/ai/offline";
 
 const TEMPLATE_GUIDANCE = `Write the page as Markdown following this structure:
 - An answer-first intro that satisfies the search intent in the first paragraph.
@@ -17,6 +19,8 @@ const TEMPLATE_GUIDANCE = `Write the page as Markdown following this structure:
 Write in the brand voice provided. Add genuine, specific detail — no filler, no hedging, no "in conclusion". Do not fabricate statistics or sources.`;
 
 export async function writeDraft(brief: BriefSpec, brandVoice: string): Promise<string> {
+  if (!aiEnabled()) return offlineDraft(brief, brandVoice);
+
   const prompt = `BRAND VOICE:\n${brandVoice}\n\nBRIEF:\nTitle: ${brief.title}\nTarget keyword: ${brief.targetKeyword}\nAngle / wedge: ${brief.angle}\nTarget length: ~${brief.wordTarget} words\nRequired schema: ${brief.requiredSchema.join(", ")}\nOutline:\n${brief.outline.map((s) => `- ${s}`).join("\n")}\nQuestions to answer:\n${brief.questions.map((q) => `- ${q}`).join("\n")}\nGap to fill (what competitors miss): ${brief.gap}\n\n${TEMPLATE_GUIDANCE}`;
 
   return completeText({ model: MODELS.writer, prompt, maxTokens: 16000 });
@@ -27,6 +31,8 @@ export async function reviseDraft(
   feedback: string,
   weakest: string[]
 ): Promise<string> {
+  if (!aiEnabled()) return offlineRevise(draft);
+
   const prompt = `Here is a draft that needs revision. A quality grader flagged these dimensions as weakest: ${weakest.join(", ")}.\n\nGrader feedback:\n${feedback}\n\nRevise the draft to fix those specific weaknesses. Keep everything that already works, preserve the structure and the JSON-LD block, and return the full revised Markdown (not a diff).\n\nDRAFT:\n${draft}`;
 
   return completeText({ model: MODELS.writer, prompt, maxTokens: 16000 });
