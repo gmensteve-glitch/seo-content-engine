@@ -37,8 +37,9 @@ Code is written & compiles (`tsc` clean, `next build` passes). Runtime steps bel
   - [x] Shopify adapter (real Admin API publish/update/list/healthCheck)
   - [x] Inngest content pipeline job + serve route
   - [x] Secret encryption (AES-256-GCM)
-- [ ] **Wire to real data (needs your input):** local Postgres + `prisma migrate`; add API keys (Anthropic, DataForSEO, Firecrawl, GSC OAuth, Maps) to `.env`
-- [ ] Swap the repository layer (`data/repo.ts`) from mock seed → Prisma queries
+- [x] **DB layer wired:** Prisma client singleton (`src/lib/db.ts`), initial migration (`prisma/migrations/`), and a seed (`prisma/seed.mjs`, `npm run seed`) that mirrors the sample businesses into real tables. Verified end-to-end against a local Postgres: every dashboard page renders from the DB.
+- [x] Swapped the repository layer (`data/repo.ts`) from mock seed → Prisma queries. KPIs/flags/scorecard are now **derived** from rows. Falls back to the mock automatically when `DATABASE_URL` is unset, so `npm run dev` still works with zero setup.
+- [ ] **Still needs your input:** add real API keys (Anthropic, DataForSEO, Firecrawl, GSC OAuth, Maps) to `.env`, point `DATABASE_URL` at a real Postgres.
 - [ ] Run intake on trustedcaskets → real `client.md`; then one brief → draft → grade → publish end-to-end
 
 ### Step 4 — Results tab

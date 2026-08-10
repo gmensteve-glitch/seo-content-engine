@@ -11,6 +11,8 @@ import {
 } from "@/lib/data/repo";
 import { ClipboardCheck, TrendingUp, PenLine, ArrowRight } from "lucide-react";
 
+export const dynamic = "force-dynamic";
+
 export default async function OverviewPage() {
   const biz = await getBusiness();
   const kpis = await getKpis();

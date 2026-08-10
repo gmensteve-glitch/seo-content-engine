@@ -15,6 +15,8 @@ const FLAG: Record<NonNullable<PipelineCard["flag"]>, FlagMeta> = {
   healthy: { tone: "success", label: "healthy", icon: <TrendingUp size={11} /> },
 };
 
+export const dynamic = "force-dynamic";
+
 export default async function PipelinePage() {
   const cards = await getPipeline();
 

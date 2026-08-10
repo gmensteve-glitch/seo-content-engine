@@ -3,6 +3,8 @@ import { PageHeader, Card, Bar, Pill } from "@/components/ui";
 import { getLatestScorecard } from "@/lib/data/repo";
 import { MessageSquare } from "lucide-react";
 
+export const dynamic = "force-dynamic";
+
 export default async function QualityPage() {
   const sc = await getLatestScorecard();
   const hasData = sc.dimensions.length > 0;

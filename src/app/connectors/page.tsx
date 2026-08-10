@@ -3,6 +3,8 @@ import { PageHeader, Card, Pill } from "@/components/ui";
 import { getConnectors } from "@/lib/data/repo";
 import { CheckCircle2, Circle, AlertTriangle } from "lucide-react";
 
+export const dynamic = "force-dynamic";
+
 export default async function ConnectorsPage() {
   const connectors = await getConnectors();
 

@@ -2,6 +2,8 @@ import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
 import { getIdeas } from "@/lib/data/repo";
 
+export const dynamic = "force-dynamic";
+
 export default async function IdeasPage() {
   const ideas = await getIdeas();
 

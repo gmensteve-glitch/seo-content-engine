@@ -3,6 +3,8 @@ import { PageHeader, Card, Pill } from "@/components/ui";
 import { getPendingBriefs } from "@/lib/data/repo";
 import { Check, X, MapPin, HelpCircle, Tag } from "lucide-react";
 
+export const dynamic = "force-dynamic";
+
 export default async function BriefsPage() {
   const briefs = await getPendingBriefs();
 
