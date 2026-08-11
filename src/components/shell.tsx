@@ -16,6 +16,7 @@ import {
   Plus,
   ChevronDown,
   Layers,
+  LogOut,
 } from "lucide-react";
 import { BUSINESSES } from "@/lib/mock/seed";
 
@@ -82,9 +83,20 @@ export function Shell({ children }: { children: ReactNode }) {
             <Layers size={13} /> {BUSINESSES.length} businesses
           </span>
         </div>
-        <button className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-2.5 py-1.5 text-[12px] hover:bg-[var(--surface-2)]">
-          <Plus size={14} /> Add business
-        </button>
+        <div className="flex items-center gap-2">
+          <button className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-2.5 py-1.5 text-[12px] hover:bg-[var(--surface-2)]">
+            <Plus size={14} /> Add business
+          </button>
+          <form action="/api/auth/logout" method="POST">
+            <button
+              type="submit"
+              title="Sign out"
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-2.5 py-1.5 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            >
+              <LogOut size={14} />
+            </button>
+          </form>
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
