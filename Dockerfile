@@ -25,5 +25,6 @@ ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 
-# Apply pending migrations, then start the server.
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start"]
+# Apply pending migrations, then start the server (explicit host/port so the
+# platform's router can reach it; diagnostics show exactly where boot stops).
+CMD ["sh", "-c", "echo BOOT_START; node_modules/.bin/prisma migrate deploy; echo MIGRATE_EXIT=$?; echo BINDING_ON_PORT=${PORT:-3000}; exec node_modules/.bin/next start -H 0.0.0.0 -p ${PORT:-3000}"]
