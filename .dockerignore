@@ -1,0 +1,16 @@
+node_modules
+.next
+out
+build
+dist
+.git
+.github
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+npm-debug.log*
+.DS_Store
+.vscode
+.idea
+docs
