@@ -13,6 +13,7 @@ import { Prisma } from "@prisma/client";
 import { prisma, hasDatabase } from "@/lib/db";
 import { inngest } from "@/lib/jobs/client";
 import { inngestEnabled, encryptionEnabled } from "@/lib/env";
+import { runIntake } from "@/lib/agents/intake";
 import { buildBrief, type BriefSpec } from "@/lib/agents/research";
 import { writeDraft, reviseDraft } from "@/lib/agents/writer";
 import { gradeDraft } from "@/lib/agents/grader";
@@ -63,6 +64,46 @@ function toBriefSpec(brief: {
     questions: asStringArray(brief.questions),
     requiredSchema: brief.requiredSchema,
   };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Onboarding (intake)
+// ─────────────────────────────────────────────────────────────
+
+/** Crawl the business's site → generate + save its profile, brand voice, and
+ *  starter pillars. Stage 0 of the pipeline. */
+export async function runAndSaveIntake(
+  businessId: string,
+): Promise<{ profileMd: string; brandVoice: string; pillars: string[] }> {
+  requireDb();
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+  if (!business) throw new Error(`Business ${businessId} not found`);
+
+  const profile = await runIntake(business.domain, [
+    "/",
+    "/pages/about",
+    "/pages/about-us",
+    "/collections/all",
+  ]);
+
+  await prisma.business.update({
+    where: { id: businessId },
+    data: { profileMd: profile.profileMd, brandVoice: profile.brandVoice },
+  });
+
+  // Add any pillar the site suggested that we don't already track.
+  const existing = await prisma.pillar.findMany({
+    where: { businessId },
+    select: { name: true },
+  });
+  const have = new Set(existing.map((p) => p.name.toLowerCase()));
+  for (const name of profile.pillars) {
+    if (!have.has(name.toLowerCase())) {
+      await prisma.pillar.create({ data: { businessId, name } });
+    }
+  }
+
+  return profile;
 }
 
 // ─────────────────────────────────────────────────────────────
