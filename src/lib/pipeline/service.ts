@@ -322,7 +322,9 @@ export async function publishDraft(draftId: string): Promise<string> {
         html: draft.bodyMd,
         slug,
         metaDescription: draft.title,
-        publishState: "published",
+        // Land as a hidden CMS draft — a human reviews and flips it live.
+        // Safer default than auto-publishing straight to the live site.
+        publishState: "draft",
       });
       cmsId = res.cmsId;
       url = res.url;
