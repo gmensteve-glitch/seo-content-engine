@@ -17,6 +17,7 @@ import { runIntake } from "@/lib/agents/intake";
 import { buildBrief, type BriefSpec } from "@/lib/agents/research";
 import { writeDraft, reviseDraft } from "@/lib/agents/writer";
 import { gradeDraft } from "@/lib/agents/grader";
+import { planLinks, applyLinks, type LinkTarget, type PlannedLink } from "@/lib/agents/linker";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
 import { decryptJson } from "@/lib/crypto/secrets";
@@ -282,7 +283,12 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
 
   let pageUrl: string | undefined;
   if (passed) {
+    // Stage 8 — surgical internal linking: insert links to real existing pages
+    // BEFORE publishing so the published body carries them.
+    const planned = await applyForwardLinks(draft.id);
     pageUrl = await publishDraft(draft.id);
+    // Record the link graph + add a backward link from the top target to this page.
+    await recordLinks(draft.id, planned);
   }
 
   return { draftId: draft.id, passed, overall, loops: loop, pageUrl };
@@ -363,4 +369,108 @@ function cmsConnectorType(platform: CmsPlatform): "SHOPIFY" | "WORDPRESS" | "WEB
     default:
       return "SHOPIFY";
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Internal linking (stage 8)
+// ─────────────────────────────────────────────────────────────
+
+/** Real published pages for a business, as candidate link targets. */
+async function linkTargets(businessId: string, excludeDraftId: string): Promise<LinkTarget[]> {
+  const pages = await prisma.page.findMany({
+    where: { businessId, publishedAt: { not: null }, draftId: { not: excludeDraftId } },
+    include: { draft: { include: { brief: true } } },
+  });
+  return pages.map((p) => ({
+    pageId: p.id,
+    url: p.url,
+    title: p.draft?.title ?? p.url,
+    keyword: p.draft?.brief?.targetKeyword,
+  }));
+}
+
+/** Insert forward links (this draft → existing pages) into the draft body. */
+async function applyForwardLinks(draftId: string): Promise<PlannedLink[]> {
+  const draft = await prisma.draft.findUnique({ where: { id: draftId }, include: { business: true } });
+  if (!draft) return [];
+  const targets = await linkTargets(draft.businessId, draftId);
+  if (targets.length === 0) return [];
+
+  const planned = await planLinks(draft.bodyMd, targets, draft.business.linksPerPage);
+  if (planned.length === 0) return [];
+
+  const linked = applyLinks(draft.bodyMd, planned);
+  await prisma.draft.update({ where: { id: draftId }, data: { bodyMd: linked } });
+  return planned;
+}
+
+/** Record the forward link graph and add a backward link from the top target. */
+async function recordLinks(draftId: string, planned: PlannedLink[]): Promise<void> {
+  if (planned.length === 0) return;
+  const page = await prisma.page.findUnique({ where: { draftId } });
+  if (!page) return;
+
+  for (const l of planned) {
+    await prisma.linkEdge.upsert({
+      where: { fromId_toId: { fromId: page.id, toId: l.targetPageId } },
+      create: { businessId: page.businessId, fromId: page.id, toId: l.targetPageId },
+      update: {},
+    });
+  }
+
+  // Backward link: inject a link to THIS page into the single most-relevant target.
+  await addBackwardLink(planned[0].targetPageId, page.id, draftId);
+}
+
+async function addBackwardLink(
+  targetPageId: string,
+  newPageId: string,
+  newDraftId: string,
+): Promise<void> {
+  const target = await prisma.page.findUnique({
+    where: { id: targetPageId },
+    include: { draft: true },
+  });
+  const newDraft = await prisma.draft.findUnique({ where: { id: newDraftId } });
+  const newPage = await prisma.page.findUnique({ where: { id: newPageId } });
+  if (!newDraft || !newPage) return;
+
+  // Always record the reverse edge.
+  await prisma.linkEdge.upsert({
+    where: { fromId_toId: { fromId: targetPageId, toId: newPageId } },
+    create: { businessId: newPage.businessId, fromId: targetPageId, toId: newPageId },
+    update: {},
+  });
+
+  if (!target?.draft) return;
+
+  // Find a natural anchor in the target's body for the new page, then inject it.
+  const planned = await planLinks(
+    target.draft.bodyMd,
+    [{ pageId: newPageId, url: newPage.url, title: newDraft.title }],
+    1,
+  );
+  if (planned.length === 0) return;
+
+  const updatedBody = applyLinks(target.draft.bodyMd, planned);
+  await prisma.draft.update({ where: { id: target.draft.id }, data: { bodyMd: updatedBody } });
+
+  // Reflect the change on the live CMS article, if connected.
+  if (target.cmsId) {
+    await updateCmsBody(target.businessId, target.cmsId, updatedBody).catch(() => {});
+  }
+}
+
+/** Push an updated body to an already-published CMS article. Best-effort. */
+async function updateCmsBody(businessId: string, cmsId: string, html: string): Promise<void> {
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+  if (!business) return;
+  const platform = business.cmsPlatform.toLowerCase() as CmsPlatform;
+  const connector = await prisma.connector.findUnique({
+    where: { businessId_type: { businessId, type: cmsConnectorType(platform) } },
+  });
+  if (!connector || connector.status !== "CONNECTED" || !encryptionEnabled()) return;
+  const config = decryptJson(connector.configEnc);
+  const adapter = getCmsAdapter(platform, config);
+  await adapter.update(cmsId, { html });
 }
