@@ -54,6 +54,13 @@ Code is written & compiles (`tsc` clean, `next build` passes). Runtime steps bel
 - [ ] Onboarding wizard (URL → intake → connectors → pillars)
 - [ ] Business switcher + memberships/auth
 - [ ] Geo campaign mode (city list + Maps API) for casket resource pages
+  - Local-data source options: Google Places API (direct) **or SerpApi's Google
+    Maps endpoint** (businesses + ratings/reviews). Evaluated SerpApi 2026-08:
+    it overlaps DataForSEO for SERP/keyword work (no gap there) and can't
+    replace GSC for first-party performance — but its Maps endpoint is a clean
+    fit for sourcing vetted local businesses (name, rating, review count) for
+    city resource pages. Consider it here when geo mode is built; also a
+    reliability fallback if DataForSEO stays flaky.
 - [ ] Add overnightcaskets.com as business #2
 
 ### Step 7 — Deploy
