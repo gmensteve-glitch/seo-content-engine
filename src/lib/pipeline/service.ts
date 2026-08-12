@@ -18,6 +18,7 @@ import { buildBrief, type BriefSpec } from "@/lib/agents/research";
 import { writeDraft, reviseDraft } from "@/lib/agents/writer";
 import { gradeDraft } from "@/lib/agents/grader";
 import { planLinks, applyLinks, type LinkTarget, type PlannedLink } from "@/lib/agents/linker";
+import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
 import { decryptJson } from "@/lib/crypto/secrets";
@@ -323,11 +324,19 @@ export async function publishDraft(draftId: string): Promise<string> {
     try {
       const config = decryptJson(connector.configEnc);
       const adapter = getCmsAdapter(platform, config);
+      // Source a tasteful hero image + alt (Unsplash, or a store product photo).
+      const hero = await sourceHeroImage({
+        title: draft.title,
+        keyword: draft.brief.targetKeyword,
+        productImage: adapter.sourceProductImage?.bind(adapter),
+      }).catch(() => null);
       const res = await adapter.publish({
         title: draft.title,
         html: draft.bodyMd,
         slug,
         metaDescription: draft.title,
+        heroImageUrl: hero?.url,
+        heroImageAlt: hero?.alt,
         // Land as a hidden CMS draft — a human reviews and flips it live.
         // Safer default than auto-publishing straight to the live site.
         publishState: "draft",

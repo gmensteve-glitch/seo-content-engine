@@ -16,6 +16,8 @@ export interface PublishInput {
   tags?: string[];
   /** Optional hero image URL. */
   heroImageUrl?: string;
+  /** Alt text for the hero image (SEO + accessibility). */
+  heroImageAlt?: string;
   /** Publish immediately vs save as draft in the CMS. */
   publishState: "published" | "draft";
 }
@@ -52,6 +54,10 @@ export interface CmsAdapter {
 
   /** Verify the connector credentials work. */
   healthCheck(): Promise<{ ok: boolean; message?: string }>;
+
+  /** Optional: find a relevant product image from the store (for buying-guide
+   *  content). Only platforms with a product catalog implement this. */
+  sourceProductImage?(query: string): Promise<{ url: string; alt: string } | null>;
 }
 
 /** Config shapes per platform (decrypted from Connector.configEnc). */

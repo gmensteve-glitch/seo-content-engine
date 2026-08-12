@@ -62,7 +62,9 @@ export class ShopifyAdapter implements CmsAdapter {
             published: input.publishState === "published",
             summary_html: input.metaDescription,
             tags: (input.tags ?? []).join(", "),
-            ...(input.heroImageUrl ? { image: { src: input.heroImageUrl } } : {}),
+            ...(input.heroImageUrl
+              ? { image: { src: input.heroImageUrl, alt: input.heroImageAlt } }
+              : {}),
           },
         }),
       }
@@ -106,6 +108,40 @@ export class ShopifyAdapter implements CmsAdapter {
       return { ok: true };
     } catch (e) {
       return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** Pick the store product whose title/tags best match the query and return
+   *  its first image — a real casket photo for buying-guide articles. */
+  async sourceProductImage(query: string): Promise<{ url: string; alt: string } | null> {
+    try {
+      const data = await this.req<{
+        products?: Array<{
+          title: string;
+          tags?: string;
+          image?: { src: string } | null;
+          images?: Array<{ src: string }>;
+        }>;
+      }>("/products.json?limit=25&fields=id,title,tags,image,images");
+
+      const products = (data.products ?? []).filter((p) => p.image?.src || p.images?.[0]?.src);
+      if (products.length === 0) return null;
+
+      const terms = query.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+      let best = products[0];
+      let bestScore = -1;
+      for (const p of products) {
+        const hay = `${p.title} ${p.tags ?? ""}`.toLowerCase();
+        const score = terms.reduce((s, t) => s + (hay.includes(t) ? 1 : 0), 0);
+        if (score > bestScore) {
+          bestScore = score;
+          best = p;
+        }
+      }
+      const src = best.image?.src ?? best.images?.[0]?.src;
+      return src ? { url: src, alt: best.title } : null;
+    } catch {
+      return null;
     }
   }
 }
