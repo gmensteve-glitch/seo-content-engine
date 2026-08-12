@@ -282,26 +282,68 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
     });
   }
 
-  let pageUrl: string | undefined;
-  if (passed) {
-    // Stage 8 — surgical internal linking: insert links to real existing pages
-    // BEFORE publishing so the published body carries them.
-    const planned = await applyForwardLinks(draft.id);
-    pageUrl = await publishDraft(draft.id);
-    // Record the link graph + add a backward link from the top target to this page.
-    await recordLinks(draft.id, planned);
-  }
+  // A passed draft is finalized and parked in the "ready to schedule" queue.
+  // Internal linking, imaging, and the CMS publish all happen at scheduled
+  // go-live time (publishNow) — the content calendar controls when it's live.
+  return { draftId: draft.id, passed, overall, loops: loop, pageUrl: undefined };
+}
 
-  return { draftId: draft.id, passed, overall, loops: loop, pageUrl };
+// ─────────────────────────────────────────────────────────────
+// Content calendar
+// ─────────────────────────────────────────────────────────────
+
+/** Put a passed draft on the calendar for auto-publish at `when`. */
+export async function scheduleDraft(draftId: string, when: Date): Promise<void> {
+  requireDb();
+  await prisma.draft.update({
+    where: { id: draftId },
+    data: { scheduledFor: when, status: "PASSED" },
+  });
+}
+
+/** Remove a draft from the calendar (back to the ready queue). */
+export async function unscheduleDraft(draftId: string): Promise<void> {
+  requireDb();
+  await prisma.draft.update({ where: { id: draftId }, data: { scheduledFor: null } });
+}
+
+/** Auto-rollout: publish every scheduled draft whose time has arrived. Called
+ *  by the scheduler (Inngest cron) or a manual trigger. */
+export async function publishScheduled(now: Date = new Date()): Promise<{ published: string[] }> {
+  requireDb();
+  const due = await prisma.draft.findMany({
+    where: { status: "PASSED", scheduledFor: { not: null, lte: now } },
+    orderBy: { scheduledFor: "asc" },
+  });
+  const published: string[] = [];
+  for (const d of due) {
+    try {
+      await publishNow(d.id, "published");
+      published.push(d.id);
+    } catch {
+      // leave it scheduled; the next run retries.
+    }
+  }
+  return { published };
 }
 
 /**
- * Publish a PASSED draft. Uses the business's CMS connector when one is
- * configured and decryptable; otherwise records a local page URL so the
- * pipeline still completes offline.
+ * Take a finalized draft LIVE: insert surgical internal links (against the
+ * current set of published pages), source a hero image, push to the CMS, then
+ * record the link graph (forward + backward). Uses the business's CMS connector
+ * when configured; otherwise records a local page URL. `publishState` "published"
+ * goes live immediately (the calendar default); "draft" lands as a hidden CMS
+ * draft for manual review.
  */
-export async function publishDraft(draftId: string): Promise<string> {
+export async function publishNow(
+  draftId: string,
+  publishState: "published" | "draft" = "published",
+): Promise<string> {
   requireDb();
+
+  // Internal links go into the body BEFORE it hits the CMS.
+  const planned = await applyForwardLinks(draftId);
+
   const draft = await prisma.draft.findUnique({
     where: { id: draftId },
     include: { business: true, brief: true },
@@ -319,7 +361,6 @@ export async function publishDraft(draftId: string): Promise<string> {
     where: { businessId_type: { businessId: draft.businessId, type: cmsConnectorType(platform) } },
   });
 
-  // Only attempt a real publish when we can actually decrypt the connector config.
   if (connector && connector.status === "CONNECTED" && encryptionEnabled()) {
     try {
       const config = decryptJson(connector.configEnc);
@@ -337,14 +378,11 @@ export async function publishDraft(draftId: string): Promise<string> {
         metaDescription: draft.title,
         heroImageUrl: hero?.url,
         heroImageAlt: hero?.alt,
-        // Land as a hidden CMS draft — a human reviews and flips it live.
-        // Safer default than auto-publishing straight to the live site.
-        publishState: "draft",
+        publishState,
       });
       cmsId = res.cmsId;
       url = res.url;
     } catch {
-      // Fall back to a local page record; leave a note in the URL scheme.
       cmsId = null;
       url = `/blogs/guides/${slug}`;
     }
@@ -364,6 +402,9 @@ export async function publishDraft(draftId: string): Promise<string> {
   });
 
   await prisma.draft.update({ where: { id: draft.id }, data: { status: "PUBLISHED" } });
+
+  // Record the link graph + add a backward link from the top target to this page.
+  await recordLinks(draft.id, planned);
   return page.url;
 }
 

@@ -224,10 +224,15 @@ model Draft {
   bodyMd       String      @db.Text
   version      Int         @default(1)
   status       DraftStatus @default(RESEARCHING)
+  // Content calendar: when a PASSED draft should auto-publish. Null = not yet
+  // scheduled (sitting in the "ready to schedule" queue).
+  scheduledFor DateTime?
   grades       Grade[]
   page         Page?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
+
+  @@index([businessId, status, scheduledFor])
 }
 
 enum DraftStatus {

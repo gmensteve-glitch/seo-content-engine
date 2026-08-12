@@ -85,6 +85,26 @@ export interface LivePageVM {
   flag?: "boost" | "rewrite" | "decaying" | "healthy";
 }
 
+/** A finished (PASSED) draft sitting in the queue, not yet on the calendar. */
+export interface ReadyDraftVM {
+  id: string;
+  title: string;
+  targetKeyword: string;
+  overall: number; // latest grade
+  wordTarget: number;
+  createdAt: string; // ISO
+}
+
+/** A draft placed on the content calendar for auto-publish. */
+export interface ScheduledItemVM {
+  id: string;
+  title: string;
+  targetKeyword: string;
+  overall: number;
+  scheduledFor: string; // ISO
+  overdue: boolean; // scheduledFor is in the past but not yet published
+}
+
 export interface ConnectorVM {
   type:
     | "GSC"

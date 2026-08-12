@@ -10,6 +10,9 @@ import {
   approveBrief,
   rejectBrief,
   dismissIdea,
+  scheduleDraft,
+  unscheduleDraft,
+  publishNow,
 } from "@/lib/pipeline/service";
 
 export async function buildBriefAction(formData: FormData): Promise<void> {
@@ -40,4 +43,39 @@ export async function rejectBriefAction(formData: FormData): Promise<void> {
   revalidatePath("/briefs");
   revalidatePath("/pipeline");
   revalidatePath("/");
+}
+
+// ── Content calendar ─────────────────────────────────────────
+
+function revalidateCalendar(): void {
+  revalidatePath("/calendar");
+  revalidatePath("/pipeline");
+  revalidatePath("/");
+}
+
+/** Place a ready draft on the calendar for auto-publish at the chosen date. */
+export async function scheduleDraftAction(formData: FormData): Promise<void> {
+  const draftId = String(formData.get("draftId"));
+  const when = String(formData.get("scheduledFor")); // yyyy-mm-dd or ISO from <input>
+  if (!draftId || !when) return;
+  // A bare date (yyyy-mm-dd) publishes at 09:00 local-ish; keep it simple and
+  // schedule for that day at 14:00 UTC (mid-morning US). Full ISO passes through.
+  const date = when.length <= 10 ? new Date(`${when}T14:00:00.000Z`) : new Date(when);
+  if (Number.isNaN(date.getTime())) return;
+  await scheduleDraft(draftId, date);
+  revalidateCalendar();
+}
+
+/** Take a draft back off the calendar (return it to the ready queue). */
+export async function unscheduleDraftAction(formData: FormData): Promise<void> {
+  await unscheduleDraft(String(formData.get("draftId")));
+  revalidateCalendar();
+}
+
+/** Publish a ready/scheduled draft right now, bypassing its calendar date. */
+export async function publishNowAction(formData: FormData): Promise<void> {
+  await publishNow(String(formData.get("draftId")), "published");
+  revalidateCalendar();
+  revalidatePath("/performance");
+  revalidatePath("/quality");
 }

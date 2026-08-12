@@ -16,6 +16,8 @@ import type {
   LivePageVM,
   ConnectorVM,
   CmsPlatform,
+  ReadyDraftVM,
+  ScheduledItemVM,
 } from "@/lib/data/types";
 import {
   BUSINESSES,
@@ -339,6 +341,58 @@ export async function getLivePages(bizId = DEFAULT_BIZ): Promise<LivePageVM[]> {
       flag: pageFlag(perf),
     };
   });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Content calendar
+// ─────────────────────────────────────────────────────────────
+
+/** Latest grade for a draft, if any. */
+function latestGrade(grades: { overall: number }[]): number {
+  return grades[0]?.overall ?? 0;
+}
+
+/** PASSED drafts NOT yet on the calendar — the "ready to schedule" queue. */
+export async function getReadyToSchedule(bizId = DEFAULT_BIZ): Promise<ReadyDraftVM[]> {
+  if (!hasDatabase) return [];
+  const drafts = await prisma.draft.findMany({
+    where: { businessId: bizId, status: "PASSED", scheduledFor: null },
+    include: {
+      brief: true,
+      grades: { orderBy: { createdAt: "desc" }, take: 1 },
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+  return drafts.map((d) => ({
+    id: d.id,
+    title: d.title,
+    targetKeyword: d.brief.targetKeyword,
+    overall: latestGrade(d.grades),
+    wordTarget: d.brief.wordTarget ?? 0,
+    createdAt: d.createdAt.toISOString(),
+  }));
+}
+
+/** PASSED drafts that have a scheduledFor date — items placed on the calendar. */
+export async function getScheduledDrafts(bizId = DEFAULT_BIZ): Promise<ScheduledItemVM[]> {
+  if (!hasDatabase) return [];
+  const now = new Date();
+  const drafts = await prisma.draft.findMany({
+    where: { businessId: bizId, status: "PASSED", scheduledFor: { not: null } },
+    include: {
+      brief: true,
+      grades: { orderBy: { createdAt: "desc" }, take: 1 },
+    },
+    orderBy: { scheduledFor: "asc" },
+  });
+  return drafts.map((d) => ({
+    id: d.id,
+    title: d.title,
+    targetKeyword: d.brief.targetKeyword,
+    overall: latestGrade(d.grades),
+    scheduledFor: d.scheduledFor!.toISOString(),
+    overdue: d.scheduledFor! <= now,
+  }));
 }
 
 // ─────────────────────────────────────────────────────────────
