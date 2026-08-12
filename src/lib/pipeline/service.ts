@@ -18,6 +18,7 @@ import { buildBrief, type BriefSpec } from "@/lib/agents/research";
 import { writeDraft, reviseDraft } from "@/lib/agents/writer";
 import { gradeDraft } from "@/lib/agents/grader";
 import { planLinks, applyLinks, type LinkTarget, type PlannedLink } from "@/lib/agents/linker";
+import { generateIdeaProposals, type IdeationContext } from "@/lib/agents/ideator";
 import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
@@ -106,6 +107,158 @@ export async function runAndSaveIntake(
   }
 
   return profile;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Idea generation (the supply side of the autopilot loop)
+// ─────────────────────────────────────────────────────────────
+
+/** Normalize a title for duplicate detection. */
+function normTitle(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * Build a coverage/performance signal for the ideator: how many live pages sit
+ * in each pillar (thin pillars get prioritized), plus any ranking data we have.
+ * Degrades gracefully — before analytics are connected it still reports which
+ * pillars are under-served so ideation stays smart.
+ */
+async function buildPerformanceNote(businessId: string, pillars: string[]): Promise<string> {
+  const pages = await prisma.page.findMany({
+    where: { businessId, publishedAt: { not: null } },
+    include: {
+      draft: { include: { brief: { include: { idea: { include: { pillar: true } } } } } },
+      perf: { orderBy: { date: "desc" }, take: 1 },
+    },
+  });
+
+  if (pages.length === 0) {
+    return "No content published yet — prioritize breadth: seed each pillar with a strong cornerstone piece.";
+  }
+
+  const counts = new Map<string, number>();
+  for (const p of pillars) counts.set(p, 0);
+  for (const pg of pages) {
+    const name = pg.draft?.brief?.idea?.pillar?.name;
+    if (name) counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  const coverage = [...counts.entries()]
+    .sort((a, b) => a[1] - b[1])
+    .map(([name, n]) => `${name}: ${n} live`)
+    .join("; ");
+
+  // Winners/decayers, if we have ranking data.
+  const ranked = pages
+    .map((pg) => ({ title: pg.draft?.title ?? pg.url, perf: pg.perf[0] }))
+    .filter((x) => x.perf?.position != null);
+  let rankNote = "";
+  if (ranked.length) {
+    const winners = ranked
+      .filter((x) => (x.perf!.position ?? 99) <= 10)
+      .slice(0, 3)
+      .map((x) => x.title);
+    const decaying = ranked
+      .filter((x) => (x.perf!.position ?? 0) >= 11 && (x.perf!.position ?? 0) <= 20)
+      .slice(0, 3)
+      .map((x) => x.title);
+    if (winners.length) rankNote += ` Winning topics (double down with related angles): ${winners.join("; ")}.`;
+    if (decaying.length) rankNote += ` On the cusp (page 2 — worth supporting with cluster links): ${decaying.join("; ")}.`;
+  }
+
+  return `Live-content coverage by pillar (fewest first — favor the thin ones): ${coverage}.${rankNote}`;
+}
+
+/**
+ * Generate `count` fresh ideas for a business and insert the non-duplicate ones
+ * as PROPOSED. Returns the number actually added. This is the top of the funnel;
+ * the human still gates each idea → brief → approval downstream.
+ */
+export async function generateIdeas(businessId: string, count = 6): Promise<number> {
+  requireDb();
+  const business = await prisma.business.findUnique({
+    where: { id: businessId },
+    include: { pillars: true },
+  });
+  if (!business) throw new Error(`Business ${businessId} not found`);
+
+  const pillarNames = business.pillars.map((p) => p.name);
+
+  // Everything we already have a title for — ideas (any status), drafts, pages.
+  const [ideas, drafts] = await Promise.all([
+    prisma.idea.findMany({ where: { businessId }, select: { title: true } }),
+    prisma.draft.findMany({ where: { businessId }, select: { title: true } }),
+  ]);
+  const existingTitles = [...ideas.map((i) => i.title), ...drafts.map((d) => d.title)];
+  const seen = new Set(existingTitles.map(normTitle));
+
+  const performanceNote = await buildPerformanceNote(businessId, pillarNames);
+
+  const ctx: IdeationContext = {
+    businessName: business.name,
+    profileMd: business.profileMd ?? business.name,
+    brandVoice: business.brandVoice ?? undefined,
+    pillars: pillarNames,
+    existingTitles,
+    performanceNote,
+    count,
+  };
+
+  const proposals = await generateIdeaProposals(ctx);
+
+  // Map returned pillar name → existing pillarId (best-effort, case-insensitive).
+  const pillarByName = new Map(business.pillars.map((p) => [p.name.toLowerCase(), p.id]));
+
+  let added = 0;
+  for (const p of proposals) {
+    const key = normTitle(p.title);
+    if (!key || seen.has(key)) continue; // skip dupes within-batch and vs existing
+    seen.add(key);
+    await prisma.idea.create({
+      data: {
+        businessId,
+        pillarId: pillarByName.get(p.pillar.toLowerCase()) ?? null,
+        title: p.title,
+        score: Math.max(0, Math.min(100, Math.round(p.score))),
+        rationale: p.rationale,
+        status: "PROPOSED",
+      },
+    });
+    added++;
+  }
+  return added;
+}
+
+/**
+ * The feedback-loop tick: keep the idea pool full. If a business has fewer than
+ * `floor` PROPOSED ideas, top it back up. Called on a cadence by the scheduler
+ * so there is always fresh, vetted supply entering the pipeline.
+ */
+export async function replenishIdeas(businessId: string, floor = 6): Promise<number> {
+  requireDb();
+  const proposed = await prisma.idea.count({
+    where: { businessId, status: "PROPOSED" },
+  });
+  if (proposed >= floor) return 0;
+  return generateIdeas(businessId, floor - proposed);
+}
+
+/** Replenish ideas for every active/onboarding business. Returns per-business counts. */
+export async function replenishAllIdeas(floor = 6): Promise<Record<string, number>> {
+  requireDb();
+  const businesses = await prisma.business.findMany({
+    where: { status: { in: ["ACTIVE", "ONBOARDING"] } },
+    select: { id: true },
+  });
+  const result: Record<string, number> = {};
+  for (const b of businesses) {
+    try {
+      result[b.id] = await replenishIdeas(b.id, floor);
+    } catch {
+      result[b.id] = 0;
+    }
+  }
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -320,8 +473,12 @@ export async function publishScheduled(now: Date = new Date()): Promise<{ publis
     try {
       await publishNow(d.id, "published");
       published.push(d.id);
-    } catch {
-      // leave it scheduled; the next run retries.
+    } catch (e) {
+      // Leave it scheduled; the next run retries. Log so a stuck piece is visible.
+      console.error(
+        `[publishScheduled] failed to publish draft ${d.id}:`,
+        e instanceof Error ? e.message : e,
+      );
     }
   }
   return { published };

@@ -105,6 +105,16 @@ export interface ScheduledItemVM {
   overdue: boolean; // scheduledFor is in the past but not yet published
 }
 
+/** One dot on the month grid — a scheduled future post or an already-live one. */
+export interface CalendarEntryVM {
+  id: string;
+  title: string;
+  date: string; // ISO — scheduledFor (scheduled) or publishedAt (published)
+  time: string; // "HH:MM" for the chip label
+  kind: "published" | "scheduled" | "overdue";
+  url?: string; // live URL, when published
+}
+
 export interface ConnectorVM {
   type:
     | "GSC"

@@ -27,9 +27,12 @@ function linkSchema(maxLinks: number): Record<string, unknown> {
     type: "object",
     additionalProperties: false,
     properties: {
+      // NOTE: no JSON-Schema `maxItems` here — the Anthropic structured-output
+      // API rejects it ("property 'maxItems' is not supported"). The cap is
+      // enforced after the fact in sanitizeLinks() via slice(maxLinks) and the
+      // "up to N" instruction in the prompt.
       links: {
         type: "array",
-        maxItems: maxLinks,
         items: {
           type: "object",
           additionalProperties: false,

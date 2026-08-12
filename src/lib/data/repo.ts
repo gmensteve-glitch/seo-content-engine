@@ -18,6 +18,7 @@ import type {
   CmsPlatform,
   ReadyDraftVM,
   ScheduledItemVM,
+  CalendarEntryVM,
 } from "@/lib/data/types";
 import {
   BUSINESSES,
@@ -393,6 +394,49 @@ export async function getScheduledDrafts(bizId = DEFAULT_BIZ): Promise<Scheduled
     scheduledFor: d.scheduledFor!.toISOString(),
     overdue: d.scheduledFor! <= now,
   }));
+}
+
+/** Merged month-grid feed: scheduled (future) + published (past) entries. */
+export async function getCalendarEntries(bizId = DEFAULT_BIZ): Promise<CalendarEntryVM[]> {
+  if (!hasDatabase) return [];
+  const now = new Date();
+  const hhmm = (d: Date) =>
+    `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+
+  const [scheduled, pages] = await Promise.all([
+    prisma.draft.findMany({
+      where: { businessId: bizId, status: "PASSED", scheduledFor: { not: null } },
+      select: { id: true, title: true, scheduledFor: true },
+    }),
+    prisma.page.findMany({
+      where: { businessId: bizId, publishedAt: { not: null } },
+      include: { draft: { select: { title: true } } },
+    }),
+  ]);
+
+  const entries: CalendarEntryVM[] = [];
+  for (const d of scheduled) {
+    const when = d.scheduledFor!;
+    entries.push({
+      id: d.id,
+      title: d.title,
+      date: when.toISOString(),
+      time: hhmm(when),
+      kind: when <= now ? "overdue" : "scheduled",
+    });
+  }
+  for (const p of pages) {
+    const when = p.publishedAt!;
+    entries.push({
+      id: p.id,
+      title: p.draft?.title ?? p.url,
+      date: when.toISOString(),
+      time: hhmm(when),
+      kind: "published",
+      url: p.url,
+    });
+  }
+  return entries;
 }
 
 // ─────────────────────────────────────────────────────────────

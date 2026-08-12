@@ -13,7 +13,9 @@ import {
   scheduleDraft,
   unscheduleDraft,
   publishNow,
+  generateIdeas,
 } from "@/lib/pipeline/service";
+import { getBusiness } from "@/lib/data/repo";
 
 export async function buildBriefAction(formData: FormData): Promise<void> {
   await buildBriefFromIdea(String(formData.get("ideaId")));
@@ -27,6 +29,16 @@ export async function dismissIdeaAction(formData: FormData): Promise<void> {
   await dismissIdea(String(formData.get("ideaId")));
   revalidatePath("/ideas");
   revalidatePath("/pipeline");
+}
+
+/** Generate a fresh batch of ideas for the current business (top of the funnel). */
+export async function generateIdeasAction(formData: FormData): Promise<void> {
+  const bizFromForm = formData.get("businessId");
+  const bizId = bizFromForm ? String(bizFromForm) : (await getBusiness()).id;
+  await generateIdeas(bizId, 6);
+  revalidatePath("/ideas");
+  revalidatePath("/pipeline");
+  revalidatePath("/");
 }
 
 export async function approveBriefAction(formData: FormData): Promise<void> {
@@ -56,11 +68,15 @@ function revalidateCalendar(): void {
 /** Place a ready draft on the calendar for auto-publish at the chosen date. */
 export async function scheduleDraftAction(formData: FormData): Promise<void> {
   const draftId = String(formData.get("draftId"));
-  const when = String(formData.get("scheduledFor")); // yyyy-mm-dd or ISO from <input>
+  const when = String(formData.get("scheduledFor")); // yyyy-mm-dd, datetime-local, or ISO
   if (!draftId || !when) return;
-  // A bare date (yyyy-mm-dd) publishes at 09:00 local-ish; keep it simple and
-  // schedule for that day at 14:00 UTC (mid-morning US). Full ISO passes through.
-  const date = when.length <= 10 ? new Date(`${when}T14:00:00.000Z`) : new Date(when);
+  // Interpret picker values as UTC so the calendar day/time is unambiguous
+  // server-side. Bare date → 14:00 UTC (mid-morning US); datetime-local
+  // ("YYYY-MM-DDTHH:MM") → that time in UTC; full ISO passes through.
+  let iso = when;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(when)) iso = `${when}T14:00:00.000Z`;
+  else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(when)) iso = `${when}:00.000Z`;
+  const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return;
   await scheduleDraft(draftId, date);
   revalidateCalendar();

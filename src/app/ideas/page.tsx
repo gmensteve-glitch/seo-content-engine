@@ -1,7 +1,8 @@
 import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
 import { getIdeas } from "@/lib/data/repo";
-import { buildBriefAction, dismissIdeaAction } from "@/app/actions";
+import { buildBriefAction, dismissIdeaAction, generateIdeasAction } from "@/app/actions";
+import { Sparkles } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -10,10 +11,17 @@ export default async function IdeasPage() {
 
   return (
     <Shell>
-      <PageHeader
-        title="Idea box"
-        subtitle="Auto-scored from keyword gaps + Search Console intent. Highest-opportunity first."
-      />
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <PageHeader
+          title="Idea box"
+          subtitle="Auto-scored for opportunity, grounded in your pillars and existing coverage. Highest-opportunity first. New ideas replenish automatically as the pool runs low."
+        />
+        <form action={generateIdeasAction}>
+          <button className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--accent-bg)] px-3 py-2 text-[13px] font-medium text-[var(--accent)] hover:opacity-90">
+            <Sparkles size={15} /> Generate ideas
+          </button>
+        </form>
+      </div>
       <div className="space-y-2.5">
         {ideas.map((i) => (
           <Card key={i.id} className="flex items-start justify-between gap-4">
