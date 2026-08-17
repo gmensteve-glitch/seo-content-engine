@@ -17,18 +17,10 @@ import {
   CheckCircle2,
 } from "lucide-react";
 
-function defaultWhen(): string {
-  const d = new Date();
-  d.setDate(d.getDate() + 1); // default: tomorrow 9am
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T09:00`;
-}
-
 export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   const [vm, setVm] = useState<PolishDraftVM>(initial);
   const [selection, setSelection] = useState("");
   const [instruction, setInstruction] = useState("");
-  const [when, setWhen] = useState(defaultWhen());
   const [busy, setBusy] = useState<null | "boost" | "edit" | "regrade" | "schedule" | "publish">(null);
   const [note, setNote] = useState("");
   const [done, setDone] = useState<null | { label: string; href: string }>(null);
@@ -100,8 +92,8 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
     });
 
   const moveToCalendar = () =>
-    run("schedule", "/api/review/schedule", { draftId: vm.id, scheduledFor: when }, () => {
-      setDone({ label: "Moved to calendar", href: "/calendar" });
+    run("schedule", "/api/review/queue", { draftId: vm.id }, () => {
+      setDone({ label: "Moved to the calendar's ready-to-schedule queue", href: "/calendar" });
     });
 
   const publishNow = () =>
@@ -179,16 +171,14 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       {/* Primary actions */}
       {passed && !done ? (
         <div className="mb-4 rounded-xl border border-[var(--success)] bg-[var(--success-bg)] p-4">
-          <div className="mb-2 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-[var(--success)]">
+          <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-[var(--success)]">
             <CheckCircle2 size={13} /> Ready to publish
           </div>
+          <p className="mb-2.5 text-[12px] text-[var(--muted)]">
+            Send it to the calendar&apos;s ready-to-schedule queue — you pick the exact date &amp;
+            time there. Or publish it right now.
+          </p>
           <div className="flex flex-wrap items-center gap-2">
-            <input
-              type="datetime-local"
-              value={when}
-              onChange={(e) => setWhen(e.target.value)}
-              className="rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-2.5 py-2 text-[13px]"
-            />
             <button
               onClick={moveToCalendar}
               disabled={busy !== null}

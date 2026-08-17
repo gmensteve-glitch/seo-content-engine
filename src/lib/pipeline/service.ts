@@ -742,12 +742,20 @@ export async function regradeDraft(draftId: string): Promise<{ overall: number; 
 // Content calendar
 // ─────────────────────────────────────────────────────────────
 
+/** Move a reviewed piece out of "Ready" into the calendar's ready-to-schedule
+ *  queue (still no date — the operator picks that on the calendar). */
+export async function markReadyForSchedule(draftId: string): Promise<void> {
+  requireDb();
+  await prisma.draft.update({ where: { id: draftId }, data: { reviewedAt: new Date() } });
+}
+
 /** Put a passed draft on the calendar for auto-publish at `when`. */
 export async function scheduleDraft(draftId: string, when: Date): Promise<void> {
   requireDb();
   await prisma.draft.update({
     where: { id: draftId },
-    data: { scheduledFor: when, status: "PASSED" },
+    // Scheduling implies it's been reviewed — stamp reviewedAt if not already.
+    data: { scheduledFor: when, status: "PASSED", reviewedAt: new Date() },
   });
 }
 

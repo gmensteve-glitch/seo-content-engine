@@ -232,6 +232,9 @@ model Draft {
   // died mid-run and the draft is safe to reclaim. attempts caps crash loops.
   processingStartedAt DateTime?
   attempts     Int         @default(0)
+  // Set when the operator moves a PASSED piece out of the "Ready" review step
+  // into the calendar's ready-to-schedule queue. Null = still awaiting review.
+  reviewedAt   DateTime?
   grades       Grade[]
   page         Page?
   createdAt    DateTime    @default(now())

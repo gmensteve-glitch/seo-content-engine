@@ -370,11 +370,12 @@ function latestGrade(grades: { overall: number }[]): number {
   return grades[0]?.overall ?? 0;
 }
 
-/** PASSED drafts NOT yet on the calendar — the "ready to schedule" queue. */
+/** The calendar's "ready to schedule" queue: reviewed pieces the operator moved
+ *  out of Ready, now awaiting a date. (PASSED, no date yet, reviewed.) */
 export async function getReadyToSchedule(bizId = DEFAULT_BIZ): Promise<ReadyDraftVM[]> {
   if (!hasDatabase) return [];
   const drafts = await prisma.draft.findMany({
-    where: { businessId: bizId, status: "PASSED", scheduledFor: null },
+    where: { businessId: bizId, status: "PASSED", scheduledFor: null, reviewedAt: { not: null } },
     include: {
       brief: true,
       grades: { orderBy: { createdAt: "desc" }, take: 1 },
@@ -459,18 +460,21 @@ function toPolishVM(d: PolishRow, threshold: number): PolishDraftVM {
   };
 }
 
-/** Ready-to-review: PASSED drafts not yet on the calendar. They sit here with
- *  full scorecard + post for a final look before you move them to the calendar. */
+/** Ready-to-review: PASSED pieces that have cleared the bar but haven't been
+ *  reviewed+moved yet. They sit here with full scorecard + post for a final look
+ *  before you move them to the calendar's ready-to-schedule queue. */
 export async function getReadyForReview(bizId = DEFAULT_BIZ): Promise<PolishDraftVM[]> {
   if (!hasDatabase) return [];
   const business = await prisma.business.findUnique({ where: { id: bizId } });
   const threshold = business?.qualityThreshold ?? 85;
   const drafts = await prisma.draft.findMany({
-    where: { businessId: bizId, status: "PASSED", scheduledFor: null },
+    where: { businessId: bizId, status: "PASSED", scheduledFor: null, reviewedAt: null },
     include: { brief: true, grades: { orderBy: { version: "desc" }, take: 1 } },
     orderBy: { updatedAt: "desc" },
   });
-  return drafts.map((d) => toPolishVM(d, threshold));
+  // Only genuinely-graded pieces — filters out any placeholder/seed rows that
+  // were marked PASSED without a real grade (they'd show a 0/empty scorecard).
+  return drafts.map((d) => toPolishVM(d, threshold)).filter((vm) => vm.overall >= vm.threshold);
 }
 
 /** Near-miss drafts (FAILED) that need a human E-E-A-T pass before they can pass. */
