@@ -25,6 +25,7 @@ export type PipelineStage =
   | "ideas"
   | "briefs"
   | "in_progress"
+  | "review"
   | "scheduled"
   | "live";
 

@@ -185,13 +185,29 @@ export async function getPipeline(bizId = DEFAULT_BIZ): Promise<PipelineCard[]> 
     });
   }
 
+  // Review — near-miss drafts (FAILED) that need a human experience pass.
+  const failed = await prisma.draft.findMany({
+    where: { businessId: bizId, status: "FAILED" },
+    include: { grades: { orderBy: { createdAt: "desc" }, take: 1 } },
+    orderBy: { updatedAt: "desc" },
+  });
+  for (const d of failed) {
+    cards.push({
+      id: d.id,
+      title: d.title,
+      stage: "review",
+      score: d.grades[0]?.overall,
+      meta: "add experience",
+    });
+  }
+
   // Scheduled — passed drafts awaiting publish.
   const scheduled = await prisma.draft.findMany({
     where: { businessId: bizId, status: "PASSED" },
     orderBy: { createdAt: "asc" },
   });
   for (const d of scheduled) {
-    cards.push({ id: d.id, title: d.title, stage: "scheduled", meta: "queued" });
+    cards.push({ id: d.id, title: d.title, stage: "scheduled", meta: "ready" });
   }
 
   // Live — published pages.
@@ -528,11 +544,17 @@ export async function getConnectors(bizId = DEFAULT_BIZ): Promise<ConnectorVM[]>
   });
 }
 
-/** Column definitions for the pipeline board. */
-export const PIPELINE_COLUMNS: { key: PipelineCard["stage"]; label: string }[] = [
-  { key: "ideas", label: "Ideas" },
-  { key: "briefs", label: "Briefs · needs you" },
-  { key: "in_progress", label: "In progress" },
-  { key: "scheduled", label: "Scheduled" },
-  { key: "live", label: "Live" },
+/** Column definitions for the pipeline board. `tone` drives the color language:
+ *  gray = raw, amber = needs YOU, blue = engine working / queued, green = done. */
+export const PIPELINE_COLUMNS: {
+  key: PipelineCard["stage"];
+  label: string;
+  tone: "neutral" | "warn" | "accent" | "success";
+}[] = [
+  { key: "ideas", label: "Ideas", tone: "neutral" },
+  { key: "briefs", label: "Briefs · needs you", tone: "warn" },
+  { key: "in_progress", label: "Writing & grading", tone: "accent" },
+  { key: "review", label: "Review · needs you", tone: "warn" },
+  { key: "scheduled", label: "Ready & scheduled", tone: "accent" },
+  { key: "live", label: "Live", tone: "success" },
 ];
