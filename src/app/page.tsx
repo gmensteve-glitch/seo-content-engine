@@ -71,48 +71,77 @@ export default async function OverviewPage() {
     <Shell>
       <PageHeader title="Overview" subtitle={biz.name} />
 
-      {/* 1) What needs you — the daily action list, first and biggest */}
-      <Card className="mb-4">
-        <div className="mb-3 flex items-center gap-2">
-          <h2 className="text-[15px] font-medium">Needs you today</h2>
-          {todos.length === 0 && (
-            <span className="ml-auto flex items-center gap-1 text-[12px] text-[var(--success)]">
-              <CheckCircle2 size={14} /> All caught up
-            </span>
-          )}
-        </div>
-        {todos.length === 0 ? (
-          <p className="text-[13px] text-[var(--muted)]">
-            Nothing waiting on you. The engine keeps generating ideas and drafting
-            in the background — check back, or approve a brief to queue more.
-          </p>
-        ) : (
-          <div className="space-y-2.5">
-            {todos.map((t) => (
-              <Link
-                key={t.href}
-                href={t.href}
-                className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-3 hover:bg-[var(--surface-2)]"
-              >
-                <span className="flex items-center gap-3">
-                  <span
-                    className={
-                      t.tone === "warn" ? "text-[var(--warn)]" : "text-[var(--accent)]"
-                    }
-                  >
-                    {t.icon}
-                  </span>
-                  <span>
-                    <span className="block text-[13.5px] font-medium">{t.label}</span>
-                    <span className="block text-[12px] text-[var(--muted)]">{t.hint}</span>
-                  </span>
-                </span>
-                <ArrowRight size={15} className="text-[var(--subtle)]" />
-              </Link>
-            ))}
+      {/* 1) DO THIS NEXT — one clear focal action (no triage, no paralysis). */}
+      {todos.length === 0 ? (
+        <Card className="mb-4 border-[var(--success)]">
+          <div className="flex items-center gap-3 py-2">
+            <CheckCircle2 size={22} className="text-[var(--success)]" />
+            <div>
+              <div className="text-[15px] font-medium">You&apos;re all caught up</div>
+              <div className="text-[12px] text-[var(--muted)]">
+                The engine keeps drafting in the background. Nothing needs you right now.
+              </div>
+            </div>
           </div>
-        )}
-      </Card>
+        </Card>
+      ) : (
+        <>
+          <Link
+            href={todos[0].href}
+            className="mb-3 block rounded-xl border border-[var(--accent)] bg-[var(--accent-bg)] p-5 transition-colors hover:brightness-110"
+          >
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--accent)]">
+              Do this next
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <span className="text-[var(--accent)]">{todos[0].icon}</span>
+                <div>
+                  <div className="text-[18px] font-semibold leading-tight">
+                    {todos[0].label}
+                  </div>
+                  <div className="mt-0.5 text-[12.5px] text-[var(--muted)]">
+                    {todos[0].hint}
+                  </div>
+                </div>
+              </div>
+              <span className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3.5 py-2 text-[13px] font-medium text-white">
+                Open <ArrowRight size={15} />
+              </span>
+            </div>
+          </Link>
+
+          {/* Then — the rest, small and quiet so they don't compete. */}
+          {todos.length > 1 && (
+            <div className="mb-4">
+              <div className="mb-1.5 px-1 text-[11px] font-medium uppercase tracking-wider text-[var(--subtle)]">
+                Then
+              </div>
+              <div className="space-y-1.5">
+                {todos.slice(1).map((t) => (
+                  <Link
+                    key={t.href}
+                    href={t.href}
+                    className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-2.5 hover:bg-[var(--surface-2)]"
+                  >
+                    <span className="flex items-center gap-2.5 text-[13px]">
+                      <span
+                        className={
+                          t.tone === "warn" ? "text-[var(--warn)]" : "text-[var(--accent)]"
+                        }
+                      >
+                        {t.icon}
+                      </span>
+                      {t.label}
+                    </span>
+                    <ArrowRight size={14} className="text-[var(--subtle)]" />
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* 2) Your content — the REAL numbers */}
       <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium text-[var(--muted)]">

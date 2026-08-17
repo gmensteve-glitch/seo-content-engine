@@ -22,18 +22,39 @@ import {
 } from "lucide-react";
 import { BUSINESSES } from "@/lib/mock/seed";
 
-const NAV = [
-  { href: "/", label: "Overview", icon: LayoutDashboard },
-  { href: "/strategy", label: "Strategy", icon: Target },
-  { href: "/ideas", label: "Ideas", icon: Lightbulb },
-  { href: "/briefs", label: "Briefs", icon: ClipboardCheck, badge: 2 },
-  { href: "/pipeline", label: "Pipeline", icon: Columns3 },
-  { href: "/review", label: "Review", icon: Sparkles },
-  { href: "/calendar", label: "Calendar", icon: CalendarDays },
-  { href: "/quality", label: "Quality", icon: Gauge },
-  { href: "/performance", label: "Performance", icon: LineChart },
-  { href: "/geo", label: "Geo", icon: MapPin },
-  { href: "/connectors", label: "Connectors", icon: Plug },
+// Grouped nav — chunked into a few labelled sections so the sidebar reads as
+// "what do I do / what do I make / what do I check / setup" instead of a flat
+// list of 11 items. Lower cognitive load, easier to scan.
+const NAV_GROUPS: {
+  header: string | null;
+  items: { href: string; label: string; icon: typeof LayoutDashboard }[];
+}[] = [
+  { header: null, items: [{ href: "/", label: "Overview", icon: LayoutDashboard }] },
+  {
+    header: "Do today",
+    items: [
+      { href: "/briefs", label: "Briefs", icon: ClipboardCheck },
+      { href: "/review", label: "Review", icon: Sparkles },
+      { href: "/calendar", label: "Calendar", icon: CalendarDays },
+    ],
+  },
+  {
+    header: "Create",
+    items: [
+      { href: "/ideas", label: "Ideas", icon: Lightbulb },
+      { href: "/strategy", label: "Strategy", icon: Target },
+      { href: "/pipeline", label: "Pipeline", icon: Columns3 },
+    ],
+  },
+  {
+    header: "Measure",
+    items: [
+      { href: "/quality", label: "Quality", icon: Gauge },
+      { href: "/performance", label: "Performance", icon: LineChart },
+      { href: "/geo", label: "Geo", icon: MapPin },
+    ],
+  },
+  { header: "Setup", items: [{ href: "/connectors", label: "Connectors", icon: Plug }] },
 ];
 
 export function Shell({ children }: { children: ReactNode }) {
@@ -105,31 +126,35 @@ export function Shell({ children }: { children: ReactNode }) {
 
       <div className="flex min-h-0 flex-1">
         {/* Sidebar */}
-        <nav className="w-52 shrink-0 border-r border-[var(--border)] bg-[var(--surface-1)] p-2">
-          {NAV.map((item) => {
-            const active =
-              item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`mb-0.5 flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] ${
-                  active
-                    ? "bg-[var(--accent-bg)] font-medium text-[var(--accent)]"
-                    : "text-[var(--muted)] hover:bg-[var(--surface-2)]"
-                }`}
-              >
-                <Icon size={16} />
-                <span className="flex-1">{item.label}</span>
-                {item.badge && (
-                  <span className="rounded-full bg-[var(--warn-bg)] px-1.5 text-[10px] font-medium text-[var(--warn)]">
-                    {item.badge}
-                  </span>
-                )}
-              </Link>
-            );
-          })}
+        <nav className="w-52 shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--surface-1)] p-2">
+          {NAV_GROUPS.map((group, gi) => (
+            <div key={gi} className={gi > 0 ? "mt-4" : ""}>
+              {group.header && (
+                <div className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--subtle)]">
+                  {group.header}
+                </div>
+              )}
+              {group.items.map((item) => {
+                const active =
+                  item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`mb-0.5 flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] ${
+                      active
+                        ? "bg-[var(--accent-bg)] font-medium text-[var(--accent)]"
+                        : "text-[var(--muted)] hover:bg-[var(--surface-2)]"
+                    }`}
+                  >
+                    <Icon size={16} />
+                    <span className="flex-1">{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         {/* Main */}
