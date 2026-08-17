@@ -144,4 +144,47 @@ export class ShopifyAdapter implements CmsAdapter {
       return null;
     }
   }
+
+  /** Real product facts (title + price + specs) from the store, most relevant
+   *  first — the concrete, verifiable substance the enricher weaves into a
+   *  near-miss draft (real casket prices/materials). */
+  async listProductFacts(query: string, limit = 8): Promise<{ title: string; price?: string; specs?: string }[]> {
+    try {
+      const data = await this.req<{
+        products?: Array<{
+          title: string;
+          tags?: string;
+          product_type?: string;
+          variants?: Array<{ price?: string; weight?: number; weight_unit?: string }>;
+        }>;
+      }>("/products.json?limit=50&fields=id,title,tags,product_type,variants");
+
+      const products = data.products ?? [];
+      if (products.length === 0) return [];
+
+      const terms = query.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+      const scored = products
+        .map((p) => {
+          const hay = `${p.title} ${p.tags ?? ""} ${p.product_type ?? ""}`.toLowerCase();
+          const score = terms.reduce((s, t) => s + (hay.includes(t) ? 1 : 0), 0);
+          const v = p.variants?.[0];
+          const price = v?.price ? `$${Number(v.price).toLocaleString()}` : undefined;
+          const specParts: string[] = [];
+          if (p.product_type) specParts.push(p.product_type);
+          if (v?.weight) specParts.push(`${v.weight}${v.weight_unit ?? ""}`);
+          if (p.tags) specParts.push(p.tags.split(",").slice(0, 3).map((t) => t.trim()).join(", "));
+          return {
+            score,
+            fact: { title: p.title, price, specs: specParts.filter(Boolean).join(" · ") || undefined },
+          };
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit)
+        .map((x) => x.fact);
+
+      return scored;
+    } catch {
+      return [];
+    }
+  }
 }

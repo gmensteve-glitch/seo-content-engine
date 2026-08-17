@@ -422,6 +422,42 @@ function extractExperienceNotes(body: string): string[] {
   return out;
 }
 
+type PolishRow = {
+  id: string;
+  title: string;
+  bodyMd: string;
+  status: string;
+  updatedAt: Date;
+  brief: { targetKeyword: string };
+  grades: { overall: number; feedback: string | null; dimensions: unknown }[];
+};
+
+/** Map a draft (+ its latest grade + brief) into the polish view-model. */
+function toPolishVM(d: PolishRow, threshold: number): PolishDraftVM {
+  const g = d.grades[0];
+  const stored = (g?.dimensions ?? {}) as Record<string, StoredDimension>;
+  const dimensions = RUBRIC.filter((r) => stored[r.key]).map((r) => ({
+    key: r.key,
+    label: r.label,
+    score: stored[r.key].score,
+    max: stored[r.key].max ?? r.max,
+    note: stored[r.key].note ?? "",
+  }));
+  return {
+    id: d.id,
+    title: d.title,
+    targetKeyword: d.brief.targetKeyword,
+    overall: g?.overall ?? 0,
+    threshold,
+    status: d.status.toLowerCase() as PolishDraftVM["status"],
+    bodyMd: d.bodyMd,
+    feedback: g?.feedback ?? "",
+    dimensions,
+    experienceNotes: extractExperienceNotes(d.bodyMd),
+    updatedAt: d.updatedAt.toISOString(),
+  };
+}
+
 /** Near-miss drafts (FAILED) that need a human E-E-A-T pass before they can pass. */
 export async function getNeedsPolish(bizId = DEFAULT_BIZ): Promise<PolishDraftVM[]> {
   if (!hasDatabase) return [];
@@ -430,37 +466,21 @@ export async function getNeedsPolish(bizId = DEFAULT_BIZ): Promise<PolishDraftVM
 
   const drafts = await prisma.draft.findMany({
     where: { businessId: bizId, status: "FAILED" },
-    include: {
-      brief: true,
-      grades: { orderBy: { version: "desc" }, take: 1 },
-    },
+    include: { brief: true, grades: { orderBy: { version: "desc" }, take: 1 } },
     orderBy: { updatedAt: "desc" },
   });
+  return drafts.map((d) => toPolishVM(d, threshold));
+}
 
-  return drafts.map((d) => {
-    const g = d.grades[0];
-    const stored = (g?.dimensions ?? {}) as Record<string, StoredDimension>;
-    const dimensions = RUBRIC.filter((r) => stored[r.key]).map((r) => ({
-      key: r.key,
-      label: r.label,
-      score: stored[r.key].score,
-      max: stored[r.key].max ?? r.max,
-      note: stored[r.key].note ?? "",
-    }));
-    return {
-      id: d.id,
-      title: d.title,
-      targetKeyword: d.brief.targetKeyword,
-      overall: g?.overall ?? 0,
-      threshold,
-      status: d.status.toLowerCase() as PolishDraftVM["status"],
-      bodyMd: d.bodyMd,
-      feedback: g?.feedback ?? "",
-      dimensions,
-      experienceNotes: extractExperienceNotes(d.bodyMd),
-      updatedAt: d.updatedAt.toISOString(),
-    };
+/** A single draft for the focused polish page. Returns null if not found. */
+export async function getPolishDraft(draftId: string): Promise<PolishDraftVM | null> {
+  if (!hasDatabase) return null;
+  const d = await prisma.draft.findUnique({
+    where: { id: draftId },
+    include: { brief: true, business: true, grades: { orderBy: { version: "desc" }, take: 1 } },
   });
+  if (!d) return null;
+  return toPolishVM(d, d.business.qualityThreshold);
 }
 
 /** Merged month-grid feed: scheduled (future) + published (past) entries. */

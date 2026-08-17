@@ -1,136 +1,88 @@
+import Link from "next/link";
 import { Shell } from "@/components/shell";
-import { PageHeader, Card, Pill, Bar } from "@/components/ui";
+import { PageHeader } from "@/components/ui";
 import { getNeedsPolish } from "@/lib/data/repo";
-import { polishAndRegradeAction, saveDraftBodyAction } from "@/app/actions";
-import { Sparkles, AlertCircle, PenLine, RefreshCw, Save } from "lucide-react";
+import { Sparkles, ArrowRight, Tag, CheckCircle2, PartyPopper } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
-export default async function ReviewPage() {
-  const drafts = await getNeedsPolish();
+export default async function ReviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ passed?: string }>;
+}) {
+  const [{ passed }, drafts] = await Promise.all([searchParams, getNeedsPolish()]);
 
   return (
     <Shell>
-      <PageHeader
-        title="Needs your experience"
-        subtitle="Near-miss drafts that cleared everything the AI can do on its own. Add real first-hand detail — a price you've seen, a real scenario, a verified source — then re-grade to push them over the bar and into the calendar."
-      />
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <PageHeader
+          title="Needs your experience"
+          subtitle="Near-misses that just fell short of the quality bar. Open one, add a real detail, re-grade — it passes and moves to the calendar."
+        />
+        {drafts.length > 0 && (
+          <span className="shrink-0 rounded-full bg-[var(--warn-bg)] px-3 py-1 text-[12px] font-medium text-[var(--warn)]">
+            {drafts.length} to polish
+          </span>
+        )}
+      </div>
 
-      {drafts.length === 0 && (
-        <Card>
-          <p className="text-[13px] text-[var(--muted)]">
-            Nothing waiting for polish. Drafts that fall just short of the quality
-            bar land here with the grader&apos;s notes on exactly what to add.
-          </p>
-        </Card>
+      {passed && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border border-[var(--success)] bg-[var(--success-bg)] px-3 py-2.5 text-[13px] text-[var(--success)]">
+          <PartyPopper size={16} /> Nice — that one cleared the bar and moved to the calendar&apos;s
+          ready queue.
+        </div>
       )}
 
-      <div className="space-y-5">
+      <div className="space-y-2.5">
         {drafts.map((d) => {
           const gap = d.threshold - d.overall;
-          const weak = d.dimensions
-            .filter((dim) => dim.score < dim.max)
-            .sort((a, b) => a.score / a.max - b.score / b.max);
+          const addCount = d.experienceNotes.length;
           return (
-            <Card key={d.id}>
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <h2 className="text-[15px] font-medium">{d.title}</h2>
-                  <div className="mt-1 text-[12px] text-[var(--muted)]">{d.targetKeyword}</div>
-                </div>
-                <div className="flex shrink-0 items-center gap-2 text-right">
-                  <div>
-                    <div className="text-[22px] font-semibold leading-none">
-                      {d.overall}
-                      <span className="text-[13px] font-normal text-[var(--muted)]">
-                        /{d.threshold}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-[var(--warn)]">
-                      {gap > 0 ? `${gap} to go` : "ready"}
-                    </div>
-                  </div>
+            <Link
+              key={d.id}
+              href={`/review/${d.id}`}
+              className="flex items-center gap-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3.5 hover:bg-[var(--surface-2)]"
+            >
+              {/* Score */}
+              <div className="flex w-14 shrink-0 flex-col items-center">
+                <span className="text-[22px] font-semibold leading-none text-[var(--warn)]">
+                  {d.overall}
+                </span>
+                <span className="mt-1 text-[10px] text-[var(--muted)]">{gap} to go</span>
+              </div>
+
+              {/* Title + what's needed */}
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[14px] font-medium">{d.title}</div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-[var(--muted)]">
+                  <span className="flex items-center gap-1">
+                    <Tag size={11} /> {d.targetKeyword}
+                  </span>
+                  {addCount > 0 && (
+                    <span className="flex items-center gap-1 text-[var(--accent)]">
+                      <Sparkles size={11} /> {addCount} thing{addCount === 1 ? "" : "s"} to add
+                    </span>
+                  )}
                 </div>
               </div>
 
-              {/* Weakest dimensions */}
-              {weak.length > 0 && (
-                <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
-                  {weak.slice(0, 4).map((dim) => {
-                    const pct = (dim.score / dim.max) * 100;
-                    const tone = pct < 50 ? "danger" : pct < 80 ? "warn" : "success";
-                    return (
-                      <div key={dim.key} className="flex items-center gap-2">
-                        <span className="w-32 shrink-0 text-[11.5px] text-[var(--muted)]">
-                          {dim.label}
-                        </span>
-                        <Bar pct={pct} tone={tone} />
-                        <span className="w-9 shrink-0 text-right text-[11px] tabular-nums">
-                          {dim.score}/{dim.max}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* What to add (experience callouts) */}
-              {d.experienceNotes.length > 0 && (
-                <div className="mt-3 rounded-lg border border-[var(--accent-bg)] bg-[var(--accent-bg)] px-3 py-2.5">
-                  <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium text-[var(--accent)]">
-                    <Sparkles size={13} /> Add your experience
-                  </div>
-                  <ul className="space-y-1">
-                    {d.experienceNotes.map((n, i) => (
-                      <li key={i} className="text-[12.5px] text-[var(--text)]">
-                        · {n}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Grader feedback */}
-              {d.feedback && (
-                <div className="mt-3 flex gap-2 rounded-lg bg-[var(--surface-2)] px-3 py-2.5">
-                  <AlertCircle size={15} className="mt-0.5 shrink-0 text-[var(--warn)]" />
-                  <p className="text-[12.5px] leading-relaxed text-[var(--text)]">{d.feedback}</p>
-                </div>
-              )}
-
-              {/* Editable body + actions */}
-              <form className="mt-3">
-                <input type="hidden" name="draftId" value={d.id} />
-                <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium text-[var(--muted)]">
-                  <PenLine size={13} /> Draft (Markdown) — edit in place
-                </div>
-                <textarea
-                  name="bodyMd"
-                  defaultValue={d.bodyMd}
-                  spellCheck
-                  className="h-80 w-full resize-y rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] p-3 font-mono text-[12px] leading-relaxed"
-                />
-                <div className="mt-2 flex items-center gap-2">
-                  <button
-                    formAction={polishAndRegradeAction}
-                    className="flex items-center gap-1.5 rounded-lg bg-[var(--accent-bg)] px-3 py-2 text-[13px] font-medium text-[var(--accent)]"
-                  >
-                    <RefreshCw size={14} /> Save &amp; re-grade
-                  </button>
-                  <button
-                    formAction={saveDraftBodyAction}
-                    className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-2 text-[13px] text-[var(--muted)]"
-                  >
-                    <Save size={14} /> Save only
-                  </button>
-                  <span className="text-[11px] text-[var(--subtle)]">
-                    Re-grading passes it straight to the calendar if it clears {d.threshold}.
-                  </span>
-                </div>
-              </form>
-            </Card>
+              {/* CTA */}
+              <span className="flex shrink-0 items-center gap-1 rounded-lg bg-[var(--accent-bg)] px-3 py-1.5 text-[12.5px] font-medium text-[var(--accent)]">
+                Polish <ArrowRight size={13} />
+              </span>
+            </Link>
           );
         })}
+
+        {drafts.length === 0 && (
+          <div className="rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] px-4 py-8 text-center">
+            <CheckCircle2 size={20} className="mx-auto mb-2 text-[var(--success)]" />
+            <p className="text-[13px] text-[var(--muted)]">
+              Nothing to polish. Near-misses land here with a checklist of what to add.
+            </p>
+          </div>
+        )}
       </div>
     </Shell>
   );

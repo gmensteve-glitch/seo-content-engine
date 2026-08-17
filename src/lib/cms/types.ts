@@ -58,6 +58,12 @@ export interface CmsAdapter {
   /** Optional: find a relevant product image from the store (for buying-guide
    *  content). Only platforms with a product catalog implement this. */
   sourceProductImage?(query: string): Promise<{ url: string; alt: string } | null>;
+
+  /** Optional: real product facts (title/price/specs) for auto-enrichment. */
+  listProductFacts?(
+    query: string,
+    limit?: number,
+  ): Promise<{ title: string; price?: string; specs?: string }[]>;
 }
 
 /** Config shapes per platform (decrypted from Connector.configEnc). */

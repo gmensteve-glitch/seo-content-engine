@@ -14,8 +14,6 @@ import {
   unscheduleDraft,
   publishNow,
   generateIdeas,
-  updateDraftBody,
-  regradeDraft,
 } from "@/lib/pipeline/service";
 import { getBusiness } from "@/lib/data/repo";
 
@@ -98,28 +96,5 @@ export async function publishNowAction(formData: FormData): Promise<void> {
   revalidatePath("/quality");
 }
 
-// ── Human polish lane ────────────────────────────────────────
-
-/** Save the operator's edits to a near-miss draft, then re-grade it. If it now
- *  clears the bar it becomes PASSED and moves to the calendar's ready queue. */
-export async function polishAndRegradeAction(formData: FormData): Promise<void> {
-  const draftId = String(formData.get("draftId"));
-  const bodyMd = String(formData.get("bodyMd") ?? "");
-  if (!draftId) return;
-  if (bodyMd.trim()) await updateDraftBody(draftId, bodyMd);
-  await regradeDraft(draftId);
-  revalidatePath("/review");
-  revalidatePath("/calendar");
-  revalidatePath("/quality");
-  revalidatePath("/pipeline");
-  revalidatePath("/");
-}
-
-/** Save edits without re-grading (park progress). */
-export async function saveDraftBodyAction(formData: FormData): Promise<void> {
-  const draftId = String(formData.get("draftId"));
-  const bodyMd = String(formData.get("bodyMd") ?? "");
-  if (!draftId) return;
-  await updateDraftBody(draftId, bodyMd);
-  revalidatePath("/review");
-}
+// The Review lane (auto-boost + highlight-edit) runs through /api/review/* so
+// the page can update live — see src/app/review/[id]/ReviewEditor.tsx.

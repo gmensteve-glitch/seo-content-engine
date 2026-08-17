@@ -19,6 +19,10 @@ import { writeDraft, reviseDraft } from "@/lib/agents/writer";
 import { gradeDraft } from "@/lib/agents/grader";
 import { planLinks, applyLinks, type LinkTarget, type PlannedLink } from "@/lib/agents/linker";
 import { generateIdeaProposals, type IdeationContext } from "@/lib/agents/ideator";
+import { enrichDraft, rewritePassage, hasResources, type EnrichResources } from "@/lib/agents/enricher";
+import { serpTop } from "@/lib/connectors/dataforseo";
+import { scrapeMany } from "@/lib/connectors/firecrawl";
+import { dataforseoEnabled, firecrawlEnabled } from "@/lib/env";
 import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
@@ -408,6 +412,19 @@ export async function processQueuedDrafts(max = 10): Promise<number> {
       if (!claimed) break;
       try {
         await runPipelineForBrief(claimed.briefId);
+        // Auto-boost a near-miss with our own data (no human needed). Runs once
+        // here; FAILED drafts aren't re-claimed, so it never loops.
+        const after = await prisma.draft.findUnique({
+          where: { id: claimed.id },
+          select: { status: true },
+        });
+        if (after?.status === "FAILED") {
+          const r = await boostDraft(claimed.id).catch((e) => {
+            console.error(`[worker] auto-boost failed for ${claimed.id}:`, e instanceof Error ? e.message : e);
+            return null;
+          });
+          if (r?.passed) console.log(`[worker] auto-boost lifted draft ${claimed.id} to ${r.overall} (PASSED)`);
+        }
       } catch (e) {
         console.error(
           `[worker] pipeline failed for draft ${claimed.id}:`,
@@ -558,13 +575,127 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
 }
 
 // ─────────────────────────────────────────────────────────────
-// Human polish lane — add real E-E-A-T to a near-miss, then re-grade
+// Review lane — auto-boost a near-miss with our own resources, then re-grade.
+// No human writing: real product data (Shopify) + verified web facts do the
+// lift. A highlight→instruct editor lets the operator DIRECT targeted tweaks
+// without typing prose.
 // ─────────────────────────────────────────────────────────────
 
-/** Save human edits to a draft body (the polish step). */
+/** Save a draft body (used by auto-boost + the highlight-edit flow). */
 export async function updateDraftBody(draftId: string, bodyMd: string): Promise<void> {
   requireDb();
   await prisma.draft.update({ where: { id: draftId }, data: { bodyMd } });
+}
+
+/** Domains we treat as authoritative enough to cite for E-E-A-T. */
+const AUTHORITATIVE = /(\.gov|\.edu|nfda\.org|consumer\.ftc\.gov|\.org)(\/|$)/i;
+
+/** Gather real enrichment resources for a keyword: the store's product facts
+ *  (when the CMS connector is configured) + excerpts from authoritative pages
+ *  (DataForSEO SERP → Firecrawl). Degrades to whatever is available. */
+async function gatherResources(
+  businessId: string,
+  keyword: string,
+): Promise<EnrichResources> {
+  const products: EnrichResources["products"] = [];
+  const sources: EnrichResources["sources"] = [];
+
+  // Product facts from the business's CMS catalog.
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+  if (business && encryptionEnabled()) {
+    const platform = business.cmsPlatform.toLowerCase() as CmsPlatform;
+    const connector = await prisma.connector.findUnique({
+      where: { businessId_type: { businessId, type: cmsConnectorType(platform) } },
+    });
+    if (connector?.status === "CONNECTED") {
+      try {
+        const adapter = getCmsAdapter(platform, decryptJson(connector.configEnc));
+        const facts = (await adapter.listProductFacts?.(keyword)) ?? [];
+        products.push(...facts);
+      } catch {
+        /* no product data available */
+      }
+    }
+  }
+
+  // Authoritative web facts (real, citable).
+  if (dataforseoEnabled() && firecrawlEnabled()) {
+    try {
+      const serp = await serpTop(keyword, { limit: 10 });
+      const authoritative = serp.filter((r) => AUTHORITATIVE.test(r.url)).slice(0, 2);
+      const urls = (authoritative.length ? authoritative : serp.slice(0, 2)).map((r) => r.url);
+      const pages = await scrapeMany(urls);
+      for (const p of pages) sources.push({ url: p.url, title: p.title, excerpt: p.markdown });
+    } catch {
+      /* no web data available */
+    }
+  }
+
+  return { products, sources };
+}
+
+/**
+ * Auto-boost a near-miss with real data (no human input): pull product facts +
+ * authoritative web facts, have the enricher weave them in, then re-grade. If it
+ * now clears the bar → PASSED (flows to the calendar); otherwise stays FAILED.
+ */
+export async function boostDraft(draftId: string): Promise<{
+  overall: number;
+  passed: boolean;
+  usedProducts: number;
+  usedSources: number;
+}> {
+  requireDb();
+  const draft = await prisma.draft.findUnique({
+    where: { id: draftId },
+    include: {
+      brief: { include: { idea: true } },
+      business: true,
+      grades: { orderBy: { version: "desc" }, take: 1 },
+    },
+  });
+  if (!draft) throw new Error(`Draft ${draftId} not found`);
+
+  const spec = toBriefSpec(draft.brief);
+  const res = await gatherResources(draft.businessId, spec.targetKeyword);
+
+  if (!hasResources(res)) {
+    // Nothing real to add — leave it as a near-miss for a later attempt.
+    const g = draft.grades[0];
+    return { overall: g?.overall ?? 0, passed: false, usedProducts: 0, usedSources: 0 };
+  }
+
+  const weakest = draft.grades[0]
+    ? weakestDimensions(draft.grades[0].dimensions as never).slice(0, 3)
+    : ["eeat", "depth"];
+
+  const enriched = await enrichDraft(draft.bodyMd, spec, weakest, res);
+  await prisma.draft.update({ where: { id: draft.id }, data: { bodyMd: enriched } });
+
+  const { overall, passed } = await regradeDraft(draft.id);
+  return { overall, passed, usedProducts: res.products.length, usedSources: res.sources.length };
+}
+
+/**
+ * Highlight → instruct: revise just the selected passage per a short instruction
+ * and splice it back into the draft. Returns the updated body. No prose typing —
+ * the operator directs, the model edits.
+ */
+export async function editDraftSelection(
+  draftId: string,
+  selectedText: string,
+  instruction: string,
+): Promise<string> {
+  requireDb();
+  const draft = await prisma.draft.findUnique({ where: { id: draftId } });
+  if (!draft) throw new Error(`Draft ${draftId} not found`);
+  if (!selectedText.trim() || !instruction.trim()) return draft.bodyMd;
+  if (!draft.bodyMd.includes(selectedText)) return draft.bodyMd; // selection not found — no-op
+
+  const revised = await rewritePassage(selectedText, instruction);
+  const newBody = draft.bodyMd.replace(selectedText, revised);
+  await prisma.draft.update({ where: { id: draftId }, data: { bodyMd: newBody } });
+  return newBody;
 }
 
 /**
