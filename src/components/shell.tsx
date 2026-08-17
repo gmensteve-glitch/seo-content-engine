@@ -29,7 +29,13 @@ const NAV_GROUPS: {
   header: string | null;
   items: { href: string; label: string; icon: typeof LayoutDashboard }[];
 }[] = [
-  { header: null, items: [{ href: "/", label: "Overview", icon: LayoutDashboard }] },
+  {
+    header: null,
+    items: [
+      { href: "/", label: "Overview", icon: LayoutDashboard },
+      { href: "/pipeline", label: "Pipeline", icon: Columns3 },
+    ],
+  },
   {
     header: "Do today",
     items: [
@@ -43,7 +49,6 @@ const NAV_GROUPS: {
     items: [
       { href: "/ideas", label: "Ideas", icon: Lightbulb },
       { href: "/strategy", label: "Strategy", icon: Target },
-      { href: "/pipeline", label: "Pipeline", icon: Columns3 },
     ],
   },
   {
