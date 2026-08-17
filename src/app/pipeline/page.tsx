@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { PageHeader, Pill } from "@/components/ui";
 import { getPipeline, PIPELINE_COLUMNS } from "@/lib/data/repo";
 import type { PipelineCard } from "@/lib/data/types";
-import { MapPin, Search, Gauge, TrendingUp, PenLine } from "lucide-react";
+import { MapPin, Search, Gauge, TrendingUp, PenLine, ArrowUpRight } from "lucide-react";
 
 type FlagMeta = { tone: "success" | "warn" | "accent"; label: string; icon: ReactNode };
 
@@ -63,10 +64,26 @@ export default async function PipelinePage() {
               {/* Colored top bar = the stage's meaning */}
               <div className={`h-1 w-full ${TONE_BAR[col.tone]}`} />
               <div className="p-2.5">
-                <div className="mb-2 flex items-center justify-between px-1">
-                  <span className="text-[12px] font-medium text-[var(--text)]">{col.label}</span>
-                  <Pill tone={col.tone}>{items.length}</Pill>
-                </div>
+                {col.href ? (
+                  <Link
+                    href={col.href}
+                    className="group mb-2 flex items-center justify-between rounded-md px-1 py-0.5 hover:bg-[var(--surface-2)]"
+                  >
+                    <span className="flex items-center gap-1 text-[12px] font-medium text-[var(--text)]">
+                      {col.label}
+                      <ArrowUpRight
+                        size={12}
+                        className="text-[var(--subtle)] opacity-0 transition-opacity group-hover:opacity-100"
+                      />
+                    </span>
+                    <Pill tone={col.tone}>{items.length}</Pill>
+                  </Link>
+                ) : (
+                  <div className="mb-2 flex items-center justify-between px-1 py-0.5">
+                    <span className="text-[12px] font-medium text-[var(--text)]">{col.label}</span>
+                    <Pill tone={col.tone}>{items.length}</Pill>
+                  </div>
+                )}
                 <div className="space-y-2">
                   {items.map((c) => (
                     <CardItem key={c.id} card={c} />

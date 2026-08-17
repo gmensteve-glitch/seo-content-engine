@@ -550,11 +550,14 @@ export const PIPELINE_COLUMNS: {
   key: PipelineCard["stage"];
   label: string;
   tone: "neutral" | "warn" | "accent" | "success";
+  /** Page this stage links to (its detail/action view). Omitted stages (the
+   *  automatic "Writing & grading") have no dedicated page. */
+  href?: string;
 }[] = [
-  { key: "ideas", label: "Ideas", tone: "neutral" },
-  { key: "briefs", label: "Briefs · needs you", tone: "warn" },
+  { key: "ideas", label: "Ideas", tone: "neutral", href: "/ideas" },
+  { key: "briefs", label: "Briefs · needs you", tone: "warn", href: "/briefs" },
   { key: "in_progress", label: "Writing & grading", tone: "accent" },
-  { key: "review", label: "Review · needs you", tone: "warn" },
-  { key: "scheduled", label: "Ready & scheduled", tone: "accent" },
-  { key: "live", label: "Live", tone: "success" },
+  { key: "review", label: "Review · needs you", tone: "warn", href: "/review" },
+  { key: "scheduled", label: "Ready & scheduled", tone: "accent", href: "/calendar" },
+  { key: "live", label: "Live", tone: "success", href: "/performance" },
 ];
