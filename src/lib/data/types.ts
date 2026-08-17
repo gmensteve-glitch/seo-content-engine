@@ -105,6 +105,22 @@ export interface ScheduledItemVM {
   overdue: boolean; // scheduledFor is in the past but not yet published
 }
 
+/** A near-miss draft in the human-polish lane: add experience, re-grade, pass. */
+export interface PolishDraftVM {
+  id: string;
+  title: string;
+  targetKeyword: string;
+  overall: number;
+  threshold: number;
+  status: "failed" | "passed";
+  bodyMd: string;
+  feedback: string;
+  dimensions: DimensionScoreVM[];
+  /** The writer's "Add your experience" callouts, extracted for a checklist. */
+  experienceNotes: string[];
+  updatedAt: string;
+}
+
 /** One dot on the month grid — a scheduled future post or an already-live one. */
 export interface CalendarEntryVM {
   id: string;

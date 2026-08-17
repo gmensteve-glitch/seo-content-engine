@@ -19,6 +19,7 @@ import type {
   ReadyDraftVM,
   ScheduledItemVM,
   CalendarEntryVM,
+  PolishDraftVM,
 } from "@/lib/data/types";
 import {
   BUSINESSES,
@@ -394,6 +395,56 @@ export async function getScheduledDrafts(bizId = DEFAULT_BIZ): Promise<Scheduled
     scheduledFor: d.scheduledFor!.toISOString(),
     overdue: d.scheduledFor! <= now,
   }));
+}
+
+/** Extract the writer's "> **Add your experience:** ..." callouts from a body. */
+function extractExperienceNotes(body: string): string[] {
+  const out: string[] = [];
+  const re = /^>\s*\*\*Add your experience:\*\*\s*(.+)$/gim;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) out.push(m[1].trim());
+  return out;
+}
+
+/** Near-miss drafts (FAILED) that need a human E-E-A-T pass before they can pass. */
+export async function getNeedsPolish(bizId = DEFAULT_BIZ): Promise<PolishDraftVM[]> {
+  if (!hasDatabase) return [];
+  const business = await prisma.business.findUnique({ where: { id: bizId } });
+  const threshold = business?.qualityThreshold ?? 85;
+
+  const drafts = await prisma.draft.findMany({
+    where: { businessId: bizId, status: "FAILED" },
+    include: {
+      brief: true,
+      grades: { orderBy: { version: "desc" }, take: 1 },
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  return drafts.map((d) => {
+    const g = d.grades[0];
+    const stored = (g?.dimensions ?? {}) as Record<string, StoredDimension>;
+    const dimensions = RUBRIC.filter((r) => stored[r.key]).map((r) => ({
+      key: r.key,
+      label: r.label,
+      score: stored[r.key].score,
+      max: stored[r.key].max ?? r.max,
+      note: stored[r.key].note ?? "",
+    }));
+    return {
+      id: d.id,
+      title: d.title,
+      targetKeyword: d.brief.targetKeyword,
+      overall: g?.overall ?? 0,
+      threshold,
+      status: d.status.toLowerCase() as PolishDraftVM["status"],
+      bodyMd: d.bodyMd,
+      feedback: g?.feedback ?? "",
+      dimensions,
+      experienceNotes: extractExperienceNotes(d.bodyMd),
+      updatedAt: d.updatedAt.toISOString(),
+    };
+  });
 }
 
 /** Merged month-grid feed: scheduled (future) + published (past) entries. */

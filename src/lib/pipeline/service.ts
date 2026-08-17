@@ -558,6 +558,56 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
 }
 
 // ─────────────────────────────────────────────────────────────
+// Human polish lane — add real E-E-A-T to a near-miss, then re-grade
+// ─────────────────────────────────────────────────────────────
+
+/** Save human edits to a draft body (the polish step). */
+export async function updateDraftBody(draftId: string, bodyMd: string): Promise<void> {
+  requireDb();
+  await prisma.draft.update({ where: { id: draftId }, data: { bodyMd } });
+}
+
+/**
+ * Re-grade a (human-polished) draft ONCE — no revision loop. When it now clears
+ * the business's bar it's promoted to PASSED and flows to the calendar's
+ * "ready to schedule" queue; otherwise it stays FAILED with fresh feedback for
+ * another polish pass. This is the last mile that turns an 83 into a 92.
+ */
+export async function regradeDraft(draftId: string): Promise<{ overall: number; passed: boolean }> {
+  requireDb();
+  const draft = await prisma.draft.findUnique({
+    where: { id: draftId },
+    include: {
+      brief: { include: { idea: true } },
+      business: true,
+      grades: { orderBy: { version: "desc" }, take: 1 },
+    },
+  });
+  if (!draft) throw new Error(`Draft ${draftId} not found`);
+
+  const spec = toBriefSpec(draft.brief);
+  const threshold = draft.business.qualityThreshold;
+  const grade = await gradeDraft(draft.bodyMd, JSON.stringify(spec), threshold);
+  const nextVersion = (draft.grades[0]?.version ?? draft.version) + 1;
+
+  await prisma.grade.create({
+    data: {
+      draftId: draft.id,
+      overall: grade.overall,
+      passed: grade.passed,
+      dimensions: grade.dimensions as unknown as Prisma.InputJsonValue,
+      feedback: grade.feedback,
+      version: nextVersion,
+    },
+  });
+  await prisma.draft.update({
+    where: { id: draft.id },
+    data: { version: nextVersion, status: grade.passed ? "PASSED" : "FAILED" },
+  });
+  return { overall: grade.overall, passed: grade.passed };
+}
+
+// ─────────────────────────────────────────────────────────────
 // Content calendar
 // ─────────────────────────────────────────────────────────────
 

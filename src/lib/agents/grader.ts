@@ -62,12 +62,27 @@ export async function gradeDraft(
     (d) => `- ${d.key} (max ${d.max}): ${d.label} — ${d.criteria}`
   ).join("\n");
 
-  const raw = await structured<RawGrade>({
+  const prompt = `RUBRIC:\n${rubricText}\n\nBRIEF (the benchmark this draft should satisfy):\n${briefContext}\n\nDRAFT:\n${draftMarkdown}\n\nScore each dimension and give one paragraph of feedback on the highest-leverage fixes.`;
+
+  // A malformed grade (every dimension 0) is almost always a model hiccup, not a
+  // genuine zero — retry once before trusting it, so a blip doesn't burn a
+  // revision loop or pollute the grade history with a spurious 0.
+  let raw = await structured<RawGrade>({
     model: MODELS.grader,
     system: GRADER_SYSTEM,
     schema: gradeSchema(),
-    prompt: `RUBRIC:\n${rubricText}\n\nBRIEF (the benchmark this draft should satisfy):\n${briefContext}\n\nDRAFT:\n${draftMarkdown}\n\nScore each dimension and give one paragraph of feedback on the highest-leverage fixes.`,
+    prompt,
   });
+  const allZero = (g: RawGrade) => RUBRIC.every((d) => !(g.dimensions?.[d.key]?.score > 0));
+  if (allZero(raw)) {
+    console.warn("[grader] all-zero grade — retrying once");
+    raw = await structured<RawGrade>({
+      model: MODELS.grader,
+      system: GRADER_SYSTEM,
+      schema: gradeSchema(),
+      prompt,
+    });
+  }
 
   const dimensions: Record<string, DimensionScore> = {};
   for (const d of RUBRIC) {
