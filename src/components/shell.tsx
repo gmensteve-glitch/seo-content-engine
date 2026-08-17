@@ -37,18 +37,14 @@ const NAV_GROUPS: {
     ],
   },
   {
-    header: "Do today",
+    // Same left-to-right order as the pipeline board: idea → brief → review →
+    // schedule. The sidebar reads top-to-bottom exactly how work flows.
+    header: "Workflow",
     items: [
+      { href: "/ideas", label: "Ideas", icon: Lightbulb },
       { href: "/briefs", label: "Briefs", icon: ClipboardCheck },
       { href: "/review", label: "Review", icon: Sparkles },
       { href: "/calendar", label: "Calendar", icon: CalendarDays },
-    ],
-  },
-  {
-    header: "Create",
-    items: [
-      { href: "/ideas", label: "Ideas", icon: Lightbulb },
-      { href: "/strategy", label: "Strategy", icon: Target },
     ],
   },
   {
@@ -59,7 +55,13 @@ const NAV_GROUPS: {
       { href: "/geo", label: "Geo", icon: MapPin },
     ],
   },
-  { header: "Setup", items: [{ href: "/connectors", label: "Connectors", icon: Plug }] },
+  {
+    header: "Setup",
+    items: [
+      { href: "/strategy", label: "Strategy", icon: Target },
+      { href: "/connectors", label: "Connectors", icon: Plug },
+    ],
+  },
 ];
 
 export function Shell({ children }: { children: ReactNode }) {
