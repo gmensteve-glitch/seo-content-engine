@@ -227,12 +227,18 @@ model Draft {
   // Content calendar: when a PASSED draft should auto-publish. Null = not yet
   // scheduled (sitting in the "ready to schedule" queue).
   scheduledFor DateTime?
+  // Background job queue: the worker claims a draft by stamping processingStartedAt
+  // (a heartbeat/lock). Null = not being processed; a stale stamp = the worker
+  // died mid-run and the draft is safe to reclaim. attempts caps crash loops.
+  processingStartedAt DateTime?
+  attempts     Int         @default(0)
   grades       Grade[]
   page         Page?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
   @@index([businessId, status, scheduledFor])
+  @@index([status, processingStartedAt])
 }
 
 enum DraftStatus {

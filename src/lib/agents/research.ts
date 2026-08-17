@@ -45,10 +45,26 @@ export interface ResearchInput {
 export async function buildBrief(input: ResearchInput): Promise<BriefSpec> {
   if (!aiEnabled()) return offlineBrief(input.targetKeyword);
 
-  const serp = dataforseoEnabled()
-    ? await serpTop(input.targetKeyword, { limit: input.serpLimit ?? 10 })
-    : [];
-  const pages = firecrawlEnabled() ? await scrapeMany(serp.slice(0, 6).map((r) => r.url)) : [];
+  // SERP + competitor scraping are ENRICHMENT, not hard dependencies. If a data
+  // provider is down (e.g. DataForSEO 5xx) we degrade to a keyword+context brief
+  // rather than failing the whole pipeline — a resilient long-running system
+  // should never let one flaky upstream strand a piece.
+  let serp: Awaited<ReturnType<typeof serpTop>> = [];
+  if (dataforseoEnabled()) {
+    try {
+      serp = await serpTop(input.targetKeyword, { limit: input.serpLimit ?? 10 });
+    } catch (e) {
+      console.error("[research] SERP fetch failed, degrading:", e instanceof Error ? e.message : e);
+    }
+  }
+  let pages: Awaited<ReturnType<typeof scrapeMany>> = [];
+  if (firecrawlEnabled() && serp.length) {
+    try {
+      pages = await scrapeMany(serp.slice(0, 6).map((r) => r.url));
+    } catch (e) {
+      console.error("[research] competitor scrape failed, degrading:", e instanceof Error ? e.message : e);
+    }
+  }
 
   const competitorSummary = pages
     .map(

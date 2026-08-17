@@ -16,6 +16,7 @@
 import { hasDatabase } from "@/lib/db";
 import { inngestEnabled } from "@/lib/env";
 
+const WORKER_INTERVAL_MS = 45 * 1000; // drain the pipeline queue every 45s
 const PUBLISH_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 const REPLENISH_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
 const BOOT_DELAY_MS = 30 * 1000; // let the server settle before the first tick
@@ -32,6 +33,16 @@ async function publishTick(): Promise<void> {
     }
   } catch (e) {
     console.error("[scheduler] publish tick failed:", e instanceof Error ? e.message : e);
+  }
+}
+
+async function workerTick(): Promise<void> {
+  try {
+    const { processQueuedDrafts } = await import("@/lib/pipeline/service");
+    const n = await processQueuedDrafts();
+    if (n) console.log(`[scheduler] worker processed ${n} queued draft(s)`);
+  } catch (e) {
+    console.error("[scheduler] worker tick failed:", e instanceof Error ? e.message : e);
   }
 }
 
@@ -58,14 +69,19 @@ export function startScheduler(): void {
   }
 
   g.__seoScheduler = { started: true };
-  console.log("[scheduler] starting in-process scheduler (publish every 5m, replenish every 6h).");
+  console.log(
+    "[scheduler] starting in-process scheduler (worker every 45s, publish every 5m, replenish every 6h).",
+  );
 
-  // First ticks shortly after boot, then on their intervals.
+  // First ticks shortly after boot, then on their intervals. The worker tick
+  // also heals any drafts stranded by a previous crash/restart/timeout.
   setTimeout(() => {
+    void workerTick();
     void publishTick();
     void replenishTick();
   }, BOOT_DELAY_MS);
 
+  setInterval(() => void workerTick(), WORKER_INTERVAL_MS);
   setInterval(() => void publishTick(), PUBLISH_INTERVAL_MS);
   setInterval(() => void replenishTick(), REPLENISH_INTERVAL_MS);
 }

@@ -30,22 +30,19 @@ export async function POST(req: Request): Promise<Response> {
     ideaId = top.id;
   }
 
+  // Build the brief, then approve → this QUEUES the pipeline (returns fast). The
+  // background worker runs research/write/grade out of band; poll /api/dev/status
+  // (or the Pipeline board) to watch it progress — no request timeout.
   const briefId = await buildBriefFromIdea(ideaId);
   await approveBrief(briefId);
 
   const brief = await prisma.brief.findUnique({
     where: { id: briefId },
-    include: {
-      idea: true,
-      draft: { include: { grades: { orderBy: { version: "asc" } }, page: true } },
-    },
+    include: { idea: true, draft: true },
   });
 
-  const d = brief?.draft;
-  const latest = d?.grades[d.grades.length - 1];
-  const wordCount = d ? d.bodyMd.trim().split(/\s+/).filter(Boolean).length : 0;
-
   return NextResponse.json({
+    queued: true,
     ideaId,
     ideaTitle: brief?.idea.title,
     briefId,
@@ -55,17 +52,8 @@ export async function POST(req: Request): Promise<Response> {
       angle: brief.angle,
       wordTarget: brief.wordTarget,
     },
-    draft: d && {
-      id: d.id,
-      title: d.title,
-      status: d.status,
-      version: d.version,
-      wordCount,
-      grades: d.grades.map((g) => ({ version: g.version, overall: g.overall, passed: g.passed })),
-      latestDimensions: latest?.dimensions ?? null,
-      latestFeedback: latest?.feedback ?? null,
-      bodyPreview: d.bodyMd.slice(0, 2000),
-      page: d.page && { url: d.page.url, cmsId: d.page.cmsId },
-    },
+    draftId: brief?.draft?.id,
+    draftStatus: brief?.draft?.status,
+    note: "Pipeline queued — poll GET /api/dev/status to watch it write → grade → PASSED/FAILED.",
   });
 }

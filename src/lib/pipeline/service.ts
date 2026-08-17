@@ -299,7 +299,15 @@ export async function buildBriefFromIdea(ideaId: string): Promise<string> {
   return brief.id;
 }
 
-/** Approve a brief → create the Draft and dispatch the writer/grader pipeline. */
+/**
+ * Approve a brief → create the Draft and QUEUE the writer/grader pipeline.
+ *
+ * This returns fast (no multi-minute wait): the draft is created in RESEARCHING
+ * and the actual research/write/grade work runs OUT OF BAND — via Inngest when
+ * configured, otherwise the in-process background worker (processQueuedDrafts),
+ * which is kicked immediately and also runs on a periodic tick. That keeps the
+ * UI responsive and immune to request timeouts.
+ */
 export async function approveBrief(briefId: string): Promise<void> {
   requireDb();
   const brief = await prisma.brief.findUnique({
@@ -323,12 +331,111 @@ export async function approveBrief(briefId: string): Promise<void> {
     });
   }
 
-  // Durable path in production (Inngest), synchronous fallback offline/dev.
   if (inngestEnabled()) {
+    // Durable path: Inngest runs the pipeline function.
     await inngest.send({ name: "content/brief.approved", data: { briefId } });
   } else {
-    await runPipelineForBrief(briefId);
+    // In-process path: kick the worker without blocking the caller. The draft is
+    // already queued (RESEARCHING + brief APPROVED), so even if this process is
+    // torn down the periodic worker tick (or another instance) picks it up.
+    void processQueuedDrafts().catch((e) =>
+      console.error("[worker] kick after approve failed:", e instanceof Error ? e.message : e),
+    );
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Background worker — runs queued pipelines out of band (no HTTP timeout)
+// ─────────────────────────────────────────────────────────────
+
+const WORKER_STALE_MS = 15 * 60 * 1000; // reclaim a draft whose worker died mid-run
+const WORKER_MAX_ATTEMPTS = 3; // give up (→ FAILED) after this many crashes
+const IN_PROGRESS: DraftStatus[] = ["RESEARCHING", "DRAFTED", "GRADING", "REVISING"];
+
+// One worker loop per process at a time (the DB claim-lock guards correctness;
+// this just avoids piling up overlapping loops in a single instance).
+let workerRunning = false;
+
+type DraftStatus = "RESEARCHING" | "DRAFTED" | "GRADING" | "REVISING" | "PASSED" | "PUBLISHED" | "FAILED";
+
+/**
+ * Atomically claim the next draft that needs pipeline work: an approved brief
+ * whose draft is still in-progress, not currently locked (or whose lock is
+ * stale), and under the attempt cap. Returns the claimed draft or null.
+ */
+async function claimNextDraft(): Promise<{ id: string; briefId: string } | null> {
+  const now = new Date();
+  const staleBefore = new Date(now.getTime() - WORKER_STALE_MS);
+
+  const candidate = await prisma.draft.findFirst({
+    where: {
+      status: { in: IN_PROGRESS },
+      attempts: { lt: WORKER_MAX_ATTEMPTS },
+      brief: { status: "APPROVED" },
+      OR: [{ processingStartedAt: null }, { processingStartedAt: { lt: staleBefore } }],
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, briefId: true },
+  });
+  if (!candidate) return null;
+
+  // Optimistic lock: only win the claim if it's still unclaimed/stale.
+  const claim = await prisma.draft.updateMany({
+    where: {
+      id: candidate.id,
+      OR: [{ processingStartedAt: null }, { processingStartedAt: { lt: staleBefore } }],
+    },
+    data: { processingStartedAt: now, attempts: { increment: 1 } },
+  });
+  return claim.count === 1 ? candidate : null;
+}
+
+/**
+ * Drain the queue: claim and run pipelines one at a time (sequential keeps API
+ * cost + load controlled) up to `max` per invocation. Safe to call from the
+ * post-approve kick and the periodic scheduler tick; overlapping calls no-op via
+ * the workerRunning guard. Stranded drafts (crash/restart/timeout) are healed
+ * here because their stale lock makes them claimable again.
+ */
+export async function processQueuedDrafts(max = 10): Promise<number> {
+  requireDb();
+  if (workerRunning) return 0;
+  workerRunning = true;
+  let processed = 0;
+  try {
+    for (let i = 0; i < max; i++) {
+      const claimed = await claimNextDraft();
+      if (!claimed) break;
+      try {
+        await runPipelineForBrief(claimed.briefId);
+      } catch (e) {
+        console.error(
+          `[worker] pipeline failed for draft ${claimed.id}:`,
+          e instanceof Error ? e.message : e,
+        );
+        // If it has exhausted its attempts, stop retrying — flag for a human.
+        const d = await prisma.draft.findUnique({
+          where: { id: claimed.id },
+          select: { attempts: true, status: true },
+        });
+        if (d && d.attempts >= WORKER_MAX_ATTEMPTS && IN_PROGRESS.includes(d.status as DraftStatus)) {
+          await prisma.draft
+            .update({ where: { id: claimed.id }, data: { status: "FAILED" } })
+            .catch(() => {});
+        }
+      } finally {
+        // Release the lock so terminal drafts don't hold it (and a still-in-progress
+        // one becomes reclaimable if this run didn't finish it).
+        await prisma.draft
+          .update({ where: { id: claimed.id }, data: { processingStartedAt: null } })
+          .catch(() => {});
+      }
+      processed++;
+    }
+  } finally {
+    workerRunning = false;
+  }
+  return processed;
 }
 
 /** Skip/reject a brief — takes it out of the queue. */
@@ -392,18 +499,17 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
     data: { bodyMd: body, status: "GRADING" },
   });
 
-  // Grade → revise → re-grade, persisting each pass immediately so partial
-  // progress survives (and the dashboard updates live) even if the run is long.
+  // Grade → revise → re-grade. We KEEP THE BEST version seen, not the latest —
+  // a revision can regress (score down), and the stored draft must never get
+  // worse than a version we already produced. The DB always holds the best body.
   const briefContext = JSON.stringify(spec);
   let currentDraft = body;
   let loop = 0;
-  let passed = false;
-  let overall = 0;
+  let bestBody = body;
+  let bestOverall = -1;
 
   for (loop = 1; loop <= MAX_REVISION_LOOPS; loop++) {
     const grade = await gradeDraft(currentDraft, briefContext, threshold);
-    passed = grade.passed;
-    overall = grade.overall;
 
     await prisma.grade.create({
       data: {
@@ -415,30 +521,40 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
         version: loop,
       },
     });
+
+    // Track the best-scoring version.
+    if (grade.overall > bestOverall) {
+      bestOverall = grade.overall;
+      bestBody = currentDraft;
+    }
+
+    const passed = bestOverall >= threshold; // pass on the BEST achieved, not the last
+    const isLast = loop === MAX_REVISION_LOOPS;
+
+    // Persist the BEST body so the stored draft never regresses below a prior version.
     await prisma.draft.update({
       where: { id: draft.id },
       data: {
-        bodyMd: currentDraft,
+        bodyMd: bestBody,
         version: loop,
-        status: passed ? "PASSED" : loop === MAX_REVISION_LOOPS ? "FAILED" : "REVISING",
+        status: passed ? "PASSED" : isLast ? "FAILED" : "REVISING",
       },
     });
 
-    if (passed || loop === MAX_REVISION_LOOPS) break;
+    if (passed || isLast) break;
 
-    // Revise the weakest dimensions, then loop back to re-grade.
+    // Revise the weakest dimensions, then loop back to re-grade. Keep the stored
+    // body as the best-so-far; the unproven revision only replaces it if it grades higher.
     const weakest = weakestDimensions(grade.dimensions).slice(0, 3);
     currentDraft = await reviseDraft(currentDraft, grade.feedback, weakest);
-    await prisma.draft.update({
-      where: { id: draft.id },
-      data: { bodyMd: currentDraft, status: "GRADING" },
-    });
   }
+
+  const passed = bestOverall >= threshold;
 
   // A passed draft is finalized and parked in the "ready to schedule" queue.
   // Internal linking, imaging, and the CMS publish all happen at scheduled
   // go-live time (publishNow) — the content calendar controls when it's live.
-  return { draftId: draft.id, passed, overall, loops: loop, pageUrl: undefined };
+  return { draftId: draft.id, passed, overall: bestOverall, loops: loop, pageUrl: undefined };
 }
 
 // ─────────────────────────────────────────────────────────────
