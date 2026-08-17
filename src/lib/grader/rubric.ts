@@ -47,9 +47,10 @@ export const RUBRIC: RubricDimension[] = [
   },
   {
     key: "linking",
-    label: "Internal linking",
+    label: "Linking & link-readiness",
     max: 10,
-    criteria: "3–5 relevant internal links, forward + backward, no spam.",
+    criteria:
+      "2–4 authoritative OUTBOUND links, plus natural anchor opportunities to related topics. NOTE: surgical INTERNAL links are inserted automatically at publish time, so judge link-READINESS (are there good anchor phrases and outbound citations?) — do NOT penalize the draft for internal links not yet being present.",
   },
   {
     key: "readability",

@@ -44,6 +44,8 @@ export async function GET(req: Request): Promise<Response> {
       wordCount: latest.bodyMd.trim().split(/\s+/).filter(Boolean).length,
       scheduledFor: latest.scheduledFor,
       grades: latest.grades.map((g) => ({ version: g.version, overall: g.overall, passed: g.passed })),
+      latestDimensions: latest.grades[latest.grades.length - 1]?.dimensions ?? null,
+      latestFeedback: latest.grades[latest.grades.length - 1]?.feedback ?? null,
       updatedAt: latest.updatedAt,
     },
   });
