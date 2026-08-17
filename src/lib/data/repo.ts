@@ -429,7 +429,7 @@ type PolishRow = {
   status: string;
   updatedAt: Date;
   brief: { targetKeyword: string };
-  grades: { overall: number; feedback: string | null; dimensions: unknown }[];
+  grades: { overall: number; feedback: string | null; dimensions: unknown; version: number }[];
 };
 
 /** Map a draft (+ its latest grade + brief) into the polish view-model. */
@@ -453,9 +453,24 @@ function toPolishVM(d: PolishRow, threshold: number): PolishDraftVM {
     bodyMd: d.bodyMd,
     feedback: g?.feedback ?? "",
     dimensions,
+    loop: g?.version ?? 1,
     experienceNotes: extractExperienceNotes(d.bodyMd),
     updatedAt: d.updatedAt.toISOString(),
   };
+}
+
+/** Ready-to-review: PASSED drafts not yet on the calendar. They sit here with
+ *  full scorecard + post for a final look before you move them to the calendar. */
+export async function getReadyForReview(bizId = DEFAULT_BIZ): Promise<PolishDraftVM[]> {
+  if (!hasDatabase) return [];
+  const business = await prisma.business.findUnique({ where: { id: bizId } });
+  const threshold = business?.qualityThreshold ?? 85;
+  const drafts = await prisma.draft.findMany({
+    where: { businessId: bizId, status: "PASSED", scheduledFor: null },
+    include: { brief: true, grades: { orderBy: { version: "desc" }, take: 1 } },
+    orderBy: { updatedAt: "desc" },
+  });
+  return drafts.map((d) => toPolishVM(d, threshold));
 }
 
 /** Near-miss drafts (FAILED) that need a human E-E-A-T pass before they can pass. */

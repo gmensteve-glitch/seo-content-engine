@@ -117,6 +117,8 @@ export interface PolishDraftVM {
   bodyMd: string;
   feedback: string;
   dimensions: DimensionScoreVM[];
+  /** Which grade version (revision loop) produced this. */
+  loop: number;
   /** The writer's "Add your experience" callouts, extracted for a checklist. */
   experienceNotes: string[];
   updatedAt: string;
