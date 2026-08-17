@@ -16,28 +16,56 @@ export async function POST(req: Request): Promise<Response> {
   if (disabled()) return NextResponse.json({ error: "dev routes disabled" }, { status: 403 });
   if (!hasDatabase) return NextResponse.json({ error: "no DATABASE_URL" }, { status: 400 });
 
-  const { ideaId } = (await req.json().catch(() => ({}))) as { ideaId?: string };
-  if (!ideaId) return NextResponse.json({ error: "ideaId required" }, { status: 400 });
+  const body = (await req.json().catch(() => ({}))) as { ideaId?: string; businessId?: string };
+  let ideaId = body.ideaId;
+
+  // Convenience for smoke-testing: with no ideaId, auto-pick the top-scored
+  // PROPOSED idea (optionally scoped to a business).
+  if (!ideaId) {
+    const top = await prisma.idea.findFirst({
+      where: { status: "PROPOSED", ...(body.businessId ? { businessId: body.businessId } : {}) },
+      orderBy: { score: "desc" },
+    });
+    if (!top) return NextResponse.json({ error: "no PROPOSED idea found" }, { status: 400 });
+    ideaId = top.id;
+  }
 
   const briefId = await buildBriefFromIdea(ideaId);
   await approveBrief(briefId);
 
   const brief = await prisma.brief.findUnique({
     where: { id: briefId },
-    include: { draft: { include: { grades: { orderBy: { version: "asc" } }, page: true } } },
+    include: {
+      idea: true,
+      draft: { include: { grades: { orderBy: { version: "asc" } }, page: true } },
+    },
   });
+
+  const d = brief?.draft;
+  const latest = d?.grades[d.grades.length - 1];
+  const wordCount = d ? d.bodyMd.trim().split(/\s+/).filter(Boolean).length : 0;
 
   return NextResponse.json({
     ideaId,
+    ideaTitle: brief?.idea.title,
     briefId,
     briefStatus: brief?.status,
-    draft: brief?.draft && {
-      id: brief.draft.id,
-      title: brief.draft.title,
-      status: brief.draft.status,
-      version: brief.draft.version,
-      grades: brief.draft.grades.map((g) => ({ version: g.version, overall: g.overall, passed: g.passed })),
-      page: brief.draft.page && { url: brief.draft.page.url, cmsId: brief.draft.page.cmsId },
+    brief: brief && {
+      targetKeyword: brief.targetKeyword,
+      angle: brief.angle,
+      wordTarget: brief.wordTarget,
+    },
+    draft: d && {
+      id: d.id,
+      title: d.title,
+      status: d.status,
+      version: d.version,
+      wordCount,
+      grades: d.grades.map((g) => ({ version: g.version, overall: g.overall, passed: g.passed })),
+      latestDimensions: latest?.dimensions ?? null,
+      latestFeedback: latest?.feedback ?? null,
+      bodyPreview: d.bodyMd.slice(0, 2000),
+      page: d.page && { url: d.page.url, cmsId: d.page.cmsId },
     },
   });
 }
