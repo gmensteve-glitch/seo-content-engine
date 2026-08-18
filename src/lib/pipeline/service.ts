@@ -26,6 +26,7 @@ import { dataforseoEnabled, firecrawlEnabled } from "@/lib/env";
 import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
+import { markdownToHtml } from "@/lib/cms/markdown";
 import { decryptJson } from "@/lib/crypto/secrets";
 
 function requireDb() {
@@ -882,7 +883,7 @@ export async function publishNow(
       }).catch(() => null);
       const res = await adapter.publish({
         title: draft.title,
-        html: draft.bodyMd,
+        html: markdownToHtml(draft.bodyMd),
         slug,
         metaDescription: draft.title,
         heroImageUrl: hero?.url,
