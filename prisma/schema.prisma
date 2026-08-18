@@ -235,6 +235,9 @@ model Draft {
   // Set when the operator moves a PASSED piece out of the "Ready" review step
   // into the calendar's ready-to-schedule queue. Null = still awaiting review.
   reviewedAt   DateTime?
+  // Set when a manual "Boost with data" is requested; the background worker
+  // runs it out of band and clears this. Null = no boost pending.
+  boostRequestedAt DateTime?
   grades       Grade[]
   page         Page?
   createdAt    DateTime    @default(now())

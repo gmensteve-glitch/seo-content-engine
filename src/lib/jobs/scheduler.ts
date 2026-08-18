@@ -46,6 +46,16 @@ async function workerTick(): Promise<void> {
   }
 }
 
+async function boostTick(): Promise<void> {
+  try {
+    const { processBoostRequests } = await import("@/lib/pipeline/service");
+    const n = await processBoostRequests();
+    if (n) console.log(`[scheduler] processed ${n} boost request(s)`);
+  } catch (e) {
+    console.error("[scheduler] boost tick failed:", e instanceof Error ? e.message : e);
+  }
+}
+
 async function replenishTick(): Promise<void> {
   try {
     const { replenishAllIdeas } = await import("@/lib/pipeline/service");
@@ -77,11 +87,13 @@ export function startScheduler(): void {
   // also heals any drafts stranded by a previous crash/restart/timeout.
   setTimeout(() => {
     void workerTick();
+    void boostTick();
     void publishTick();
     void replenishTick();
   }, BOOT_DELAY_MS);
 
   setInterval(() => void workerTick(), WORKER_INTERVAL_MS);
+  setInterval(() => void boostTick(), WORKER_INTERVAL_MS);
   setInterval(() => void publishTick(), PUBLISH_INTERVAL_MS);
   setInterval(() => void replenishTick(), REPLENISH_INTERVAL_MS);
 }

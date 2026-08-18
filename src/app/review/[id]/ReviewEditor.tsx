@@ -73,17 +73,42 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       setNote("Passage updated. Re-grade to see the new score.");
     });
 
-  const boost = () =>
-    run("boost", "/api/review/boost", { draftId: vm.id }, (d) => {
-      if (d.draft) setVm(d.draft as PolishDraftVM);
-      const r = (d.result ?? {}) as { usedProducts?: number; usedSources?: number };
-      const n = (r.usedProducts ?? 0) + (r.usedSources ?? 0);
-      setNote(
-        n === 0
-          ? "No product or web data available to boost with yet (connect Shopify / check data connectors)."
-          : `Boosted with ${r.usedProducts ?? 0} product fact(s) + ${r.usedSources ?? 0} source(s), then re-graded.`,
-      );
-    });
+  // Boost runs in the BACKGROUND (research + enrich + re-grade is too slow for one
+  // request). Kick it, then poll until it finishes so the button never hangs.
+  async function boost() {
+    setBusy("boost");
+    setNote("Boosting with your real product + web data… this runs in the background (~1–2 min).");
+    try {
+      const start = await post("/api/review/boost", { draftId: vm.id });
+      if (!start.ok) {
+        setNote(start.data.error ? `Error: ${start.data.error}` : "Couldn't start the boost.");
+        setBusy(null);
+        return;
+      }
+      const before = vm.overall;
+      for (let i = 0; i < 48; i++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        const res = await fetch(`/api/review/draft?draftId=${vm.id}`);
+        const data = await res.json().catch(() => ({}));
+        if (data.draft) setVm(data.draft as PolishDraftVM);
+        if (!data.boosting) {
+          const now = (data.draft?.overall ?? before) as number;
+          setNote(
+            now > before
+              ? `Boost done — score moved ${before} → ${now}.`
+              : `Boost done — re-graded to ${now}. (If nothing moved, there wasn't enough new data to add.)`,
+          );
+          setBusy(null);
+          return;
+        }
+      }
+      setNote("Still boosting — give it another moment, then refresh.");
+      setBusy(null);
+    } catch {
+      setNote("Network error — try again.");
+      setBusy(null);
+    }
+  }
 
   const regrade = () =>
     run("regrade", "/api/review/regrade", { draftId: vm.id }, (d) => {

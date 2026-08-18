@@ -676,6 +676,53 @@ export async function boostDraft(draftId: string): Promise<{
   return { overall, passed, usedProducts: res.products.length, usedSources: res.sources.length };
 }
 
+/** Mark a draft for a background boost (the on-demand "Boost with data" button).
+ *  Returns fast; the boost worker runs the heavy work out of band. */
+export async function requestBoost(draftId: string): Promise<void> {
+  requireDb();
+  await prisma.draft.update({ where: { id: draftId }, data: { boostRequestedAt: new Date() } });
+}
+
+// One boost loop per process at a time (single instance → this serializes the
+// route kick and the periodic tick; boostDraft itself is the unit of work).
+let boostRunning = false;
+
+/**
+ * Drain pending boost requests: run boostDraft for each draft flagged with
+ * boostRequestedAt, then clear the flag (whether it lifted the score or not, so
+ * the UI stops "boosting"). Called from the /api/review/boost kick and a periodic
+ * scheduler tick (which also picks up any request stranded by a restart).
+ */
+export async function processBoostRequests(max = 5): Promise<number> {
+  requireDb();
+  if (boostRunning) return 0;
+  boostRunning = true;
+  let n = 0;
+  try {
+    for (let i = 0; i < max; i++) {
+      const d = await prisma.draft.findFirst({
+        where: { boostRequestedAt: { not: null } },
+        orderBy: { boostRequestedAt: "asc" },
+        select: { id: true },
+      });
+      if (!d) break;
+      try {
+        await boostDraft(d.id);
+      } catch (e) {
+        console.error(`[boost] failed for ${d.id}:`, e instanceof Error ? e.message : e);
+      } finally {
+        await prisma.draft
+          .update({ where: { id: d.id }, data: { boostRequestedAt: null } })
+          .catch(() => {});
+      }
+      n++;
+    }
+  } finally {
+    boostRunning = false;
+  }
+  return n;
+}
+
 /**
  * Highlight → instruct: revise just the selected passage per a short instruction
  * and splice it back into the draft. Returns the updated body. No prose typing —
