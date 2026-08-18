@@ -16,7 +16,8 @@ STRUCTURE:
 - Clear H2/H3 sections; a step-by-step "how-to" where the topic calls for it.
 - Self-contained passages of ~130–170 words under key headings so AI answer engines can quote them verbatim.
 - An FAQ section near the end (each answer self-contained, ~40–70 words).
-- 2–4 links to authoritative EXTERNAL sources (prefer .gov / recognized institutions), placed inline where a claim needs backing.
+- 2–4 links to authoritative EXTERNAL sources (prefer .gov / recognized institutions), placed inline where a claim needs backing. Only link to a real URL you are confident exists.
+- Do NOT invent internal links to the site's own pages — never write a relative link like [text](/caskets/pricing-guide) or guess the site's URL structure. Internal links to real published pages are added automatically by the system. The ONLY internal links you may write are in-page jump links in the table of contents that point to your own H2/H3 headings (e.g. [Oversized Caskets](#oversized-caskets)).
 - Soft calls-to-action at the top and bottom (never pushy).
 - End with a fenced \`\`\`json block of valid JSON-LD for the required schema types, with complete fields (datePublished/author where applicable).
 

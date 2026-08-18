@@ -27,6 +27,7 @@ import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
 import { markdownToHtml } from "@/lib/cms/markdown";
+import { sanitizeLinks } from "@/lib/cms/links";
 import { decryptJson } from "@/lib/crypto/secrets";
 
 function requireDb() {
@@ -916,9 +917,30 @@ export async function publishNow(
         keyword: draft.brief.targetKeyword,
         productImage: adapter.sourceProductImage?.bind(adapter),
       }).catch(() => null);
+
+      // Guarantee no dead link ships: validate every link against the live site
+      // (and in-page anchors against the rendered headings). Anything that
+      // doesn't resolve is unlinked — the words stay, the broken href goes.
+      let html = markdownToHtml(draft.bodyMd);
+      const siteBase = siteBaseFromConfig(platform, config as Record<string, unknown>);
+      if (siteBase) {
+        try {
+          const { html: safe, report } = await sanitizeLinks(html, { siteBase });
+          html = safe;
+          if (report.unlinked.length) {
+            console.warn(
+              `[publish] ${draft.id}: unlinked ${report.unlinked.length} dead link(s):`,
+              report.unlinked,
+            );
+          }
+        } catch (e) {
+          console.error("[publish] link sanitize failed, publishing unsanitized:", e);
+        }
+      }
+
       const res = await adapter.publish({
         title: draft.title,
-        html: markdownToHtml(draft.bodyMd),
+        html,
         slug,
         metaDescription: deriveMetaDescription(draft.bodyMd, draft.title),
         seoTitle: draft.title,
@@ -952,6 +974,17 @@ export async function publishNow(
   // Record the link graph + add a backward link from the top target to this page.
   await recordLinks(draft.id, planned);
   return page.url;
+}
+
+/** Public site base URL (for internal-link verification) from a connector config. */
+function siteBaseFromConfig(platform: CmsPlatform, config: Record<string, unknown>): string | null {
+  if (platform === "shopify" && typeof config.storeDomain === "string") {
+    return `https://${config.storeDomain.replace(/^https?:\/\//, "").replace(/\/+$/, "")}`;
+  }
+  if (platform === "wordpress" && typeof config.baseUrl === "string") {
+    return config.baseUrl.replace(/\/+$/, "");
+  }
+  return null;
 }
 
 function cmsConnectorType(platform: CmsPlatform): "SHOPIFY" | "WORDPRESS" | "WEBFLOW" {
