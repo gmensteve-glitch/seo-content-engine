@@ -9,9 +9,13 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request): Promise<Response> {
   if (!hasDatabase) return NextResponse.json({ error: "no DATABASE_URL" }, { status: 400 });
-  const { draftId } = (await req.json().catch(() => ({}))) as { draftId?: string };
+  const { draftId, publishState } = (await req.json().catch(() => ({}))) as {
+    draftId?: string;
+    publishState?: "published" | "draft";
+  };
   if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
 
-  const url = await publishNow(draftId, "published");
+  // Default live; "draft" lands as a HIDDEN CMS draft for review before go-live.
+  const url = await publishNow(draftId, publishState === "draft" ? "draft" : "published");
   return NextResponse.json({ ok: true, url });
 }

@@ -9,7 +9,6 @@ import {
   Wand2,
   RefreshCw,
   X,
-  CalendarPlus,
   Rocket,
   MessageSquare,
   MousePointerClick,
@@ -116,14 +115,12 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       setNote("Re-graded.");
     });
 
-  const moveToCalendar = () =>
-    run("schedule", "/api/review/queue", { draftId: vm.id }, () => {
-      setDone({ label: "Moved to the calendar's ready-to-schedule queue", href: "/calendar" });
-    });
-
-  const publishNow = () =>
-    run("publish", "/api/review/publish", { draftId: vm.id }, () => {
-      setDone({ label: "Published", href: "/performance" });
+  const publish = (publishState: "published" | "draft") =>
+    run("publish", "/api/review/publish", { draftId: vm.id, publishState }, (d) => {
+      setDone({
+        label: publishState === "draft" ? "Published as a hidden Shopify draft" : "Published live to Shopify",
+        href: (d.url as string) || "/performance",
+      });
     });
 
   return (
@@ -154,13 +151,24 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
         </span>
       </div>
 
-      {/* Success banner after schedule/publish */}
+      {/* Success banner after publish */}
       {done && (
         <div className="mb-4 flex items-center gap-2 rounded-lg border border-[var(--success)] bg-[var(--success-bg)] px-3 py-2.5 text-[13px] text-[var(--success)]">
           <CheckCircle2 size={16} /> {done.label}.
-          <Link href={done.href} className="ml-1 font-medium underline">
-            {done.href === "/calendar" ? "Open calendar" : "See it"}
-          </Link>
+          {done.href.startsWith("http") ? (
+            <a
+              href={done.href}
+              target="_blank"
+              rel="noreferrer"
+              className="ml-1 font-medium underline"
+            >
+              View on Shopify ↗
+            </a>
+          ) : (
+            <Link href={done.href} className="ml-1 font-medium underline">
+              See it
+            </Link>
+          )}
         </div>
       )}
 
@@ -200,23 +208,23 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
             <CheckCircle2 size={13} /> Ready to publish
           </div>
           <p className="mb-2.5 text-[12px] text-[var(--muted)]">
-            Send it to the calendar&apos;s ready-to-schedule queue — you pick the exact date &amp;
-            time there. Or publish it right now.
+            Push it straight to your Shopify blog. Go live now, or drop it in as a hidden
+            draft to eyeball on Shopify first — either way it publishes with its hero image.
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={moveToCalendar}
+              onClick={() => publish("published")}
               disabled={busy !== null}
-              className="flex items-center gap-1.5 rounded-lg bg-[var(--success)] px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-lg bg-[var(--success)] px-4 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
             >
-              <CalendarPlus size={15} /> {busy === "schedule" ? "Moving…" : "Move to calendar"}
+              <Rocket size={15} /> {busy === "publish" ? "Publishing…" : "Publish to Shopify"}
             </button>
             <button
-              onClick={publishNow}
+              onClick={() => publish("draft")}
               disabled={busy !== null}
               className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-2 text-[13px] text-[var(--muted)] hover:bg-[var(--surface-1)] disabled:opacity-50"
             >
-              <Rocket size={14} /> {busy === "publish" ? "Publishing…" : "Publish now"}
+              <Rocket size={14} /> Send as hidden draft
             </button>
           </div>
         </div>
