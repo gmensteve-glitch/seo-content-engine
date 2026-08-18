@@ -54,9 +54,10 @@ export const RUBRIC: RubricDimension[] = [
   },
   {
     key: "readability",
-    label: "Readability & structure",
+    label: "Readability & concision",
     max: 10,
-    criteria: "Scannable headings, short paragraphs, clear hierarchy, correct reading level.",
+    criteria:
+      "Scannable headings, short paragraphs, clear hierarchy — AND tight: hits its target length, answer-first, every section earns its place. Penalize padding, redundancy, hedging, and a buried answer. A bloated post that makes the reader wade scores LOW here even if well-structured.",
   },
   {
     key: "conversion",

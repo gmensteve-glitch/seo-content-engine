@@ -53,7 +53,8 @@ ${feedback}
 
 Rules:
 - Make surgical edits that directly address the feedback. Keep everything that already works.
-- Do NOT increase the word count to fix things — improve quality, don't add bulk. If anything, tighten.
+- NEVER add length to fix a problem — improve quality by cutting, not padding.
+- If the feedback flags length, bloat, or padding: CUT AGGRESSIVELY toward the target — delete whole redundant passages, merge overlapping sections, remove filler and hedging. A shorter, tighter version that keeps the substance is the goal.
 - Preserve the structure, the FAQ, and the JSON-LD block (keep it valid).
 - Keep any "> **Add your experience:**" callouts.
 - Do not introduce AI-slop tells (em-dash spam, "in conclusion", "it's important to note", reflexive hedging).

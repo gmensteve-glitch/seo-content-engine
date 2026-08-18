@@ -62,7 +62,28 @@ export async function gradeDraft(
     (d) => `- ${d.key} (max ${d.max}): ${d.label} — ${d.criteria}`
   ).join("\n");
 
-  const prompt = `RUBRIC:\n${rubricText}\n\nBRIEF (the benchmark this draft should satisfy):\n${briefContext}\n\nDRAFT:\n${draftMarkdown}\n\nScore each dimension and give one paragraph of feedback on the highest-leverage fixes.`;
+  // LLMs can't reliably count, so compute length here and hand the grader a
+  // concrete overshoot signal to judge concision against.
+  const wordCount = draftMarkdown.trim().split(/\s+/).filter(Boolean).length;
+  let target = 0;
+  try {
+    target = Number((JSON.parse(briefContext) as { wordTarget?: number }).wordTarget) || 0;
+  } catch {
+    /* briefContext not JSON — skip length check */
+  }
+  let lengthNote = "";
+  if (target > 0) {
+    const pct = Math.round((wordCount / target) * 100);
+    lengthNote =
+      `\n\nLENGTH: ${wordCount} words vs the brief's ~${target}-word target (${pct}% of target).` +
+      (wordCount > target * 1.3
+        ? ` This is significantly OVER — under "readability" penalize the padding/redundancy causing it, and in your feedback name the specific sections to cut to reach the target. A tight page beats a bloated one for readers and rankings.`
+        : wordCount < target * 0.6
+          ? ` This is well UNDER target — check it isn't too thin under "depth".`
+          : ` (within a reasonable band).`);
+  }
+
+  const prompt = `RUBRIC:\n${rubricText}\n\nBRIEF (the benchmark this draft should satisfy):\n${briefContext}\n\nDRAFT:\n${draftMarkdown}${lengthNote}\n\nScore each dimension and give one paragraph of feedback on the highest-leverage fixes.`;
 
   // A malformed grade (every dimension 0) is almost always a model hiccup, not a
   // genuine zero — retry once before trusting it, so a blip doesn't burn a

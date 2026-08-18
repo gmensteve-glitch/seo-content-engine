@@ -80,5 +80,8 @@ export async function buildBrief(input: ResearchInput): Promise<BriefSpec> {
     prompt: `TARGET KEYWORD: ${input.targetKeyword}\n\nBUSINESS CONTEXT:\n${input.businessContext}\n\nTOP-RANKING COMPETITOR PAGES:\n${competitorSummary || "(none scraped — infer from the keyword and business context)"}\n\nProduce a content brief: the winning title, the angle/wedge, the specific gap competitors leave open, a target word count, a section outline, the questions the page must answer, and which schema.org types to include.`,
   });
 
-  return { ...raw, targetKeyword: input.targetKeyword };
+  // Clamp the target to a reader-friendly band — most blog posts win at
+  // 1,000–2,200 words; anything longer tends to bury the answer.
+  const wordTarget = Math.max(900, Math.min(2200, Math.round(raw.wordTarget || 1600)));
+  return { ...raw, wordTarget, targetKeyword: input.targetKeyword };
 }
