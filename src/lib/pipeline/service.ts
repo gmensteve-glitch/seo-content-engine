@@ -47,6 +47,41 @@ function asStringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.map(String) : [];
 }
 
+/**
+ * Derive an SEO meta description from the draft body — no fabrication, it's
+ * lifted verbatim from the article's own opening. The writer is instructed to
+ * lead with an answer-first bold summary sentence; we prefer that, then fall
+ * back to the first substantial paragraph. Clamped to ~155 chars.
+ */
+function deriveMetaDescription(md: string, fallback: string): string {
+  const clamp = (s: string) =>
+    s.length > 155 ? s.slice(0, 152).replace(/\s+\S*$/, "").trimEnd() + "…" : s;
+
+  // Strip a leading byline/credit line so it never becomes the description.
+  const cleaned = md.replace(/^\s*(#.*\n)?\s*\*\*By [^\n]*\n/i, "");
+
+  // Prefer the longest bold span (the answer-first summary is bold by design).
+  const bolds = [...cleaned.matchAll(/\*\*([^*]+)\*\*/g)]
+    .map((m) => m[1].trim())
+    .filter((s) => /[.!?]$/.test(s) && s.length > 80);
+  if (bolds.length) {
+    const best = bolds.sort((a, b) => b.length - a.length)[0];
+    return clamp(best.replace(/\s+/g, " "));
+  }
+
+  // Fallback: first real paragraph, markdown stripped.
+  const text = cleaned
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/^#{1,6}\s+.*$/gm, " ")
+    .replace(/^>\s?.*$/gm, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`>#]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const sentence = text.split(/(?<=[.!?])\s/).find((s) => s.trim().length > 60);
+  return clamp((sentence ?? text).trim()) || fallback;
+}
+
 /** Rebuild the agent's BriefSpec from a stored Brief row (+ its idea title). */
 function toBriefSpec(brief: {
   targetKeyword: string;
@@ -885,7 +920,8 @@ export async function publishNow(
         title: draft.title,
         html: markdownToHtml(draft.bodyMd),
         slug,
-        metaDescription: draft.title,
+        metaDescription: deriveMetaDescription(draft.bodyMd, draft.title),
+        seoTitle: draft.title,
         heroImageUrl: hero?.url,
         heroImageAlt: hero?.alt,
         publishState,

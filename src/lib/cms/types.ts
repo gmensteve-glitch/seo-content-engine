@@ -10,8 +10,10 @@ export interface PublishInput {
   html: string;
   /** URL slug, e.g. "how-much-does-a-casket-cost". */
   slug: string;
-  /** Plain-text meta description for the <head>. */
+  /** Plain-text meta description for the <head> (SEO description_tag). */
   metaDescription: string;
+  /** Optional SEO page title (title_tag). Falls back to `title` if unset. */
+  seoTitle?: string;
   /** Optional tags/collection hints the platform may use. */
   tags?: string[];
   /** Optional hero image URL. */

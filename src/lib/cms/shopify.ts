@@ -48,6 +48,21 @@ export class ShopifyAdapter implements CmsAdapter {
     return `https://${this.cfg.storeDomain.replace(/\.myshopify\.com$/, "")}.myshopify.com/blogs/${blogHandle}/${slug}`;
   }
 
+  // Shopify's SEO "Page title" and "Meta description" fields are metafields in
+  // the `global` namespace — NOT the article's title/summary. Set them so the
+  // search-engine listing is populated on publish.
+  private seoMetafields(input: Partial<PublishInput>): Array<Record<string, unknown>> {
+    const fields: Array<Record<string, unknown>> = [];
+    const titleTag = input.seoTitle ?? input.title;
+    if (titleTag) {
+      fields.push({ namespace: "global", key: "title_tag", type: "single_line_text_field", value: titleTag });
+    }
+    if (input.metaDescription) {
+      fields.push({ namespace: "global", key: "description_tag", type: "single_line_text_field", value: input.metaDescription });
+    }
+    return fields;
+  }
+
   async publish(input: PublishInput): Promise<PublishResult> {
     const blog = await this.resolveBlog();
     const data = await this.req<{ article: { id: number; handle: string } }>(
@@ -62,6 +77,7 @@ export class ShopifyAdapter implements CmsAdapter {
             published: input.publishState === "published",
             summary_html: input.metaDescription,
             tags: (input.tags ?? []).join(", "),
+            metafields: this.seoMetafields(input),
             ...(input.heroImageUrl
               ? { image: { src: input.heroImageUrl, alt: input.heroImageAlt } }
               : {}),
@@ -81,6 +97,10 @@ export class ShopifyAdapter implements CmsAdapter {
     if (input.metaDescription !== undefined) article.summary_html = input.metaDescription;
     if (input.tags !== undefined) article.tags = input.tags.join(", ");
     if (input.publishState !== undefined) article.published = input.publishState === "published";
+    if (input.title !== undefined || input.seoTitle !== undefined || input.metaDescription !== undefined) {
+      const seo = this.seoMetafields(input);
+      if (seo.length) article.metafields = seo;
+    }
 
     const data = await this.req<{ article: { id: number; handle: string } }>(
       `/blogs/${blog.id}/articles/${cmsId}.json`,
