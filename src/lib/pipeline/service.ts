@@ -29,6 +29,7 @@ import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
 import { markdownToHtml } from "@/lib/cms/markdown";
 import { sanitizeLinks } from "@/lib/cms/links";
+import { preflightPublish } from "@/lib/cms/preflight";
 import { decryptJson } from "@/lib/crypto/secrets";
 
 function requireDb() {
@@ -969,6 +970,27 @@ export async function markReadyForSchedule(draftId: string): Promise<void> {
  * tune the writer/grader. "LIKE" keeps the piece in Ready; "REJECT" also pulls
  * it off the Ready list (stamps rejectedAt) so you don't see it again.
  */
+/**
+ * Render the EXACT HTML a draft would publish as (markdown → HTML, scripts
+ * stripped) plus the pre-publish check result — for the dashboard preview.
+ */
+export async function renderPublishPreview(
+  draftId: string,
+): Promise<{ html: string; ok: boolean; issues: string[] }> {
+  requireDb();
+  const draft = await prisma.draft.findUnique({
+    where: { id: draftId },
+    select: { bodyMd: true },
+  });
+  if (!draft) throw new Error(`Draft ${draftId} not found`);
+  const html = markdownToHtml(draft.bodyMd)
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/(\s*\n){3,}/g, "\n\n")
+    .trim();
+  const pf = preflightPublish(html);
+  return { html, ok: pf.ok, issues: pf.issues };
+}
+
 export async function recordDraftFeedback(
   draftId: string,
   verdict: "LIKE" | "REJECT",
@@ -1086,6 +1108,16 @@ export async function publishNow(
         } catch (e) {
           console.error("[publish] link sanitize failed, publishing unsanitized:", e);
         }
+      }
+      // Shopify shows inline <script> as visible text — strip schema/scripts from
+      // the body (SEO comes from metafields + the theme's own schema).
+      html = html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/(\s*\n){3,}/g, "\n\n").trim();
+
+      // BUFFER: final gate. If the rendered HTML still has garbage, refuse to
+      // publish rather than ship it.
+      const pf = preflightPublish(html);
+      if (!pf.ok) {
+        throw new Error(`Pre-publish check failed — not published: ${pf.issues.join("; ")}`);
       }
 
       const res = await adapter.publish({

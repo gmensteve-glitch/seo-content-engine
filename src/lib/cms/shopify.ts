@@ -63,6 +63,18 @@ export class ShopifyAdapter implements CmsAdapter {
     return fields;
   }
 
+  // Shopify renders <script> tags in a blog article body as VISIBLE TEXT (it
+  // doesn't allow inline scripts), so a JSON-LD block placed in body_html shows
+  // up as a wall of raw text on the page. Strip it before publishing; the theme
+  // emits its own Article/BlogPosting schema, and SEO title/description are set
+  // via the global.* metafields instead.
+  private stripInlineScripts(html: string): string {
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/(\s*\n){3,}/g, "\n\n")
+      .trim();
+  }
+
   async publish(input: PublishInput): Promise<PublishResult> {
     const blog = await this.resolveBlog();
     const data = await this.req<{ article: { id: number; handle: string } }>(
@@ -72,7 +84,7 @@ export class ShopifyAdapter implements CmsAdapter {
         body: JSON.stringify({
           article: {
             title: input.title,
-            body_html: input.html,
+            body_html: this.stripInlineScripts(input.html),
             handle: input.slug,
             published: input.publishState === "published",
             summary_html: input.metaDescription,
@@ -92,7 +104,7 @@ export class ShopifyAdapter implements CmsAdapter {
     const blog = await this.resolveBlog();
     const article: Record<string, unknown> = { id: Number(cmsId) };
     if (input.title !== undefined) article.title = input.title;
-    if (input.html !== undefined) article.body_html = input.html;
+    if (input.html !== undefined) article.body_html = this.stripInlineScripts(input.html);
     if (input.slug !== undefined) article.handle = input.slug;
     if (input.metaDescription !== undefined) article.summary_html = input.metaDescription;
     if (input.tags !== undefined) article.tags = input.tags.join(", ");

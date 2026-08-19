@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   ThumbsUp,
   ThumbsDown,
+  Eye,
 } from "lucide-react";
 
 export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
@@ -29,6 +30,9 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   const [done, setDone] = useState<null | { label: string; href: string }>(null);
   const [fbMode, setFbMode] = useState<null | "LIKE" | "REJECT">(null);
   const [fbText, setFbText] = useState("");
+  const [preview, setPreview] = useState<null | { html: string; ok: boolean; issues: string[] }>(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const gap = vm.threshold - vm.overall;
@@ -62,6 +66,28 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       setNote("Network error — try again.");
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function togglePreview() {
+    if (showPreview) {
+      setShowPreview(false);
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      const res = await fetch(`/api/review/preview?draftId=${vm.id}`);
+      const data = await res.json().catch(() => ({}));
+      if (data.html !== undefined) {
+        setPreview(data as { html: string; ok: boolean; issues: string[] });
+        setShowPreview(true);
+      } else {
+        setNote(data.error ? `Preview error: ${data.error}` : "Couldn't build preview.");
+      }
+    } catch {
+      setNote("Network error building preview.");
+    } finally {
+      setPreviewLoading(false);
     }
   }
 
@@ -343,17 +369,61 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
         </div>
       )}
 
-      {/* Read the post — highlight any text to reword it */}
-      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--subtle)]">
-        <MousePointerClick size={12} /> The post — highlight any line to reword it
+      {/* Read the post — highlight any text to reword it, or preview the final render */}
+      <div className="mb-1.5 flex items-center gap-2">
+        <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--subtle)]">
+          <MousePointerClick size={12} /> {showPreview ? "Final post preview (as it will publish)" : "The post — highlight any line to reword it"}
+        </div>
+        <button
+          onClick={togglePreview}
+          disabled={previewLoading}
+          className="ml-auto flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-2.5 py-1 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+        >
+          <Eye size={13} />
+          {previewLoading ? "Rendering…" : showPreview ? "Show source" : "Preview final post"}
+        </button>
       </div>
-      <div
-        ref={bodyRef}
-        onMouseUp={captureSelection}
-        className="max-h-[55vh] overflow-y-auto whitespace-pre-wrap rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 text-[13.5px] leading-relaxed text-[var(--text)] selection:bg-[var(--accent)] selection:text-white"
-      >
-        {vm.bodyMd}
-      </div>
+
+      {/* Pre-publish check badge (the buffer) */}
+      {showPreview && preview && (
+        <div
+          className={`mb-2 flex items-start gap-2 rounded-lg border px-3 py-2 text-[12.5px] ${
+            preview.ok
+              ? "border-[var(--success)] bg-[var(--success-bg)] text-[var(--success)]"
+              : "border-[var(--danger)] bg-[var(--danger-bg)] text-[var(--danger)]"
+          }`}
+        >
+          {preview.ok ? (
+            <>
+              <CheckCircle2 size={15} className="mt-0.5 shrink-0" /> Passed all pre-publish checks — safe to publish.
+            </>
+          ) : (
+            <div>
+              <div className="mb-0.5 font-medium">Blocked — this can&apos;t publish until fixed:</div>
+              <ul className="list-disc pl-4">
+                {preview.issues.map((i, n) => (
+                  <li key={n}>{i}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {showPreview && preview ? (
+        <div
+          className="prose-preview max-h-[55vh] overflow-y-auto rounded-lg border border-[var(--border)] bg-white p-5 text-[14px] leading-relaxed text-[#1a1a1a]"
+          dangerouslySetInnerHTML={{ __html: preview.html }}
+        />
+      ) : (
+        <div
+          ref={bodyRef}
+          onMouseUp={captureSelection}
+          className="max-h-[55vh] overflow-y-auto whitespace-pre-wrap rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 text-[13.5px] leading-relaxed text-[var(--text)] selection:bg-[var(--accent)] selection:text-white"
+        >
+          {vm.bodyMd}
+        </div>
+      )}
 
       {/* Highlight → instruct chatbox */}
       {selection && (
