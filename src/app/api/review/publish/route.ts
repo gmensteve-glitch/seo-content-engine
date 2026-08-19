@@ -16,6 +16,9 @@ export async function POST(req: Request): Promise<Response> {
   if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
 
   // Default live; "draft" lands as a HIDDEN CMS draft for review before go-live.
-  const url = await publishNow(draftId, publishState === "draft" ? "draft" : "published");
-  return NextResponse.json({ ok: true, url });
+  const { url, adminUrl } = await publishNow(
+    draftId,
+    publishState === "draft" ? "draft" : "published",
+  );
+  return NextResponse.json({ ok: true, url, adminUrl });
 }

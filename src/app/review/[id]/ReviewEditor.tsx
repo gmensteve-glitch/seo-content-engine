@@ -162,6 +162,21 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       });
     });
 
+  // Send as hidden draft, then jump to the post in Shopify admin in a new tab.
+  // Open the tab synchronously on click so the browser's popup blocker allows it,
+  // then point it at the admin URL once the API returns.
+  const sendAsDraft = () => {
+    const win = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
+    run("publish", "/api/review/publish", { draftId: vm.id, publishState: "draft" }, (d) => {
+      const target = (d.adminUrl as string) || (d.url as string) || "";
+      if (win) {
+        if (target) win.location.href = target;
+        else win.close();
+      }
+      setDone({ label: "Sent as a hidden Shopify draft — opening it in Shopify", href: target || "/performance" });
+    });
+  };
+
   const submitFeedback = () => {
     if (!fbMode || !fbText.trim()) return;
     run("feedback", "/api/review/feedback", { draftId: vm.id, verdict: fbMode, reason: fbText }, () => {
@@ -272,11 +287,11 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
               <Rocket size={15} /> {busy === "publish" ? "Publishing…" : "Publish to Shopify"}
             </button>
             <button
-              onClick={() => publish("draft")}
+              onClick={sendAsDraft}
               disabled={busy !== null}
               className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-2 text-[13px] text-[var(--muted)] hover:bg-[var(--surface-1)] disabled:opacity-50"
             >
-              <Rocket size={14} /> Send as hidden draft
+              <Rocket size={14} /> {busy === "publish" ? "Sending…" : "Send as hidden draft ↗"}
             </button>
           </div>
 

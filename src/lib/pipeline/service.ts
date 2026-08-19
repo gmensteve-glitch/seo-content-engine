@@ -1107,7 +1107,7 @@ export async function publishScheduled(now: Date = new Date()): Promise<{ publis
 export async function publishNow(
   draftId: string,
   publishState: "published" | "draft" = "published",
-): Promise<string> {
+): Promise<{ url: string; adminUrl: string | null }> {
   requireDb();
 
   // Internal links go into the body BEFORE it hits the CMS.
@@ -1125,6 +1125,7 @@ export async function publishNow(
 
   let cmsId: string | null = null;
   let url = `/blogs/guides/${slug}`;
+  let adminUrl: string | null = null;
 
   const connector = await prisma.connector.findUnique({
     where: { businessId_type: { businessId: draft.businessId, type: cmsConnectorType(platform) } },
@@ -1187,6 +1188,12 @@ export async function publishNow(
       });
       cmsId = res.cmsId;
       url = res.url;
+      // Shopify admin editor URL — where a hidden draft can be reviewed/previewed.
+      const storeDomain = (config as Record<string, unknown>).storeDomain;
+      if (platform === "shopify" && typeof storeDomain === "string" && cmsId) {
+        const handle = storeDomain.replace(/^https?:\/\//, "").replace(/\.myshopify\.com$/, "");
+        adminUrl = `https://admin.shopify.com/store/${handle}/articles/${cmsId}`;
+      }
     } catch {
       cmsId = null;
       url = `/blogs/guides/${slug}`;
@@ -1210,7 +1217,7 @@ export async function publishNow(
 
   // Record the link graph + add a backward link from the top target to this page.
   await recordLinks(draft.id, planned);
-  return page.url;
+  return { url: page.url, adminUrl };
 }
 
 /** Public site base URL (for internal-link verification) from a connector config. */
