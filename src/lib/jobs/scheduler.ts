@@ -17,25 +17,12 @@ import { hasDatabase } from "@/lib/db";
 import { inngestEnabled } from "@/lib/env";
 
 const WORKER_INTERVAL_MS = 45 * 1000; // drain the pipeline queue every 45s
-const PUBLISH_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 const ADVANCE_INTERVAL_MS = 20 * 60 * 1000; // auto-advance the pipeline every 20 min
 const REPLENISH_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
 const BOOT_DELAY_MS = 30 * 1000; // let the server settle before the first tick
 
 // Survive module re-evaluation / HMR: stash the singleton on globalThis.
 const g = globalThis as unknown as { __seoScheduler?: { started: boolean } };
-
-async function publishTick(): Promise<void> {
-  try {
-    const { publishScheduled } = await import("@/lib/pipeline/service");
-    const { published } = await publishScheduled();
-    if (published.length) {
-      console.log(`[scheduler] auto-published ${published.length} scheduled piece(s)`);
-    }
-  } catch (e) {
-    console.error("[scheduler] publish tick failed:", e instanceof Error ? e.message : e);
-  }
-}
 
 async function workerTick(): Promise<void> {
   try {
@@ -102,14 +89,12 @@ export function startScheduler(): void {
   setTimeout(() => {
     void workerTick();
     void boostTick();
-    void publishTick();
     void replenishTick();
     void autoAdvanceTick();
   }, BOOT_DELAY_MS);
 
   setInterval(() => void workerTick(), WORKER_INTERVAL_MS);
   setInterval(() => void boostTick(), WORKER_INTERVAL_MS);
-  setInterval(() => void publishTick(), PUBLISH_INTERVAL_MS);
   setInterval(() => void autoAdvanceTick(), ADVANCE_INTERVAL_MS);
   setInterval(() => void replenishTick(), REPLENISH_INTERVAL_MS);
 }
