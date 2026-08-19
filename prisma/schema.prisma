@@ -238,13 +238,30 @@ model Draft {
   // Set when a manual "Boost with data" is requested; the background worker
   // runs it out of band and clears this. Null = no boost pending.
   boostRequestedAt DateTime?
+  // Set when the operator rejects a piece from the Ready list; the reason is
+  // stored in DraftFeedback. Rejected pieces drop out of the Ready list.
+  rejectedAt   DateTime?
   grades       Grade[]
   page         Page?
+  feedback     DraftFeedback[]
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
   @@index([businessId, status, scheduledFor])
   @@index([status, processingStartedAt])
+}
+
+/// Operator feedback on a finished piece — a training signal for tuning the
+/// writer/grader. "LIKE" (what worked) or "REJECT" (what to fix), plus a reason.
+model DraftFeedback {
+  id        String   @id @default(cuid())
+  draft     Draft    @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  draftId   String
+  verdict   String // "LIKE" | "REJECT"
+  reason    String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([draftId])
 }
 
 enum DraftStatus {

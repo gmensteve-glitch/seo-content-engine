@@ -14,15 +14,21 @@ import {
   MousePointerClick,
   ArrowLeft,
   CheckCircle2,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
 
 export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   const [vm, setVm] = useState<PolishDraftVM>(initial);
   const [selection, setSelection] = useState("");
   const [instruction, setInstruction] = useState("");
-  const [busy, setBusy] = useState<null | "boost" | "edit" | "regrade" | "schedule" | "publish">(null);
+  const [busy, setBusy] = useState<
+    null | "boost" | "edit" | "regrade" | "schedule" | "publish" | "feedback"
+  >(null);
   const [note, setNote] = useState("");
   const [done, setDone] = useState<null | { label: string; href: string }>(null);
+  const [fbMode, setFbMode] = useState<null | "LIKE" | "REJECT">(null);
+  const [fbText, setFbText] = useState("");
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const gap = vm.threshold - vm.overall;
@@ -122,6 +128,19 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
         href: (d.url as string) || "/performance",
       });
     });
+
+  const submitFeedback = () => {
+    if (!fbMode || !fbText.trim()) return;
+    run("feedback", "/api/review/feedback", { draftId: vm.id, verdict: fbMode, reason: fbText }, () => {
+      if (fbMode === "REJECT") {
+        setDone({ label: "Rejected — pulled from your Ready list, and your reason is logged", href: "/ready" });
+      } else {
+        setNote("Thanks — logged what you liked. I'll use it to tune the next pieces.");
+        setFbMode(null);
+        setFbText("");
+      }
+    });
+  };
 
   return (
     <div>
@@ -226,6 +245,77 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
             >
               <Rocket size={14} /> Send as hidden draft
             </button>
+          </div>
+
+          {/* Feedback — teach me your taste. LIKE keeps it, REJECT pulls it. */}
+          <div className="mt-4 border-t border-[var(--success)] pt-3">
+            <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">
+              Not quite right, or nailed it? Tell me why
+            </div>
+            {fbMode === null ? (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setFbMode("LIKE")}
+                  disabled={busy !== null}
+                  className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 py-1.5 text-[12.5px] text-[var(--text)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+                >
+                  <ThumbsUp size={13} className="text-[var(--success)]" /> I like it because…
+                </button>
+                <button
+                  onClick={() => setFbMode("REJECT")}
+                  disabled={busy !== null}
+                  className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 py-1.5 text-[12.5px] text-[var(--text)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+                >
+                  <ThumbsDown size={13} className="text-[var(--danger)]" /> Reject &amp; why…
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium">
+                  {fbMode === "LIKE" ? (
+                    <>
+                      <ThumbsUp size={13} className="text-[var(--success)]" /> What worked about this piece?
+                    </>
+                  ) : (
+                    <>
+                      <ThumbsDown size={13} className="text-[var(--danger)]" /> What&apos;s wrong with it? (this pulls it from Ready)
+                    </>
+                  )}
+                </div>
+                <textarea
+                  autoFocus
+                  value={fbText}
+                  onChange={(e) => setFbText(e.target.value)}
+                  rows={2}
+                  placeholder={
+                    fbMode === "LIKE"
+                      ? "e.g. 'great answer-first intro', 'perfect length', 'loved the tone'"
+                      : "e.g. 'intro is boring', 'too salesy', 'wrong angle', 'reads like AI'"
+                  }
+                  className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-[13px]"
+                />
+                <div className="mt-1.5 flex items-center gap-2">
+                  <button
+                    onClick={submitFeedback}
+                    disabled={busy !== null || !fbText.trim()}
+                    className={`rounded-lg px-3.5 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-50 ${
+                      fbMode === "REJECT" ? "bg-[var(--danger)]" : "bg-[var(--success)]"
+                    } hover:brightness-110`}
+                  >
+                    {busy === "feedback" ? "Saving…" : fbMode === "REJECT" ? "Reject & log reason" : "Save feedback"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setFbMode(null);
+                      setFbText("");
+                    }}
+                    className="text-[12px] text-[var(--muted)] hover:text-[var(--text)]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       ) : !passed ? (

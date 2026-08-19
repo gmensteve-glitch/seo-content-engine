@@ -468,7 +468,7 @@ export async function getReadyForReview(bizId = DEFAULT_BIZ): Promise<PolishDraf
   const business = await prisma.business.findUnique({ where: { id: bizId } });
   const threshold = business?.qualityThreshold ?? 85;
   const drafts = await prisma.draft.findMany({
-    where: { businessId: bizId, status: "PASSED", scheduledFor: null, reviewedAt: null },
+    where: { businessId: bizId, status: "PASSED", scheduledFor: null, rejectedAt: null },
     include: { brief: true, grades: { orderBy: { version: "desc" }, take: 1 } },
     orderBy: { updatedAt: "desc" },
   });

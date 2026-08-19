@@ -833,6 +833,25 @@ export async function markReadyForSchedule(draftId: string): Promise<void> {
   await prisma.draft.update({ where: { id: draftId }, data: { reviewedAt: new Date() } });
 }
 
+/**
+ * Record operator feedback on a finished piece — the training signal used to
+ * tune the writer/grader. "LIKE" keeps the piece in Ready; "REJECT" also pulls
+ * it off the Ready list (stamps rejectedAt) so you don't see it again.
+ */
+export async function recordDraftFeedback(
+  draftId: string,
+  verdict: "LIKE" | "REJECT",
+  reason: string,
+): Promise<void> {
+  requireDb();
+  await prisma.draftFeedback.create({
+    data: { draftId, verdict, reason: reason.trim().slice(0, 4000) },
+  });
+  if (verdict === "REJECT") {
+    await prisma.draft.update({ where: { id: draftId }, data: { rejectedAt: new Date() } });
+  }
+}
+
 /** Put a passed draft on the calendar for auto-publish at `when`. */
 export async function scheduleDraft(draftId: string, when: Date): Promise<void> {
   requireDb();
