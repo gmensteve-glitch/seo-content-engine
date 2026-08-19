@@ -20,6 +20,7 @@ import { gradeDraft } from "@/lib/agents/grader";
 import { planLinks, applyLinks, type LinkTarget, type PlannedLink } from "@/lib/agents/linker";
 import { generateIdeaProposals, type IdeationContext } from "@/lib/agents/ideator";
 import { enrichDraft, rewritePassage, hasResources, type EnrichResources } from "@/lib/agents/enricher";
+import { finalizeDraftBody } from "@/lib/agents/finalize";
 import { serpTop } from "@/lib/connectors/dataforseo";
 import { scrapeMany } from "@/lib/connectors/firecrawl";
 import { dataforseoEnabled, firecrawlEnabled } from "@/lib/env";
@@ -657,10 +658,19 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
   const spec = toBriefSpec(brief);
   const brandVoice = brief.business.brandVoice ?? "Clear, warm, and authoritative.";
   const threshold = brief.business.qualityThreshold;
+  const finalizeCtx = {
+    title: draft.title,
+    brandName: brief.business.name,
+    isoDate: new Date().toISOString().slice(0, 10),
+    metaDescription: "",
+  };
 
-  // Write.
+  // Write, then auto-finalize (strip placeholders, guarantee valid JSON-LD) so
+  // no mechanical defect is ever graded or shipped.
   await prisma.draft.update({ where: { id: draft.id }, data: { status: "DRAFTED" } });
-  const body = await writeDraft(spec, brandVoice);
+  const rawBody = await writeDraft(spec, brandVoice);
+  finalizeCtx.metaDescription = deriveMetaDescription(rawBody, draft.title);
+  const body = finalizeDraftBody(rawBody, finalizeCtx);
   draft = await prisma.draft.update({
     where: { id: draft.id },
     data: { bodyMd: body, status: "GRADING" },
@@ -713,7 +723,10 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
     // Revise the weakest dimensions, then loop back to re-grade. Keep the stored
     // body as the best-so-far; the unproven revision only replaces it if it grades higher.
     const weakest = weakestDimensions(grade.dimensions).slice(0, 3);
-    currentDraft = await reviseDraft(currentDraft, grade.feedback, weakest);
+    currentDraft = finalizeDraftBody(
+      await reviseDraft(currentDraft, grade.feedback, weakest),
+      finalizeCtx,
+    );
   }
 
   const passed = bestOverall >= threshold;
@@ -819,7 +832,12 @@ export async function boostDraft(draftId: string): Promise<{
     ? weakestDimensions(draft.grades[0].dimensions as never).slice(0, 3)
     : ["eeat", "depth"];
 
-  const enriched = await enrichDraft(draft.bodyMd, spec, weakest, res);
+  const enriched = finalizeDraftBody(await enrichDraft(draft.bodyMd, spec, weakest, res), {
+    title: draft.title,
+    brandName: draft.business.name,
+    isoDate: new Date().toISOString().slice(0, 10),
+    metaDescription: deriveMetaDescription(draft.bodyMd, draft.title),
+  });
   await prisma.draft.update({ where: { id: draft.id }, data: { bodyMd: enriched } });
 
   const { overall, passed } = await regradeDraft(draft.id);

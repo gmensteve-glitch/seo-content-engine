@@ -19,7 +19,7 @@ STRUCTURE:
 - 2–4 links to authoritative EXTERNAL sources (prefer .gov / recognized institutions), placed inline where a claim needs backing. Only link to a real URL you are confident exists.
 - Do NOT invent internal links to the site's own pages — never write a relative link like [text](/caskets/pricing-guide) or guess the site's URL structure. Internal links to real published pages are added automatically by the system. The ONLY internal links you may write are in-page jump links in the table of contents that point to your own H2/H3 headings (e.g. [Oversized Caskets](#oversized-caskets)).
 - Soft calls-to-action at the top and bottom (never pushy).
-- End with a fenced \`\`\`json block of valid JSON-LD for the required schema types, with complete fields (datePublished/author where applicable).
+- End with a fenced \`\`\`json block of valid JSON-LD for the required schema types, with complete fields (datePublished/author where applicable). The JSON-LD MUST be complete and valid — never truncate it. If you're running low on room, shorten the prose, never the schema.
 
 QUALITY — this is what gets it ranked:
 - Take a clear point of view / thesis. Own the wedge from the brief; don't hedge.
@@ -27,7 +27,7 @@ QUALITY — this is what gets it ranked:
 - Author personas / pen names, a first-person voice, quotes, and general experience descriptions ("years in funeral service", "has helped many families") are all allowed and encouraged for warmth and authority. The ONE thing never to fabricate is a verifiable credential NUMBER or ID: no made-up professional license numbers, certification numbers, registration IDs, or membership numbers (e.g. "LFD #4471, California"). This applies in the visible text AND in the JSON-LD author. A persona may describe general background and speak in quotes, but must never cite a specific license/registration/certification number that doesn't exist.
 - Write like an experienced practitioner: specific, plain, reassuring.
 - BAN these AI-slop tells: em-dash overuse, "in conclusion", "it's important to note", "when it comes to", "navigate/navigating", "delve", "in today's world", and reflexive hedging ("generally", "typically", "often") unless genuinely warranted.
-- Where real first-hand experience would strengthen the page (a specific customer scenario, an original photo, a number only this business knows), insert a clearly-marked callout: "> **Add your experience:** <what to add>". That callout is the ONLY way to signal missing first-hand detail — never fabricate the experience itself.
+- Write the strongest, COMPLETE version you can using the personas, general experience, and verifiable specifics allowed above. This pipeline is fully automated — there is no human to fill in blanks later. Do NOT insert placeholder callouts, bracketed TODOs, "[add …]" notes, or "> **Add your experience:**" markers. The piece must be finished and publishable exactly as written.
 
 TONE — warm and personal: you're talking to a grieving family, not writing a spec sheet. Lead with empathy and reassurance, use plain human language, and be genuinely helpful before anything else. Keep the brand voice below, but never let it get cold, corporate, or salesy.
 
@@ -38,7 +38,7 @@ export async function writeDraft(brief: BriefSpec, brandVoice: string): Promise<
 
   const prompt = `BRAND VOICE:\n${brandVoice}\n\nBRIEF:\nTitle: ${brief.title}\nTarget keyword: ${brief.targetKeyword}\nAngle / wedge: ${brief.angle}\nTarget length: ~${brief.wordTarget} words\nRequired schema: ${brief.requiredSchema.join(", ")}\nOutline:\n${brief.outline.map((s) => `- ${s}`).join("\n")}\nQuestions to answer:\n${brief.questions.map((q) => `- ${q}`).join("\n")}\nGap to fill (what competitors miss): ${brief.gap}\n\n${TEMPLATE_GUIDANCE}`;
 
-  return completeText({ model: MODELS.writer, prompt, maxTokens: 16000 });
+  return completeText({ model: MODELS.writer, prompt, maxTokens: 20000 });
 }
 
 export async function reviseDraft(
@@ -59,13 +59,13 @@ Rules:
 - Make surgical edits that directly address the feedback. Keep everything that already works.
 - NEVER add length to fix a problem — improve quality by cutting, not padding.
 - If the feedback flags length, bloat, or padding: CUT AGGRESSIVELY toward the target — delete whole redundant passages, merge overlapping sections, remove filler and hedging. A shorter, tighter version that keeps the substance is the goal.
-- Preserve the structure, the FAQ, and the JSON-LD block (keep it valid).
-- Keep any "> **Add your experience:**" callouts.
+- Preserve the structure, the FAQ, and the JSON-LD block (keep it COMPLETE and valid — never truncate the schema).
+- The piece must be complete and publishable as-is: remove any leftover placeholder callouts, bracketed TODOs, or "> **Add your experience:**" markers.
 - Do not introduce AI-slop tells (em-dash spam, "in conclusion", "it's important to note", reflexive hedging).
 - Return the full revised Markdown (not a diff).
 
 DRAFT:
 ${draft}`;
 
-  return completeText({ model: MODELS.writer, prompt, maxTokens: 16000 });
+  return completeText({ model: MODELS.writer, prompt, maxTokens: 20000 });
 }
