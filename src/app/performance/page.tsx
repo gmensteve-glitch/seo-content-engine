@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
-import { getLivePages } from "@/lib/data/repo";
-import { BarChart3, TrendingUp, PenLine } from "lucide-react";
+import { getLivePages, getBusiness } from "@/lib/data/repo";
+import { listPublishedBlogs } from "@/lib/pipeline/service";
+import { BarChart3, TrendingUp, PenLine, FileText, ExternalLink } from "lucide-react";
 
 const FLAG_TONE = {
   boost: "warn",
@@ -13,7 +15,11 @@ const FLAG_TONE = {
 export const dynamic = "force-dynamic";
 
 export default async function PerformancePage() {
-  const pages = await getLivePages();
+  const biz = await getBusiness();
+  const [pages, published] = await Promise.all([
+    getLivePages(),
+    listPublishedBlogs(biz.id).catch(() => []),
+  ]);
 
   return (
     <Shell>
@@ -21,6 +27,63 @@ export default async function PerformancePage() {
         title="Performance"
         subtitle="Results from Google Search Console + GA4. The engine turns these signals into improvement tasks."
       />
+
+      {/* All published posts — straight from your live blog */}
+      <Card className="mb-4">
+        <div className="mb-3 flex items-center gap-2">
+          <FileText size={16} className="text-[var(--accent)]" />
+          <h2 className="text-[15px] font-medium">All published posts</h2>
+          <span className="ml-auto rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-[11px] text-[var(--muted)]">
+            {published.length} live on your blog
+          </span>
+        </div>
+        {published.length === 0 ? (
+          <p className="text-[12px] text-[var(--subtle)]">
+            Couldn&apos;t load posts from your blog — check the Shopify connector.
+          </p>
+        ) : (
+          <div className="max-h-[420px] overflow-y-auto">
+            <table className="w-full text-left text-[13px]">
+              <thead className="sticky top-0 bg-[var(--surface-1)] text-[11px] uppercase tracking-wide text-[var(--subtle)]">
+                <tr className="border-b border-[var(--border)]">
+                  <th className="pb-2 pr-4 font-medium">Post</th>
+                  <th className="pb-2 pr-4 font-medium">Updated</th>
+                  <th className="pb-2 font-medium">Clicks 28d</th>
+                </tr>
+              </thead>
+              <tbody>
+                {published.map((p) => (
+                  <tr key={p.cmsId} className="border-b border-[var(--border)] last:border-0">
+                    <td className="py-2 pr-4">
+                      <Link
+                        href={p.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 font-medium hover:underline"
+                      >
+                        {p.title}
+                        <ExternalLink size={11} className="text-[var(--subtle)]" />
+                      </Link>
+                    </td>
+                    <td className="py-2 pr-4 text-[12px] text-[var(--muted)]">
+                      {new Date(p.updatedAt).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </td>
+                    <td className="py-2 text-[12px] text-[var(--subtle)]">— (connect GSC)</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="mt-2 text-[11px] text-[var(--subtle)]">
+          Click totals, impressions, and rankings light up here once Google Search Console is
+          connected.
+        </p>
+      </Card>
 
       <Card className="mb-4">
         <div className="flex items-center gap-2 text-[13px] text-[var(--muted)]">

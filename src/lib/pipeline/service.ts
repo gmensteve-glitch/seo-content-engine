@@ -436,6 +436,35 @@ export async function setLocalRatio(businessId: string, ratio: number): Promise<
   await prisma.business.update({ where: { id: businessId }, data: { localRatio: clamped } });
 }
 
+export interface PublishedBlog {
+  cmsId: string;
+  title: string;
+  url: string;
+  updatedAt: string;
+}
+
+/** List every post on the business's live blog (straight from the CMS). */
+export async function listPublishedBlogs(businessId: string): Promise<PublishedBlog[]> {
+  requireDb();
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+  if (!business) return [];
+  const platform = business.cmsPlatform.toLowerCase() as CmsPlatform;
+  const connector = await prisma.connector.findUnique({
+    where: { businessId_type: { businessId, type: cmsConnectorType(platform) } },
+  });
+  if (!connector || connector.status !== "CONNECTED" || !encryptionEnabled()) return [];
+  try {
+    const adapter = getCmsAdapter(platform, decryptJson(connector.configEnc));
+    const pages = await adapter.list({ limit: 250 });
+    return pages
+      .map((p) => ({ cmsId: p.cmsId, title: p.title, url: p.url, updatedAt: p.updatedAt }))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  } catch (e) {
+    console.error("[listPublishedBlogs] failed:", e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
 /** Set the min grade a piece must hit to reach the Ready list (0–100). */
 export async function setQualityThreshold(businessId: string, threshold: number): Promise<void> {
   requireDb();
