@@ -1,0 +1,8 @@
+-- CreateEnum
+CREATE TYPE "IdeaKind" AS ENUM ('LOCAL', 'EVERGREEN');
+
+-- AlterTable
+ALTER TABLE "Business" ADD COLUMN "localRatio" INTEGER NOT NULL DEFAULT 50;
+
+-- AlterTable
+ALTER TABLE "Idea" ADD COLUMN "kind" "IdeaKind" NOT NULL DEFAULT 'EVERGREEN';

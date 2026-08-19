@@ -1,8 +1,13 @@
 import { Shell } from "@/components/shell";
 import { PageHeader, Pill } from "@/components/ui";
-import { getIdeas } from "@/lib/data/repo";
-import { buildBriefAction, dismissIdeaAction, generateIdeasAction } from "@/app/actions";
-import { Sparkles, FileText, X, Tag } from "lucide-react";
+import { getIdeas, getBusiness } from "@/lib/data/repo";
+import {
+  buildBriefAction,
+  dismissIdeaAction,
+  generateIdeasAction,
+  setLocalRatioAction,
+} from "@/app/actions";
+import { Sparkles, FileText, X, Tag, MapPin, BookOpen } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +27,9 @@ function tier(score: number): {
 }
 
 export default async function IdeasPage() {
-  const ideas = await getIdeas();
+  const [ideas, business] = await Promise.all([getIdeas(), getBusiness()]);
+  const localRatio = business.localRatio;
+  const localCount = ideas.filter((i) => i.kind === "LOCAL").length;
 
   return (
     <Shell>
@@ -36,6 +43,40 @@ export default async function IdeasPage() {
             <Sparkles size={15} /> Generate ideas
           </button>
         </form>
+      </div>
+
+      {/* Content mix — local vs evergreen ratio that steers the whole pipeline */}
+      <div className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--subtle)]">
+          Content mix
+          <span className="ml-auto font-normal normal-case tracking-normal text-[11px] text-[var(--muted)]">
+            steers idea generation + auto-advance
+          </span>
+        </div>
+        <form action={setLocalRatioAction} className="flex flex-wrap items-center gap-3">
+          <span className="flex items-center gap-1 text-[12.5px] font-medium text-[var(--accent)]">
+            <MapPin size={13} /> Local {localRatio}%
+          </span>
+          <input
+            type="range"
+            name="localRatio"
+            min={0}
+            max={100}
+            step={5}
+            defaultValue={localRatio}
+            className="h-1.5 min-w-[180px] flex-1 accent-[var(--accent)]"
+          />
+          <span className="flex items-center gap-1 text-[12.5px] text-[var(--muted)]">
+            <BookOpen size={13} /> Evergreen {100 - localRatio}%
+          </span>
+          <button className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110">
+            Save mix
+          </button>
+        </form>
+        <p className="mt-2 text-[11px] text-[var(--muted)]">
+          New ideas are generated to this split, and the pipeline advances whichever kind is behind
+          target. In the box now: {localCount} local · {ideas.length - localCount} evergreen.
+        </p>
       </div>
 
       {/* Color legend */}
@@ -76,6 +117,19 @@ export default async function IdeasPage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[14px] font-medium">{i.title}</span>
+                      <Pill tone={i.kind === "LOCAL" ? "accent" : "neutral"}>
+                        {i.kind === "LOCAL" ? (
+                          <>
+                            <MapPin size={10} className="mr-1 inline" />
+                            Local
+                          </>
+                        ) : (
+                          <>
+                            <BookOpen size={10} className="mr-1 inline" />
+                            Evergreen
+                          </>
+                        )}
+                      </Pill>
                       <Pill tone="neutral">
                         <Tag size={10} className="mr-1 inline" />
                         {i.pillar}

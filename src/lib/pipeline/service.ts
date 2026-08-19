@@ -237,6 +237,8 @@ export async function generateIdeas(businessId: string, count = 6): Promise<numb
 
   const performanceNote = await buildPerformanceNote(businessId, pillarNames);
 
+  // Split the batch by the business's local/evergreen target ratio.
+  const targetLocal = Math.round((count * (business.localRatio ?? 50)) / 100);
   const ctx: IdeationContext = {
     businessName: business.name,
     profileMd: business.profileMd ?? business.name,
@@ -245,6 +247,8 @@ export async function generateIdeas(businessId: string, count = 6): Promise<numb
     existingTitles,
     performanceNote,
     count,
+    targetLocal,
+    targetEvergreen: count - targetLocal,
   };
 
   const proposals = await generateIdeaProposals(ctx);
@@ -264,6 +268,7 @@ export async function generateIdeas(businessId: string, count = 6): Promise<numb
         title: p.title,
         score: Math.max(0, Math.min(100, Math.round(p.score))),
         rationale: p.rationale,
+        kind: p.kind === "LOCAL" ? "LOCAL" : "EVERGREEN",
         status: "PROPOSED",
       },
     });
@@ -368,12 +373,37 @@ export async function autoAdvanceBusiness(businessId: string): Promise<number> {
     }
   }
 
-  // 2) If budget remains, turn top proposed ideas into briefs and approve them.
+  // 2) If budget remains, turn top proposed ideas into briefs and approve them,
+  //    preferring the kind (LOCAL/EVERGREEN) that's currently under its target
+  //    share so the live mix tracks the business's localRatio.
   if (budget > 0) {
+    const business = await prisma.business.findUnique({
+      where: { id: businessId },
+      select: { localRatio: true },
+    });
+    const activeDrafts = await prisma.draft.findMany({
+      where: {
+        businessId,
+        OR: [
+          { status: "PASSED", scheduledFor: null, rejectedAt: null },
+          { status: { in: [...INFLIGHT_STATUSES] } },
+        ],
+      },
+      select: { brief: { select: { idea: { select: { kind: true } } } } },
+    });
+    const localCount = activeDrafts.filter((d) => d.brief?.idea?.kind === "LOCAL").length;
+    const localPct = activeDrafts.length ? (localCount / activeDrafts.length) * 100 : 0;
+    const preferLocal = localPct < (business?.localRatio ?? 50);
+
     const ideas = await prisma.idea.findMany({
       where: { businessId, status: "PROPOSED" },
       orderBy: { createdAt: "asc" },
-      take: budget * 3, // headroom to skip near-duplicates
+      take: budget * 4, // headroom to skip near-duplicates + pick the right kind
+    });
+    ideas.sort((a, b) => {
+      const aPref = (a.kind === "LOCAL") === preferLocal ? 0 : 1;
+      const bPref = (b.kind === "LOCAL") === preferLocal ? 0 : 1;
+      return aPref - bPref;
     });
     for (const idea of ideas) {
       if (budget <= 0) break;
@@ -399,6 +429,13 @@ export async function autoAdvanceBusiness(businessId: string): Promise<number> {
 }
 
 /** Auto-advance every active business. */
+/** Set the business's target local/evergreen content ratio (0–100 = % local). */
+export async function setLocalRatio(businessId: string, ratio: number): Promise<void> {
+  requireDb();
+  const clamped = Math.max(0, Math.min(100, Math.round(ratio)));
+  await prisma.business.update({ where: { id: businessId }, data: { localRatio: clamped } });
+}
+
 export async function autoAdvanceAll(): Promise<Record<string, number>> {
   requireDb();
   const businesses = await prisma.business.findMany({

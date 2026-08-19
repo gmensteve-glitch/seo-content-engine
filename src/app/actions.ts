@@ -14,6 +14,7 @@ import {
   unscheduleDraft,
   publishNow,
   generateIdeas,
+  setLocalRatio,
 } from "@/lib/pipeline/service";
 import { getBusiness } from "@/lib/data/repo";
 
@@ -22,6 +23,16 @@ export async function buildBriefAction(formData: FormData): Promise<void> {
   revalidatePath("/ideas");
   revalidatePath("/briefs");
   revalidatePath("/pipeline");
+  revalidatePath("/");
+}
+
+/** Set the local/evergreen content mix that drives idea generation + auto-advance. */
+export async function setLocalRatioAction(formData: FormData): Promise<void> {
+  const ratio = Number(formData.get("localRatio"));
+  const bizFromForm = formData.get("businessId");
+  const bizId = bizFromForm ? String(bizFromForm) : (await getBusiness()).id;
+  if (Number.isFinite(ratio)) await setLocalRatio(bizId, ratio);
+  revalidatePath("/ideas");
   revalidatePath("/");
 }
 

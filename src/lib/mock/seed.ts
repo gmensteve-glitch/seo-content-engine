@@ -21,6 +21,7 @@ export const BUSINESSES: BusinessSummary[] = [
     domain: "trustedcaskets.com",
     cms: "shopify",
     status: "active",
+    localRatio: 50,
   },
   {
     id: "overnightcaskets",
@@ -29,6 +30,7 @@ export const BUSINESSES: BusinessSummary[] = [
     domain: "overnightcaskets.com",
     cms: "shopify",
     status: "onboarding",
+    localRatio: 50,
   },
   {
     id: "demo",
@@ -37,6 +39,7 @@ export const BUSINESSES: BusinessSummary[] = [
     domain: "example.com",
     cms: "wordpress",
     status: "paused",
+    localRatio: 50,
   },
 ];
 
@@ -89,11 +92,11 @@ export const PIPELINE: Record<string, PipelineCard[]> = {
 
 export const IDEAS: Record<string, IdeaVM[]> = {
   trustedcaskets: [
-    { id: "i1", title: "First 48 hours after a death", score: 96, pillar: "Immediate steps", rationale: "2,400/mo, very high intent, low competition — grieving families search this first." },
-    { id: "i2", title: "Cremation vs burial cost", score: 94, pillar: "Costs", rationale: "High volume comparison; we can win with a material-by-material cost table nobody else has." },
-    { id: "i3", title: "How to choose a casket: size, material, price", score: 92, pillar: "Buying guide", rationale: "Directly transactional; ties to product pages." },
-    { id: "i4", title: "Veteran burial benefits, state by state", score: 89, pillar: "Local resources", rationale: "Programmatic geo potential; underserved." },
-    { id: "i5", title: "What is a green burial?", score: 85, pillar: "Eco options", rationale: "Growing trend; strong AEO/citation potential." },
+    { id: "i1", title: "First 48 hours after a death", score: 96, pillar: "Immediate steps", rationale: "2,400/mo, very high intent, low competition — grieving families search this first.", kind: "EVERGREEN" as const },
+    { id: "i2", title: "Cremation vs burial cost", score: 94, pillar: "Costs", rationale: "High volume comparison; we can win with a material-by-material cost table nobody else has.", kind: "EVERGREEN" as const },
+    { id: "i3", title: "How to choose a casket: size, material, price", score: 92, pillar: "Buying guide", rationale: "Directly transactional; ties to product pages.", kind: "EVERGREEN" as const },
+    { id: "i4", title: "Veteran burial benefits, state by state", score: 89, pillar: "Local resources", rationale: "Programmatic geo potential; underserved.", kind: "LOCAL" as const },
+    { id: "i5", title: "What is a green burial?", score: 85, pillar: "Eco options", rationale: "Growing trend; strong AEO/citation potential.", kind: "EVERGREEN" as const },
   ],
   overnightcaskets: [],
   demo: [],

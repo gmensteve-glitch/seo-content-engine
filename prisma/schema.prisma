@@ -58,6 +58,9 @@ model Business {
   qualityThreshold Int    @default(85) // min grade to auto-queue
   linksPerPage     Int    @default(4)
   cadencePerWeek   Int    @default(5)
+  // Target share of NEW content that is locally-targeted (city/state), 0–100.
+  // The rest is evergreen/informational. Drives idea generation + auto-advance.
+  localRatio       Int    @default(50)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -170,9 +173,15 @@ model Idea {
   title      String
   score      Int? // auto-scored 0-100
   rationale  String?    @db.Text
+  kind       IdeaKind   @default(EVERGREEN) // LOCAL (geo-targeted) vs EVERGREEN
   status     IdeaStatus @default(PROPOSED)
   brief      Brief?
   createdAt  DateTime   @default(now())
+}
+
+enum IdeaKind {
+  LOCAL
+  EVERGREEN
 }
 
 enum IdeaStatus {

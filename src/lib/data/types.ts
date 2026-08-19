@@ -10,6 +10,7 @@ export interface BusinessSummary {
   domain: string;
   cms: CmsPlatform;
   status: "onboarding" | "active" | "paused";
+  localRatio: number; // target % of new content that is local (0–100)
 }
 
 export interface Kpis {
@@ -45,6 +46,7 @@ export interface IdeaVM {
   score: number;
   pillar: string;
   rationale?: string;
+  kind: "LOCAL" | "EVERGREEN";
 }
 
 export interface BriefVM {

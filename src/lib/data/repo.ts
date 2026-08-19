@@ -51,6 +51,7 @@ function toBusinessSummary(b: {
   domain: string;
   cmsPlatform: string;
   status: string;
+  localRatio?: number;
 }): BusinessSummary {
   return {
     id: b.id,
@@ -59,6 +60,7 @@ function toBusinessSummary(b: {
     domain: b.domain,
     cms: b.cmsPlatform.toLowerCase() as CmsPlatform,
     status: b.status.toLowerCase() as BusinessSummary["status"],
+    localRatio: b.localRatio ?? 50,
   };
 }
 
@@ -253,6 +255,7 @@ export async function getIdeas(bizId = DEFAULT_BIZ): Promise<IdeaVM[]> {
     score: i.score ?? 0,
     pillar: i.pillar?.name ?? "—",
     rationale: i.rationale ?? undefined,
+    kind: i.kind === "LOCAL" ? ("LOCAL" as const) : ("EVERGREEN" as const),
   }));
 }
 
