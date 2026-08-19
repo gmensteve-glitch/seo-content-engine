@@ -9,7 +9,6 @@ import {
   Lightbulb,
   ClipboardCheck,
   Columns3,
-  CalendarDays,
   CheckCircle2,
   Gauge,
   Sparkles,
@@ -45,8 +44,7 @@ const NAV_GROUPS: {
       { href: "/ideas", label: "Ideas", icon: Lightbulb },
       { href: "/briefs", label: "Briefs", icon: ClipboardCheck },
       { href: "/review", label: "Review", icon: Sparkles },
-      { href: "/ready", label: "Ready", icon: CheckCircle2 },
-      { href: "/calendar", label: "Calendar", icon: CalendarDays },
+      { href: "/ready", label: "Ready to publish", icon: CheckCircle2 },
     ],
   },
   {

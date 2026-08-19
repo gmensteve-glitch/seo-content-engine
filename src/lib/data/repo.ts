@@ -597,6 +597,6 @@ export const PIPELINE_COLUMNS: {
   { key: "briefs", label: "Briefs · needs you", tone: "warn", href: "/briefs" },
   { key: "in_progress", label: "Writing & grading", tone: "accent" },
   { key: "review", label: "Review · needs you", tone: "warn", href: "/review" },
-  { key: "scheduled", label: "Ready & scheduled", tone: "accent", href: "/calendar" },
+  { key: "scheduled", label: "Ready to publish", tone: "success", href: "/ready" },
   { key: "live", label: "Live", tone: "success", href: "/performance" },
 ];

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { PageHeader } from "@/components/ui";
 import { getReadyForReview } from "@/lib/data/repo";
-import { ArrowRight, Tag, CheckCircle2, CalendarPlus } from "lucide-react";
+import { ArrowRight, Tag, CheckCircle2 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export default async function ReadyPage() {
       <div className="mb-4 flex items-start justify-between gap-4">
         <PageHeader
           title="Ready to publish"
-          subtitle="Finished pieces that cleared the quality bar. Open one to see its full scorecard and read the post, then move it to the calendar."
+          subtitle="Finished pieces that cleared the quality bar — fully written, graded, image and links checked. Open one to read it and push it straight to Shopify."
         />
         {drafts.length > 0 && (
           <span className="shrink-0 rounded-full bg-[var(--success-bg)] px-3 py-1 text-[12px] font-medium text-[var(--success)]">
@@ -43,7 +43,7 @@ export default async function ReadyPage() {
               </div>
             </div>
             <span className="flex shrink-0 items-center gap-1 rounded-lg bg-[var(--accent-bg)] px-3 py-1.5 text-[12.5px] font-medium text-[var(--accent)]">
-              Review &amp; schedule <ArrowRight size={13} />
+              Read &amp; publish <ArrowRight size={13} />
             </span>
           </Link>
         ))}
@@ -52,8 +52,7 @@ export default async function ReadyPage() {
           <div className="rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] px-4 py-8 text-center">
             <CheckCircle2 size={20} className="mx-auto mb-2 text-[var(--muted)]" />
             <p className="text-[13px] text-[var(--muted)]">
-              Nothing ready yet. Approve a brief — pieces that pass land here for a final look
-              before the <CalendarPlus size={12} className="inline" /> calendar.
+              Nothing ready yet. Pieces that pass the quality bar land here, ready to publish.
             </p>
           </div>
         )}
