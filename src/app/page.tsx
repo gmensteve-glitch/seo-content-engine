@@ -10,6 +10,7 @@ import {
   getReadyToSchedule,
   getPipeline,
   getConnectors,
+  getPipelineHealth,
 } from "@/lib/data/repo";
 import {
   ClipboardCheck,
@@ -21,12 +22,15 @@ import {
   Gauge,
   Loader2,
   Search,
+  Activity,
+  AlertTriangle,
+  ChevronRight,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
-  const [biz, kpis, briefs, needsPolish, ready, pipeline, connectors] = await Promise.all([
+  const [biz, kpis, briefs, needsPolish, ready, pipeline, connectors, health] = await Promise.all([
     getBusiness(),
     getKpis(),
     getPendingBriefs(),
@@ -34,10 +38,22 @@ export default async function OverviewPage() {
     getReadyToSchedule(),
     getPipeline(),
     getConnectors(),
+    getPipelineHealth(),
   ]);
 
   const inProgress = pipeline.filter((c) => c.stage === "in_progress").length;
   const gscConnected = connectors.find((c) => c.type === "GSC")?.status === "connected";
+
+  const engineHealthy = health.engineHealthy;
+  const lastActivityLabel = health.lastActivityLabel;
+
+  const funnel = [
+    { label: "Ideas", value: health.ideas, href: "/ideas" },
+    { label: "Briefs", value: health.briefs, href: "/briefs" },
+    { label: "Writing", value: health.writing, href: "/pipeline" },
+    { label: "Ready", value: health.ready, href: "/ready" },
+    { label: "Live", value: health.published, href: "/performance" },
+  ];
 
   // The real daily to-dos, in priority order.
   const todos = [
@@ -162,6 +178,56 @@ export default async function OverviewPage() {
         />
         <StatTile label="Ready to publish" value={ready.length} />
       </div>
+
+      {/* 2b) Pipeline health — watch the background engine move */}
+      <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium text-[var(--muted)]">
+        <Activity size={13} /> Pipeline health
+      </div>
+      <Card className="mb-5">
+        <div className="mb-3 flex items-center gap-2">
+          <span
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+              engineHealthy
+                ? "bg-[var(--success-bg)] text-[var(--success)]"
+                : "bg-[var(--warn-bg)] text-[var(--warn)]"
+            }`}
+          >
+            <span className={`h-2 w-2 rounded-full ${engineHealthy ? "bg-[var(--success)]" : "bg-[var(--warn)]"}`} />
+            {engineHealthy ? "Engine running" : "Engine idle"}
+          </span>
+          <span className="text-[11px] text-[var(--muted)]">last activity {lastActivityLabel}</span>
+          {health.stuck > 0 && (
+            <span className="ml-auto flex items-center gap-1 text-[11px] text-[var(--warn)]">
+              <AlertTriangle size={12} /> {health.stuck} stuck
+            </span>
+          )}
+        </div>
+
+        {/* The funnel — counts at each stage, left to right */}
+        <div className="flex items-stretch gap-1.5 overflow-x-auto">
+          {funnel.map((s, i) => (
+            <div key={s.label} className="flex items-center gap-1.5">
+              <Link
+                href={s.href}
+                className="flex min-w-[76px] flex-col items-center rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2.5 hover:bg-[var(--surface-2)]"
+              >
+                <span className="text-[22px] font-semibold leading-none">{s.value}</span>
+                <span className="mt-1 text-[11px] text-[var(--muted)]">{s.label}</span>
+              </Link>
+              {i < funnel.length - 1 && <ChevronRight size={14} className="shrink-0 text-[var(--subtle)]" />}
+            </div>
+          ))}
+        </div>
+
+        {health.failed > 0 && (
+          <Link
+            href="/review"
+            className="mt-3 flex items-center gap-1.5 text-[11px] text-[var(--warn)] hover:underline"
+          >
+            <AlertTriangle size={12} /> {health.failed} piece{health.failed === 1 ? "" : "s"} couldn&apos;t reach the quality bar — review or boost
+          </Link>
+        )}
+      </Card>
 
       {/* 3) Search performance — honest: real only once GSC is connected */}
       <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium text-[var(--muted)]">

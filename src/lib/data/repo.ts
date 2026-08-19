@@ -9,6 +9,7 @@ import { RUBRIC } from "@/lib/grader/rubric";
 import type {
   BusinessSummary,
   Kpis,
+  PipelineHealthVM,
   PipelineCard,
   IdeaVM,
   BriefVM,
@@ -52,6 +53,7 @@ function toBusinessSummary(b: {
   cmsPlatform: string;
   status: string;
   localRatio?: number;
+  qualityThreshold?: number;
 }): BusinessSummary {
   return {
     id: b.id,
@@ -61,6 +63,7 @@ function toBusinessSummary(b: {
     cms: b.cmsPlatform.toLowerCase() as CmsPlatform,
     status: b.status.toLowerCase() as BusinessSummary["status"],
     localRatio: b.localRatio ?? 50,
+    qualityThreshold: b.qualityThreshold ?? 85,
   };
 }
 
@@ -84,6 +87,63 @@ export async function getBusiness(id?: string): Promise<BusinessSummary> {
 // ─────────────────────────────────────────────────────────────
 // KPIs (overview)
 // ─────────────────────────────────────────────────────────────
+
+/** Live pipeline health: stage counts + whether the background engine is moving. */
+export async function getPipelineHealth(bizId = DEFAULT_BIZ): Promise<PipelineHealthVM> {
+  const empty: PipelineHealthVM = {
+    ideas: 0, briefs: 0, writing: 0, ready: 0, failed: 0, published: 0, stuck: 0,
+    lastActivityAt: null, engineHealthy: false, lastActivityLabel: "no activity yet",
+  };
+  if (!hasDatabase) return empty;
+
+  const business = await prisma.business.findUnique({ where: { id: bizId } });
+  const threshold = business?.qualityThreshold ?? 85;
+  const inflight = ["RESEARCHING", "DRAFTED", "GRADING", "REVISING"] as const;
+  const staleBefore = new Date(Date.now() - 15 * 60 * 1000);
+
+  const [ideas, briefs, writing, passed, failed, published, latest, stuck] = await Promise.all([
+    prisma.idea.count({ where: { businessId: bizId, status: "PROPOSED" } }),
+    prisma.brief.count({ where: { businessId: bizId, status: "PENDING_APPROVAL" } }),
+    prisma.draft.count({ where: { businessId: bizId, status: { in: [...inflight] } } }),
+    prisma.draft.findMany({
+      where: { businessId: bizId, status: "PASSED", scheduledFor: null, rejectedAt: null },
+      include: { grades: { orderBy: { version: "desc" }, take: 1 } },
+    }),
+    prisma.draft.count({ where: { businessId: bizId, status: "FAILED" } }),
+    prisma.draft.count({ where: { businessId: bizId, status: "PUBLISHED" } }),
+    prisma.draft.findFirst({
+      where: { businessId: bizId },
+      orderBy: { updatedAt: "desc" },
+      select: { updatedAt: true },
+    }),
+    prisma.draft.count({
+      where: {
+        businessId: bizId,
+        status: { in: [...inflight] },
+        processingStartedAt: { lt: staleBefore },
+      },
+    }),
+  ]);
+
+  const ready = passed.filter((d) => (d.grades[0]?.overall ?? 0) >= threshold).length;
+
+  const lastMs = latest ? Date.now() - latest.updatedAt.getTime() : null;
+  const lastActivityLabel =
+    lastMs === null
+      ? "no activity yet"
+      : lastMs < 60_000
+        ? "just now"
+        : lastMs < 3_600_000
+          ? `${Math.round(lastMs / 60_000)}m ago`
+          : `${Math.round(lastMs / 3_600_000)}h ago`;
+
+  return {
+    ideas, briefs, writing, ready, failed, published, stuck,
+    lastActivityAt: latest?.updatedAt.toISOString() ?? null,
+    engineHealthy: lastMs !== null && lastMs < 40 * 60 * 1000,
+    lastActivityLabel,
+  };
+}
 
 export async function getKpis(bizId = DEFAULT_BIZ): Promise<Kpis> {
   if (!hasDatabase) return KPIS[bizId] ?? KPIS[DEFAULT_BIZ];

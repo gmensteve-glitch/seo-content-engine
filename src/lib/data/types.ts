@@ -11,6 +11,20 @@ export interface BusinessSummary {
   cms: CmsPlatform;
   status: "onboarding" | "active" | "paused";
   localRatio: number; // target % of new content that is local (0–100)
+  qualityThreshold: number; // min grade (0–100) a piece must hit to reach Ready
+}
+
+export interface PipelineHealthVM {
+  ideas: number; // PROPOSED ideas waiting
+  briefs: number; // briefs pending approval
+  writing: number; // drafts being researched/written/graded
+  ready: number; // passed, in the Ready list
+  failed: number; // couldn't reach the bar
+  published: number; // live
+  stuck: number; // drafts held by a stale worker lock (crash mid-run)
+  lastActivityAt: string | null; // most recent draft update — "engine breathing"
+  engineHealthy: boolean; // pipeline moved in the last ~40 min
+  lastActivityLabel: string; // human "12m ago" / "no activity yet"
 }
 
 export interface Kpis {

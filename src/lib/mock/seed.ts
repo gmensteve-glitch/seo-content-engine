@@ -22,6 +22,7 @@ export const BUSINESSES: BusinessSummary[] = [
     cms: "shopify",
     status: "active",
     localRatio: 50,
+    qualityThreshold: 77,
   },
   {
     id: "overnightcaskets",
@@ -31,6 +32,7 @@ export const BUSINESSES: BusinessSummary[] = [
     cms: "shopify",
     status: "onboarding",
     localRatio: 50,
+    qualityThreshold: 77,
   },
   {
     id: "demo",
@@ -40,6 +42,7 @@ export const BUSINESSES: BusinessSummary[] = [
     cms: "wordpress",
     status: "paused",
     localRatio: 50,
+    qualityThreshold: 77,
   },
 ];
 

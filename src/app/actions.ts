@@ -15,6 +15,7 @@ import {
   publishNow,
   generateIdeas,
   setLocalRatio,
+  setQualityThreshold,
 } from "@/lib/pipeline/service";
 import { getBusiness } from "@/lib/data/repo";
 
@@ -32,6 +33,16 @@ export async function setLocalRatioAction(formData: FormData): Promise<void> {
   const bizFromForm = formData.get("businessId");
   const bizId = bizFromForm ? String(bizFromForm) : (await getBusiness()).id;
   if (Number.isFinite(ratio)) await setLocalRatio(bizId, ratio);
+  revalidatePath("/ideas");
+  revalidatePath("/");
+}
+
+/** Set the quality bar a piece must clear to reach the Ready list. */
+export async function setQualityThresholdAction(formData: FormData): Promise<void> {
+  const threshold = Number(formData.get("threshold"));
+  const bizFromForm = formData.get("businessId");
+  const bizId = bizFromForm ? String(bizFromForm) : (await getBusiness()).id;
+  if (Number.isFinite(threshold)) await setQualityThreshold(bizId, threshold);
   revalidatePath("/ideas");
   revalidatePath("/");
 }

@@ -6,8 +6,9 @@ import {
   dismissIdeaAction,
   generateIdeasAction,
   setLocalRatioAction,
+  setQualityThresholdAction,
 } from "@/app/actions";
-import { Sparkles, FileText, X, Tag, MapPin, BookOpen } from "lucide-react";
+import { Sparkles, FileText, X, Tag, MapPin, BookOpen, Gauge } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,7 @@ function tier(score: number): {
 export default async function IdeasPage() {
   const [ideas, business] = await Promise.all([getIdeas(), getBusiness()]);
   const localRatio = business.localRatio;
+  const qualityThreshold = business.qualityThreshold;
   const localCount = ideas.filter((i) => i.kind === "LOCAL").length;
 
   return (
@@ -76,6 +78,35 @@ export default async function IdeasPage() {
         <p className="mt-2 text-[11px] text-[var(--muted)]">
           New ideas are generated to this split, and the pipeline advances whichever kind is behind
           target. In the box now: {localCount} local · {ideas.length - localCount} evergreen.
+        </p>
+      </div>
+
+      {/* Quality bar — the score a piece must hit to reach Ready */}
+      <div className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--subtle)]">
+          <Gauge size={13} /> Quality bar
+          <span className="ml-auto font-normal normal-case tracking-normal text-[11px] text-[var(--muted)]">
+            min score to reach Ready
+          </span>
+        </div>
+        <form action={setQualityThresholdAction} className="flex flex-wrap items-center gap-3">
+          <span className="text-[12.5px] font-medium text-[var(--success)]">{qualityThreshold}/100</span>
+          <input
+            type="range"
+            name="threshold"
+            min={50}
+            max={95}
+            step={1}
+            defaultValue={qualityThreshold}
+            className="h-1.5 min-w-[180px] flex-1 accent-[var(--success)]"
+          />
+          <button className="rounded-lg bg-[var(--success)] px-3 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110">
+            Save bar
+          </button>
+        </form>
+        <p className="mt-2 text-[11px] text-[var(--muted)]">
+          Lower = more pieces reach Ready (you catch weaker ones), higher = only near-perfect
+          pieces get through. You picked volume-first — try 70.
         </p>
       </div>
 

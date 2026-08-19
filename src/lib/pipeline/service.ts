@@ -436,6 +436,13 @@ export async function setLocalRatio(businessId: string, ratio: number): Promise<
   await prisma.business.update({ where: { id: businessId }, data: { localRatio: clamped } });
 }
 
+/** Set the min grade a piece must hit to reach the Ready list (0–100). */
+export async function setQualityThreshold(businessId: string, threshold: number): Promise<void> {
+  requireDb();
+  const clamped = Math.max(50, Math.min(95, Math.round(threshold)));
+  await prisma.business.update({ where: { id: businessId }, data: { qualityThreshold: clamped } });
+}
+
 export async function autoAdvanceAll(): Promise<Record<string, number>> {
   requireDb();
   const businesses = await prisma.business.findMany({
