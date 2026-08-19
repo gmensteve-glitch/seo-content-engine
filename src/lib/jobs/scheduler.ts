@@ -18,6 +18,7 @@ import { inngestEnabled } from "@/lib/env";
 
 const WORKER_INTERVAL_MS = 45 * 1000; // drain the pipeline queue every 45s
 const PUBLISH_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
+const ADVANCE_INTERVAL_MS = 20 * 60 * 1000; // auto-advance the pipeline every 20 min
 const REPLENISH_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
 const BOOT_DELAY_MS = 30 * 1000; // let the server settle before the first tick
 
@@ -67,6 +68,19 @@ async function replenishTick(): Promise<void> {
   }
 }
 
+// Auto-advance: idea → brief → approve, self-throttled to a Ready backlog.
+// This is what keeps the Ready list stocked without any manual gates.
+async function autoAdvanceTick(): Promise<void> {
+  try {
+    const { autoAdvanceAll } = await import("@/lib/pipeline/service");
+    const counts = await autoAdvanceAll();
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    if (total) console.log(`[scheduler] auto-advanced ${total} new piece(s) toward Ready`);
+  } catch (e) {
+    console.error("[scheduler] auto-advance tick failed:", e instanceof Error ? e.message : e);
+  }
+}
+
 export function startScheduler(): void {
   if (g.__seoScheduler?.started) return;
   if (!hasDatabase) {
@@ -90,10 +104,12 @@ export function startScheduler(): void {
     void boostTick();
     void publishTick();
     void replenishTick();
+    void autoAdvanceTick();
   }, BOOT_DELAY_MS);
 
   setInterval(() => void workerTick(), WORKER_INTERVAL_MS);
   setInterval(() => void boostTick(), WORKER_INTERVAL_MS);
   setInterval(() => void publishTick(), PUBLISH_INTERVAL_MS);
+  setInterval(() => void autoAdvanceTick(), ADVANCE_INTERVAL_MS);
   setInterval(() => void replenishTick(), REPLENISH_INTERVAL_MS);
 }

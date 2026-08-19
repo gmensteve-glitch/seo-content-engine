@@ -29,6 +29,8 @@ QUALITY — this is what gets it ranked:
 - BAN these AI-slop tells: em-dash overuse, "in conclusion", "it's important to note", "when it comes to", "navigate/navigating", "delve", "in today's world", and reflexive hedging ("generally", "typically", "often") unless genuinely warranted.
 - Where real first-hand experience would strengthen the page (a specific customer scenario, an original photo, a number only this business knows), insert a clearly-marked callout: "> **Add your experience:** <what to add>". That callout is the ONLY way to signal missing first-hand detail — never fabricate the experience itself.
 
+TONE — warm and personal: you're talking to a grieving family, not writing a spec sheet. Lead with empathy and reassurance, use plain human language, and be genuinely helpful before anything else. Keep the brand voice below, but never let it get cold, corporate, or salesy.
+
 Write in the brand voice provided.`;
 
 export async function writeDraft(brief: BriefSpec, brandVoice: string): Promise<string> {

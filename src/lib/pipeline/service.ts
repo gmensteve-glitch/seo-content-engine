@@ -303,6 +303,119 @@ export async function replenishAllIdeas(floor = 6): Promise<Record<string, numbe
 }
 
 // ─────────────────────────────────────────────────────────────
+// Auto-advance — "pump out ready-to-publish" with no manual gates.
+// Drives idea → brief → approve automatically. Writing/grading is already
+// automatic downstream, so finished pieces land in the Ready list on their own.
+// ─────────────────────────────────────────────────────────────
+
+// Keep up to this many finished pieces waiting in Ready. Because publishing is
+// manual, this SELF-THROTTLES: once Ready is full the loop idles and refills
+// only as you publish or reject — no flooding, no runaway cost.
+const READY_TARGET = 5;
+// New pieces to kick off per business per tick (a gentle drip).
+const AUTO_ADVANCE_PER_TICK = 1;
+const INFLIGHT_STATUSES = ["RESEARCHING", "DRAFTED", "GRADING", "REVISING"] as const;
+
+/** Buffer: a brief is safe to auto-approve only if it's structurally complete. */
+function isBriefReady(brief: { targetKeyword: string | null; outline: unknown }): boolean {
+  const outline = Array.isArray(brief.outline) ? brief.outline : [];
+  return Boolean(brief.targetKeyword && brief.targetKeyword.trim().length > 2 && outline.length >= 3);
+}
+
+/** Buffer: skip an idea whose exact topic already has a draft (don't repeat work). */
+async function isDuplicateIdea(businessId: string, title: string): Promise<boolean> {
+  if (!slugify(title)) return true;
+  const existing = await prisma.draft.findFirst({
+    where: { businessId, title: { equals: title, mode: "insensitive" } },
+    select: { id: true },
+  });
+  return Boolean(existing);
+}
+
+/** Auto-advance one business toward the Ready-backlog target. Returns how many
+ *  new pieces it started this tick. */
+export async function autoAdvanceBusiness(businessId: string): Promise<number> {
+  requireDb();
+
+  const [readyCount, inflightCount] = await Promise.all([
+    prisma.draft.count({
+      where: { businessId, status: "PASSED", scheduledFor: null, rejectedAt: null },
+    }),
+    prisma.draft.count({ where: { businessId, status: { in: [...INFLIGHT_STATUSES] } } }),
+  ]);
+  let budget = Math.min(AUTO_ADVANCE_PER_TICK, READY_TARGET - readyCount - inflightCount);
+  if (budget <= 0) return 0;
+
+  let started = 0;
+
+  // 1) Approve any structurally-complete briefs already waiting.
+  const pending = await prisma.brief.findMany({
+    where: { businessId, status: "PENDING_APPROVAL" },
+    orderBy: { createdAt: "asc" },
+    take: budget,
+  });
+  for (const b of pending) {
+    if (budget <= 0) break;
+    if (!isBriefReady(b)) continue;
+    try {
+      await approveBrief(b.id);
+      started++;
+      budget--;
+    } catch (e) {
+      console.error("[auto-advance] approve failed:", e instanceof Error ? e.message : e);
+    }
+  }
+
+  // 2) If budget remains, turn top proposed ideas into briefs and approve them.
+  if (budget > 0) {
+    const ideas = await prisma.idea.findMany({
+      where: { businessId, status: "PROPOSED" },
+      orderBy: { createdAt: "asc" },
+      take: budget * 3, // headroom to skip near-duplicates
+    });
+    for (const idea of ideas) {
+      if (budget <= 0) break;
+      if (await isDuplicateIdea(businessId, idea.title)) {
+        await prisma.idea.update({ where: { id: idea.id }, data: { status: "DISMISSED" } });
+        continue;
+      }
+      try {
+        const briefId = await buildBriefFromIdea(idea.id);
+        const brief = await prisma.brief.findUnique({ where: { id: briefId } });
+        if (brief && isBriefReady(brief)) {
+          await approveBrief(briefId);
+          started++;
+          budget--;
+        }
+      } catch (e) {
+        console.error("[auto-advance] build/approve failed:", e instanceof Error ? e.message : e);
+      }
+    }
+  }
+
+  return started;
+}
+
+/** Auto-advance every active business. */
+export async function autoAdvanceAll(): Promise<Record<string, number>> {
+  requireDb();
+  const businesses = await prisma.business.findMany({
+    where: { status: { in: ["ACTIVE", "ONBOARDING"] } },
+    select: { id: true },
+  });
+  const out: Record<string, number> = {};
+  for (const b of businesses) {
+    try {
+      out[b.id] = await autoAdvanceBusiness(b.id);
+    } catch (e) {
+      out[b.id] = 0;
+      console.error("[auto-advance] business failed:", e instanceof Error ? e.message : e);
+    }
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────
 // Human-gate actions
 // ─────────────────────────────────────────────────────────────
 
