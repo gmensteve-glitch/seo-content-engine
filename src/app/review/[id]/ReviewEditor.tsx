@@ -30,7 +30,14 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   const [done, setDone] = useState<null | { label: string; href: string }>(null);
   const [fbMode, setFbMode] = useState<null | "LIKE" | "REJECT">(null);
   const [fbText, setFbText] = useState("");
-  const [preview, setPreview] = useState<null | { html: string; ok: boolean; issues: string[] }>(null);
+  const [preview, setPreview] = useState<null | {
+    html: string;
+    seoTitle: string;
+    metaDescription: string;
+    slug: string;
+    ok: boolean;
+    issues: string[];
+  }>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -79,7 +86,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       const res = await fetch(`/api/review/preview?draftId=${vm.id}`);
       const data = await res.json().catch(() => ({}));
       if (data.html !== undefined) {
-        setPreview(data as { html: string; ok: boolean; issues: string[] });
+        setPreview(data);
         setShowPreview(true);
       } else {
         setNote(data.error ? `Preview error: ${data.error}` : "Couldn't build preview.");
@@ -411,10 +418,31 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       )}
 
       {showPreview && preview ? (
-        <div
-          className="prose-preview max-h-[55vh] overflow-y-auto rounded-lg border border-[var(--border)] bg-white p-5 text-[14px] leading-relaxed text-[#1a1a1a]"
-          dangerouslySetInnerHTML={{ __html: preview.html }}
-        />
+        <>
+          {/* Search-engine snippet — exactly the title + meta that will publish */}
+          <div className="mb-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
+            <div className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--subtle)]">
+              Search engine preview
+              <span className="ml-auto flex gap-2 font-normal normal-case tracking-normal text-[10px]">
+                <span className={preview.seoTitle.length > 60 ? "text-[var(--warn)]" : "text-[var(--muted)]"}>
+                  title {preview.seoTitle.length}/60
+                </span>
+                <span className={preview.metaDescription.length > 160 ? "text-[var(--warn)]" : "text-[var(--muted)]"}>
+                  meta {preview.metaDescription.length}/160
+                </span>
+              </span>
+            </div>
+            <div className="text-[12px] text-[#5f6368]">
+              trustedcaskets.com › blogs › news › {preview.slug}
+            </div>
+            <div className="text-[16px] leading-snug text-[#1a0dab]">{preview.seoTitle}</div>
+            <div className="text-[12.5px] leading-snug text-[#4d5156]">{preview.metaDescription}</div>
+          </div>
+          <div
+            className="prose-preview max-h-[55vh] overflow-y-auto rounded-lg border border-[var(--border)] bg-white p-5 text-[14px] leading-relaxed text-[#1a1a1a]"
+            dangerouslySetInnerHTML={{ __html: preview.html }}
+          />
+        </>
       ) : (
         <div
           ref={bodyRef}

@@ -29,7 +29,7 @@ import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
 import { markdownToHtml } from "@/lib/cms/markdown";
 import { sanitizeLinks } from "@/lib/cms/links";
-import { preflightPublish } from "@/lib/cms/preflight";
+import { preflightPublish, metaIssues } from "@/lib/cms/preflight";
 import { decryptJson } from "@/lib/crypto/secrets";
 
 function requireDb() {
@@ -974,21 +974,35 @@ export async function markReadyForSchedule(draftId: string): Promise<void> {
  * Render the EXACT HTML a draft would publish as (markdown → HTML, scripts
  * stripped) plus the pre-publish check result — for the dashboard preview.
  */
-export async function renderPublishPreview(
-  draftId: string,
-): Promise<{ html: string; ok: boolean; issues: string[] }> {
+export async function renderPublishPreview(draftId: string): Promise<{
+  html: string;
+  seoTitle: string;
+  metaDescription: string;
+  slug: string;
+  ok: boolean;
+  issues: string[];
+}> {
   requireDb();
   const draft = await prisma.draft.findUnique({
     where: { id: draftId },
-    select: { bodyMd: true },
+    select: { bodyMd: true, title: true },
   });
   if (!draft) throw new Error(`Draft ${draftId} not found`);
   const html = markdownToHtml(draft.bodyMd)
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/(\s*\n){3,}/g, "\n\n")
     .trim();
-  const pf = preflightPublish(html);
-  return { html, ok: pf.ok, issues: pf.issues };
+  const seoTitle = draft.title;
+  const metaDescription = deriveMetaDescription(draft.bodyMd, draft.title);
+  const issues = [...preflightPublish(html).issues, ...metaIssues(seoTitle, metaDescription)];
+  return {
+    html,
+    seoTitle,
+    metaDescription,
+    slug: slugify(draft.title),
+    ok: issues.length === 0,
+    issues,
+  };
 }
 
 export async function recordDraftFeedback(
@@ -1113,18 +1127,22 @@ export async function publishNow(
       // the body (SEO comes from metafields + the theme's own schema).
       html = html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/(\s*\n){3,}/g, "\n\n").trim();
 
-      // BUFFER: final gate. If the rendered HTML still has garbage, refuse to
-      // publish rather than ship it.
-      const pf = preflightPublish(html);
-      if (!pf.ok) {
-        throw new Error(`Pre-publish check failed — not published: ${pf.issues.join("; ")}`);
+      // BUFFER: final gate. If the rendered HTML still has garbage, or the SEO
+      // title/meta description is missing or malformed, refuse to publish.
+      const metaDescription = deriveMetaDescription(draft.bodyMd, draft.title);
+      const issues = [
+        ...preflightPublish(html).issues,
+        ...metaIssues(draft.title, metaDescription),
+      ];
+      if (issues.length) {
+        throw new Error(`Pre-publish check failed — not published: ${issues.join("; ")}`);
       }
 
       const res = await adapter.publish({
         title: draft.title,
         html,
         slug,
-        metaDescription: deriveMetaDescription(draft.bodyMd, draft.title),
+        metaDescription,
         seoTitle: draft.title,
         heroImageUrl: hero?.url,
         heroImageAlt: hero?.alt,

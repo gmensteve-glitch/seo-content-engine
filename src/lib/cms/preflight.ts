@@ -39,3 +39,17 @@ export function preflightPublish(html: string): PreflightResult {
 
   return { ok: issues.length === 0, issues };
 }
+
+/** Validate the SEO page title + meta description that will be published. */
+export function metaIssues(seoTitle: string, metaDescription: string): string[] {
+  const issues: string[] = [];
+  if (!seoTitle || !seoTitle.trim()) issues.push("missing SEO page title");
+  else if (seoTitle.length > 70) {
+    issues.push(`SEO title too long (${seoTitle.length} chars — Google truncates ~60)`);
+  }
+  if (!metaDescription || !metaDescription.trim()) issues.push("missing meta description");
+  else if (metaDescription.length > 160) {
+    issues.push(`meta description too long (${metaDescription.length} chars — keep ≤ 160)`);
+  }
+  return issues;
+}
