@@ -9,6 +9,7 @@ import {
   setQualityThresholdAction,
 } from "@/app/actions";
 import { Sparkles, FileText, X, Tag, MapPin, BookOpen, Gauge } from "lucide-react";
+import { SliderForm } from "./SliderForm";
 
 export const dynamic = "force-dynamic";
 
@@ -59,26 +60,16 @@ export default async function IdeasPage() {
             steers idea generation + auto-advance
           </span>
         </div>
-        <form action={setLocalRatioAction} className="flex flex-wrap items-center gap-3">
-          <span className="flex items-center gap-1 text-[12.5px] font-medium text-[var(--accent)]">
-            <MapPin size={13} /> Local {localRatio}%
-          </span>
-          <input
-            type="range"
-            name="localRatio"
-            min={0}
-            max={100}
-            step={5}
-            defaultValue={localRatio}
-            className="h-1.5 min-w-[180px] flex-1 accent-[var(--accent)]"
-          />
-          <span className="flex items-center gap-1 text-[12.5px] text-[var(--muted)]">
-            <BookOpen size={13} /> Evergreen {100 - localRatio}%
-          </span>
-          <button className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110">
-            Save mix
-          </button>
-        </form>
+        <SliderForm
+          action={setLocalRatioAction}
+          name="localRatio"
+          min={0}
+          max={100}
+          step={5}
+          initial={localRatio}
+          variant="mix"
+          saveLabel="Save mix"
+        />
         <p className="mt-2 text-[11px] text-[var(--muted)]">
           New ideas are generated to this split, and the pipeline advances whichever kind is behind
           target. In the box now: {localCount} local · {ideas.length - localCount} evergreen.
@@ -93,21 +84,16 @@ export default async function IdeasPage() {
             min score to reach Ready
           </span>
         </div>
-        <form action={setQualityThresholdAction} className="flex flex-wrap items-center gap-3">
-          <span className="text-[12.5px] font-medium text-[var(--success)]">{qualityThreshold}/100</span>
-          <input
-            type="range"
-            name="threshold"
-            min={50}
-            max={95}
-            step={1}
-            defaultValue={qualityThreshold}
-            className="h-1.5 min-w-[180px] flex-1 accent-[var(--success)]"
-          />
-          <button className="rounded-lg bg-[var(--success)] px-3 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110">
-            Save bar
-          </button>
-        </form>
+        <SliderForm
+          action={setQualityThresholdAction}
+          name="threshold"
+          min={50}
+          max={95}
+          step={1}
+          initial={qualityThreshold}
+          variant="threshold"
+          saveLabel="Save bar"
+        />
         <p className="mt-2 text-[11px] text-[var(--muted)]">
           Lower = more pieces reach Ready (you catch weaker ones), higher = only near-perfect
           pieces get through. You picked volume-first — try 70.
