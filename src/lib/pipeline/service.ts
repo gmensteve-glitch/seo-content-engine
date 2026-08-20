@@ -278,17 +278,21 @@ export async function generateIdeas(businessId: string, count = 6): Promise<numb
 }
 
 /**
- * The feedback-loop tick: keep the idea pool full. If a business has fewer than
- * `floor` PROPOSED ideas, top it back up. Called on a cadence by the scheduler
- * so there is always fresh, vetted supply entering the pipeline.
+ * The feedback-loop tick: keep BOTH categories of the idea pool full. If either
+ * LOCAL or EVERGREEN has fewer than `floorPerKind` PROPOSED ideas, top up — so
+ * auto-advance always has supply of whichever category is short. Called on a
+ * cadence by the scheduler.
  */
-export async function replenishIdeas(businessId: string, floor = 6): Promise<number> {
+export async function replenishIdeas(businessId: string, floorPerKind = 6): Promise<number> {
   requireDb();
-  const proposed = await prisma.idea.count({
-    where: { businessId, status: "PROPOSED" },
-  });
-  if (proposed >= floor) return 0;
-  return generateIdeas(businessId, floor - proposed);
+  const [local, evergreen] = await Promise.all([
+    prisma.idea.count({ where: { businessId, status: "PROPOSED", kind: "LOCAL" } }),
+    prisma.idea.count({ where: { businessId, status: "PROPOSED", kind: "EVERGREEN" } }),
+  ]);
+  const deficit = Math.max(floorPerKind - local, floorPerKind - evergreen);
+  if (deficit <= 0) return 0;
+  // Generate ~2× the deficit so, after the ratio split, the short kind is covered.
+  return generateIdeas(businessId, deficit * 2);
 }
 
 /** Replenish ideas for every active/onboarding business. Returns per-business counts. */
@@ -315,12 +319,13 @@ export async function replenishAllIdeas(floor = 6): Promise<Record<string, numbe
 // automatic downstream, so finished pieces land in the Ready list on their own.
 // ─────────────────────────────────────────────────────────────
 
-// Keep up to this many finished pieces waiting in Ready. Because publishing is
-// manual, this SELF-THROTTLES: once Ready is full the loop idles and refills
-// only as you publish or reject — no flooding, no runaway cost.
-const READY_TARGET = 5;
-// New pieces to kick off per business per tick (a gentle drip).
-const AUTO_ADVANCE_PER_TICK = 1;
+// Target: this many finished pieces waiting in Ready every morning, split into
+// LOCAL + EVERGREEN by the business's localRatio (e.g. 10 @ 50% = 5 + 5). Because
+// publishing is manual, this SELF-THROTTLES: once each category is full the loop
+// idles, and refills only as you publish or reject — no flooding, no runaway cost.
+const TOTAL_READY_TARGET = 10;
+// New pieces to kick off per business per tick.
+const AUTO_ADVANCE_PER_TICK = 2;
 const INFLIGHT_STATUSES = ["RESEARCHING", "DRAFTED", "GRADING", "REVISING"] as const;
 
 /** Buffer: a brief is safe to auto-approve only if it's structurally complete. */
@@ -339,74 +344,78 @@ async function isDuplicateIdea(businessId: string, title: string): Promise<boole
   return Boolean(existing);
 }
 
-/** Auto-advance one business toward the Ready-backlog target. Returns how many
- *  new pieces it started this tick. */
+/** Per-category Ready targets for a business (LOCAL + EVERGREEN sum to the total). */
+async function readyTargets(businessId: string): Promise<{ LOCAL: number; EVERGREEN: number }> {
+  const business = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { localRatio: true },
+  });
+  const localTarget = Math.round((TOTAL_READY_TARGET * (business?.localRatio ?? 50)) / 100);
+  return { LOCAL: localTarget, EVERGREEN: TOTAL_READY_TARGET - localTarget };
+}
+
+/**
+ * Auto-advance one business so each category (LOCAL/EVERGREEN) fills to its
+ * target in Ready. Counts already-ready + in-flight per kind, and only builds
+ * the kind that's short — so you wake up to ~5 local + ~5 evergreen. Returns how
+ * many new pieces it started this tick.
+ */
 export async function autoAdvanceBusiness(businessId: string): Promise<number> {
   requireDb();
 
-  const [readyCount, inflightCount] = await Promise.all([
-    prisma.draft.count({
-      where: { businessId, status: "PASSED", scheduledFor: null, rejectedAt: null },
-    }),
-    prisma.draft.count({ where: { businessId, status: { in: [...INFLIGHT_STATUSES] } } }),
-  ]);
-  let budget = Math.min(AUTO_ADVANCE_PER_TICK, READY_TARGET - readyCount - inflightCount);
+  const targets = await readyTargets(businessId);
+
+  // Already-ready (PASSED, unrejected, unscheduled) + in-flight, bucketed by kind.
+  const active = await prisma.draft.findMany({
+    where: {
+      businessId,
+      OR: [
+        { status: "PASSED", scheduledFor: null, rejectedAt: null },
+        { status: { in: [...INFLIGHT_STATUSES] } },
+      ],
+    },
+    select: { brief: { select: { idea: { select: { kind: true } } } } },
+  });
+  const activeLocal = active.filter((d) => d.brief?.idea?.kind === "LOCAL").length;
+  const need = {
+    LOCAL: Math.max(0, targets.LOCAL - activeLocal),
+    EVERGREEN: Math.max(0, targets.EVERGREEN - (active.length - activeLocal)),
+  };
+  let budget = Math.min(AUTO_ADVANCE_PER_TICK, need.LOCAL + need.EVERGREEN);
   if (budget <= 0) return 0;
 
   let started = 0;
 
-  // 1) Approve any structurally-complete briefs already waiting.
+  // 1) Approve complete pending briefs first (already-committed work), counting
+  //    them against the kind they belong to.
   const pending = await prisma.brief.findMany({
     where: { businessId, status: "PENDING_APPROVAL" },
+    include: { idea: { select: { kind: true } } },
     orderBy: { createdAt: "asc" },
-    take: budget,
+    take: budget * 2,
   });
   for (const b of pending) {
     if (budget <= 0) break;
-    if (!isBriefReady(b)) continue;
+    const k = b.idea?.kind === "LOCAL" ? "LOCAL" : "EVERGREEN";
+    if (need[k] <= 0 || !isBriefReady(b)) continue;
     try {
       await approveBrief(b.id);
       started++;
       budget--;
+      need[k]--;
     } catch (e) {
       console.error("[auto-advance] approve failed:", e instanceof Error ? e.message : e);
     }
   }
 
-  // 2) If budget remains, turn top proposed ideas into briefs and approve them,
-  //    preferring the kind (LOCAL/EVERGREEN) that's currently under its target
-  //    share so the live mix tracks the business's localRatio.
-  if (budget > 0) {
-    const business = await prisma.business.findUnique({
-      where: { id: businessId },
-      select: { localRatio: true },
-    });
-    const activeDrafts = await prisma.draft.findMany({
-      where: {
-        businessId,
-        OR: [
-          { status: "PASSED", scheduledFor: null, rejectedAt: null },
-          { status: { in: [...INFLIGHT_STATUSES] } },
-        ],
-      },
-      select: { brief: { select: { idea: { select: { kind: true } } } } },
-    });
-    const localCount = activeDrafts.filter((d) => d.brief?.idea?.kind === "LOCAL").length;
-    const localPct = activeDrafts.length ? (localCount / activeDrafts.length) * 100 : 0;
-    const preferLocal = localPct < (business?.localRatio ?? 50);
-
-    const ideas = await prisma.idea.findMany({
-      where: { businessId, status: "PROPOSED" },
-      orderBy: { createdAt: "asc" },
-      take: budget * 4, // headroom to skip near-duplicates + pick the right kind
-    });
-    ideas.sort((a, b) => {
-      const aPref = (a.kind === "LOCAL") === preferLocal ? 0 : 1;
-      const bPref = (b.kind === "LOCAL") === preferLocal ? 0 : 1;
-      return aPref - bPref;
-    });
-    for (const idea of ideas) {
-      if (budget <= 0) break;
+  // 2) Build fresh pieces for whichever category is still short.
+  for (const kind of ["LOCAL", "EVERGREEN"] as const) {
+    while (need[kind] > 0 && budget > 0) {
+      const idea = await prisma.idea.findFirst({
+        where: { businessId, status: "PROPOSED", kind },
+        orderBy: { score: "desc" },
+      });
+      if (!idea) break; // no supply of this kind right now — next tick / replenish
       if (await isDuplicateIdea(businessId, idea.title)) {
         await prisma.idea.update({ where: { id: idea.id }, data: { status: "DISMISSED" } });
         continue;
@@ -418,6 +427,7 @@ export async function autoAdvanceBusiness(businessId: string): Promise<number> {
           await approveBrief(briefId);
           started++;
           budget--;
+          need[kind]--;
         }
       } catch (e) {
         console.error("[auto-advance] build/approve failed:", e instanceof Error ? e.message : e);

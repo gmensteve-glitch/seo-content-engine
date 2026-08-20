@@ -137,6 +137,7 @@ export interface PolishDraftVM {
   id: string;
   title: string;
   targetKeyword: string;
+  kind: "LOCAL" | "EVERGREEN";
   overall: number;
   threshold: number;
   status: "failed" | "passed";

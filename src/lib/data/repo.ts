@@ -544,7 +544,7 @@ type PolishRow = {
   bodyMd: string;
   status: string;
   updatedAt: Date;
-  brief: { targetKeyword: string };
+  brief: { targetKeyword: string; idea?: { kind: string } | null };
   grades: { overall: number; feedback: string | null; dimensions: unknown; version: number }[];
 };
 
@@ -563,6 +563,7 @@ function toPolishVM(d: PolishRow, threshold: number): PolishDraftVM {
     id: d.id,
     title: d.title,
     targetKeyword: d.brief.targetKeyword,
+    kind: d.brief.idea?.kind === "LOCAL" ? "LOCAL" : "EVERGREEN",
     overall: g?.overall ?? 0,
     threshold,
     status: d.status.toLowerCase() as PolishDraftVM["status"],
@@ -585,7 +586,7 @@ export async function getReadyForReview(bizId = DEFAULT_BIZ): Promise<PolishDraf
   const drafts = await prisma.draft.findMany({
     where: { businessId: bizId, status: "PASSED", scheduledFor: null, rejectedAt: null },
     // Best grade the piece achieved — matches the stored best-version body.
-    include: { brief: true, grades: { orderBy: { overall: "desc" }, take: 1 } },
+    include: { brief: { include: { idea: { select: { kind: true } } } }, grades: { orderBy: { overall: "desc" }, take: 1 } },
     orderBy: { updatedAt: "desc" },
   });
   // Only genuinely-graded pieces — filters out any placeholder/seed rows that
@@ -601,7 +602,7 @@ export async function getNeedsPolish(bizId = DEFAULT_BIZ): Promise<PolishDraftVM
 
   const drafts = await prisma.draft.findMany({
     where: { businessId: bizId, status: "FAILED", rejectedAt: null },
-    include: { brief: true, grades: { orderBy: { overall: "desc" }, take: 1 } },
+    include: { brief: { include: { idea: { select: { kind: true } } } }, grades: { orderBy: { overall: "desc" }, take: 1 } },
     orderBy: { updatedAt: "desc" },
   });
   // Only genuine near-misses — pieces whose best score is still below the bar.
@@ -613,7 +614,11 @@ export async function getPolishDraft(draftId: string): Promise<PolishDraftVM | n
   if (!hasDatabase) return null;
   const d = await prisma.draft.findUnique({
     where: { id: draftId },
-    include: { brief: true, business: true, grades: { orderBy: { version: "desc" }, take: 1 } },
+    include: {
+      brief: { include: { idea: { select: { kind: true } } } },
+      business: true,
+      grades: { orderBy: { overall: "desc" }, take: 1 },
+    },
   });
   if (!d) return null;
   return toPolishVM(d, d.business.qualityThreshold);
