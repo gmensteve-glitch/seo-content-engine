@@ -1,16 +1,32 @@
 // Thin wrapper around the Anthropic SDK — the one place every agent talks to Claude.
-// Default model is claude-opus-5; swap a stage to claude-sonnet-5 for lower cost.
+//
+// MODEL STRATEGY (cost vs quality): each stage runs on the cheapest model that
+// still holds the standard, instead of Opus for everything.
+//   • Haiku  — high-volume, low-stakes generation (idea brainstorming, keyword
+//              extraction). Cheap and fast; a weaker model here costs nothing.
+//   • Sonnet — the workhorse: the writer (biggest token spender at ~20k output ×
+//              several passes), the grader (runs on every revise/boost loop), the
+//              competitive research/brief, and business profiling. Sonnet 5 writes
+//              and judges at near-Opus quality for a fraction of the cost.
+//   • Opus   — reserved. Not in the routine loop; opt in per run via PIPELINE_MODEL
+//              when a flagship piece justifies the premium.
+// Set PIPELINE_MODEL to override every stage at once (a global cost/speed lever).
+//
 // Request bodies are cast to `any` at the call site because SDK typings lag new
 // params (adaptive thinking, output_config) — the wire shape is correct.
 
 import Anthropic from "@anthropic-ai/sdk";
 
+const HAIKU = "claude-haiku-4-5-20251001";
+const SONNET = "claude-sonnet-5";
+
 export const MODELS = {
-  intake: "claude-opus-5",
-  keyword: "claude-opus-5",
-  research: "claude-opus-5",
-  writer: "claude-opus-5",
-  grader: "claude-opus-5",
+  intake: SONNET, // business profiling — rare, wants good synthesis
+  keyword: HAIKU, // simple extraction
+  ideas: HAIKU, // idea brainstorming — high volume, low stakes
+  research: SONNET, // competitive gap-map brief
+  writer: SONNET, // the content — quality lever + biggest spender
+  grader: SONNET, // reliable rubric judgment, runs often
 } as const;
 
 let _client: Anthropic | null = null;

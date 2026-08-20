@@ -141,7 +141,7 @@ export async function generateIdeaProposals(ctx: IdeationContext): Promise<IdeaP
     : "(none yet)";
 
   const { ideas } = await structured<{ ideas: IdeaProposal[] }>({
-    model: MODELS.research,
+    model: MODELS.ideas,
     system: IDEATION_SYSTEM,
     schema: IDEA_SCHEMA,
     prompt: `BUSINESS: ${ctx.businessName}
