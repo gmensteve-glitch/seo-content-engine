@@ -27,6 +27,23 @@ export interface PipelineHealthVM {
   lastActivityLabel: string; // human "12m ago" / "no activity yet"
 }
 
+export interface GoalDiagnosticsVM {
+  total: number; // the goal (e.g. 10)
+  localTarget: number;
+  everTarget: number;
+  readyLocal: number; // ready at the CURRENT bar
+  readyEver: number;
+  currentBar: number;
+  /** A lower bar that would reach the 5+5 goal, or null if the bar isn't the fix. */
+  recommendedBar: number | null;
+  projectedLocal: number; // ready at the recommended bar
+  projectedEver: number;
+  /** What's holding you back: nothing (at goal), the bar (too high), or supply. */
+  limiting: "none" | "bar" | "supply";
+  poolLocal: number; // graded pieces available per kind (supply signal)
+  poolEver: number;
+}
+
 export interface ScoreCalibrationVM {
   acceptedCount: number; // pieces you published or liked
   acceptedAvg: number | null;

@@ -11,7 +11,9 @@ import {
   getPipeline,
   getConnectors,
   getPipelineHealth,
+  getGoalDiagnostics,
 } from "@/lib/data/repo";
+import { setQualityThresholdAction, boostAllNearMissesAction } from "@/app/actions";
 import {
   ClipboardCheck,
   Sparkles,
@@ -25,21 +27,30 @@ import {
   Activity,
   AlertTriangle,
   ChevronRight,
+  Target,
+  Wand2,
+  MapPin,
+  BookOpen,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
-  const [biz, kpis, briefs, needsPolish, ready, pipeline, connectors, health] = await Promise.all([
-    getBusiness(),
-    getKpis(),
-    getPendingBriefs(),
-    getNeedsPolish(),
-    getReadyToSchedule(),
-    getPipeline(),
-    getConnectors(),
-    getPipelineHealth(),
-  ]);
+  const [biz, kpis, briefs, needsPolish, ready, pipeline, connectors, health, goal] =
+    await Promise.all([
+      getBusiness(),
+      getKpis(),
+      getPendingBriefs(),
+      getNeedsPolish(),
+      getReadyToSchedule(),
+      getPipeline(),
+      getConnectors(),
+      getPipelineHealth(),
+      getGoalDiagnostics(),
+    ]);
+
+  const readyTotal = goal.readyLocal + goal.readyEver;
+  const atGoal = goal.limiting === "none";
 
   const inProgress = pipeline.filter((c) => c.stage === "in_progress").length;
   const gscConnected = connectors.find((c) => c.type === "GSC")?.status === "connected";
@@ -86,6 +97,84 @@ export default async function OverviewPage() {
   return (
     <Shell>
       <PageHeader title="Overview" subtitle={biz.name} />
+
+      {/* ── THE BRAIN: goal status + one-click optimize ────────────────── */}
+      <div className="mb-5 rounded-2xl border border-[var(--accent)] bg-[var(--surface-1)] p-5">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--accent)]">
+              <Target size={13} /> Goal — 10 ready every morning
+            </div>
+            <div className="mt-1.5 flex items-baseline gap-2">
+              <span
+                className={`text-[44px] font-bold leading-none ${atGoal ? "text-[var(--success)]" : "text-[var(--text)]"}`}
+              >
+                {Math.min(readyTotal, goal.total)}
+              </span>
+              <span className="text-[18px] text-[var(--muted)]">/ {goal.total} ready</span>
+              {atGoal && (
+                <span className="ml-1 rounded-full bg-[var(--success-bg)] px-2.5 py-1 text-[12px] font-medium text-[var(--success)]">
+                  🎯 Goal met
+                </span>
+              )}
+            </div>
+          </div>
+          <Link
+            href="/ready"
+            className="flex items-center gap-1.5 rounded-lg bg-[var(--success)] px-4 py-2 text-[13px] font-medium text-white hover:brightness-110"
+          >
+            Go to Ready <ArrowRight size={14} />
+          </Link>
+        </div>
+
+        {/* Per-category progress */}
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <GoalBar label="Local" icon={<MapPin size={13} />} ready={goal.readyLocal} target={goal.localTarget} />
+          <GoalBar label="Evergreen" icon={<BookOpen size={13} />} ready={goal.readyEver} target={goal.everTarget} />
+        </div>
+
+        {/* The recommendation — the math, in plain language */}
+        {goal.limiting === "bar" && goal.recommendedBar !== null && (
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--warn)] bg-[var(--warn-bg)] px-4 py-3">
+            <Wand2 size={17} className="shrink-0 text-[var(--warn)]" />
+            <div className="min-w-0 flex-1 text-[13px] text-[var(--text)]">
+              <span className="font-medium">You&apos;re {goal.total - readyTotal} short.</span>{" "}
+              {goal.projectedLocal + goal.projectedEver - readyTotal} more pieces are sitting just
+              below your bar of {goal.currentBar}. Drop it to{" "}
+              <b className="text-[var(--success)]">{goal.recommendedBar}</b> and you hit{" "}
+              {goal.projectedLocal} local + {goal.projectedEver} evergreen = your 10.
+            </div>
+            <form action={setQualityThresholdAction}>
+              <input type="hidden" name="threshold" value={goal.recommendedBar} />
+              <button className="flex items-center gap-1.5 rounded-lg bg-[var(--warn)] px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110">
+                <Wand2 size={14} /> Optimize → bar {goal.recommendedBar}
+              </button>
+            </form>
+          </div>
+        )}
+        {goal.limiting === "supply" && (
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--accent)] bg-[var(--accent-bg)] px-4 py-3">
+            <Sparkles size={17} className="shrink-0 text-[var(--accent)]" />
+            <div className="min-w-0 flex-1 text-[13px] text-[var(--text)]">
+              <span className="font-medium">You&apos;re {goal.total - readyTotal} short</span> — and
+              lowering the bar alone won&apos;t get there ({goal.poolLocal} local + {goal.poolEver}{" "}
+              evergreen pieces exist). The engine needs to produce more: keep it running, and
+              boosting the backlog squeezes out every piece it can.
+            </div>
+            <form action={boostAllNearMissesAction}>
+              <button className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110">
+                <Sparkles size={14} /> Boost the backlog
+              </button>
+            </form>
+          </div>
+        )}
+        {atGoal && (
+          <div className="mt-4 rounded-xl border border-[var(--success)] bg-[var(--success-bg)] px-4 py-3 text-[13px] text-[var(--success)]">
+            <span className="font-medium">All set.</span> {goal.readyLocal} local + {goal.readyEver}{" "}
+            evergreen are stacked and clean — go publish the good ones.
+          </div>
+        )}
+      </div>
 
       {/* 1) DO THIS NEXT — one clear focal action (no triage, no paralysis). */}
       {todos.length === 0 ? (
@@ -261,6 +350,38 @@ export default async function OverviewPage() {
         </Link>
       )}
     </Shell>
+  );
+}
+
+/** A category progress bar for the goal panel (Local / Evergreen). */
+function GoalBar({
+  label,
+  icon,
+  ready,
+  target,
+}: {
+  label: string;
+  icon: ReactNode;
+  ready: number;
+  target: number;
+}) {
+  const pct = target > 0 ? Math.min(100, (ready / target) * 100) : 0;
+  const done = target > 0 && ready >= target;
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-0)] p-3">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[12px] text-[var(--muted)]">
+        {icon} {label}
+        <span className={`ml-auto font-medium ${done ? "text-[var(--success)]" : "text-[var(--text)]"}`}>
+          {ready} / {target}
+        </span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-[var(--surface-2)]">
+        <div
+          className={`h-full rounded-full ${done ? "bg-[var(--success)]" : "bg-[var(--accent)]"}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
   );
 }
 

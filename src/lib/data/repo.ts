@@ -11,6 +11,7 @@ import type {
   Kpis,
   PipelineHealthVM,
   ScoreCalibrationVM,
+  GoalDiagnosticsVM,
   PipelineCard,
   IdeaVM,
   BriefVM,
@@ -194,6 +195,89 @@ export async function getScoreCalibration(bizId = DEFAULT_BIZ): Promise<ScoreCal
   return {
     acceptedCount: acc.length, acceptedAvg: avg(acc), acceptedMin,
     rejectedCount: rej.length, rejectedAvg: avg(rej), recommended, note,
+  };
+}
+
+/**
+ * The "brain": given your goal (10 = 5 local + 5 evergreen) and the scores of the
+ * pieces the engine has produced, work out how many are ready at the current bar
+ * and what single change gets you to 10 — lower the bar (and to what), or produce
+ * more (supply-limited). Drives the Overview status + one-click Optimize.
+ */
+export async function getGoalDiagnostics(bizId = DEFAULT_BIZ): Promise<GoalDiagnosticsVM> {
+  const total = 10;
+  const base = (bar: number, ratio: number): GoalDiagnosticsVM => {
+    const localTarget = Math.round((total * ratio) / 100);
+    return {
+      total, localTarget, everTarget: total - localTarget,
+      readyLocal: 0, readyEver: 0, currentBar: bar,
+      recommendedBar: null, projectedLocal: 0, projectedEver: 0,
+      limiting: "supply", poolLocal: 0, poolEver: 0,
+    };
+  };
+  if (!hasDatabase) return base(85, 50);
+
+  const business = await prisma.business.findUnique({ where: { id: bizId } });
+  const bar = business?.qualityThreshold ?? 85;
+  const ratio = business?.localRatio ?? 50;
+  const localTarget = Math.round((total * ratio) / 100);
+  const everTarget = total - localTarget;
+
+  // Pool = pieces that could become ready (passed or near-miss, not rejected/
+  // scheduled/published), with their best score + category.
+  const pool = await prisma.draft.findMany({
+    where: { businessId: bizId, status: { in: ["PASSED", "FAILED"] }, rejectedAt: null, scheduledFor: null },
+    include: {
+      brief: { select: { idea: { select: { kind: true } } } },
+      grades: { orderBy: { overall: "desc" }, take: 1 },
+    },
+  });
+  const localScores = pool
+    .filter((d) => d.brief?.idea?.kind === "LOCAL")
+    .map((d) => d.grades[0]?.overall ?? 0)
+    .filter((s) => s > 0);
+  const everScores = pool
+    .filter((d) => d.brief?.idea?.kind !== "LOCAL")
+    .map((d) => d.grades[0]?.overall ?? 0)
+    .filter((s) => s > 0);
+
+  const readyAt = (b: number) => ({
+    local: localScores.filter((s) => s >= b).length,
+    ever: everScores.filter((s) => s >= b).length,
+  });
+  const cur = readyAt(bar);
+
+  // Highest bar (≥60) that still meets BOTH category targets — least lowering.
+  let goalBar: number | null = null;
+  for (let b = bar; b >= 60; b--) {
+    const r = readyAt(b);
+    if (r.local >= localTarget && r.ever >= everTarget) {
+      goalBar = b;
+      break;
+    }
+  }
+
+  let limiting: GoalDiagnosticsVM["limiting"];
+  let recommendedBar: number | null;
+  if (goalBar === bar) {
+    limiting = "none";
+    recommendedBar = null;
+  } else if (goalBar !== null) {
+    limiting = "bar";
+    recommendedBar = goalBar;
+  } else {
+    // Even at 60 we can't fill both categories — need more content.
+    limiting = "supply";
+    const at60 = readyAt(60);
+    recommendedBar = at60.local + at60.ever > cur.local + cur.ever ? 60 : null;
+  }
+  const proj = readyAt(recommendedBar ?? bar);
+
+  return {
+    total, localTarget, everTarget,
+    readyLocal: cur.local, readyEver: cur.ever, currentBar: bar,
+    recommendedBar, projectedLocal: proj.local, projectedEver: proj.ever,
+    limiting, poolLocal: localScores.length, poolEver: everScores.length,
   };
 }
 
