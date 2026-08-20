@@ -10,6 +10,7 @@ import type {
   BusinessSummary,
   Kpis,
   PipelineHealthVM,
+  ScoreCalibrationVM,
   PipelineCard,
   IdeaVM,
   BriefVM,
@@ -142,6 +143,57 @@ export async function getPipelineHealth(bizId = DEFAULT_BIZ): Promise<PipelineHe
     lastActivityAt: latest?.updatedAt.toISOString() ?? null,
     engineHealthy: lastMs !== null && lastMs < 40 * 60 * 1000,
     lastActivityLabel,
+  };
+}
+
+/**
+ * Score calibration: learn the "good enough" bar from YOUR decisions. Compares
+ * the grades of pieces you published/liked vs pieces you rejected, and suggests
+ * a threshold — so the bar reflects what actually works for this industry, not a
+ * guessed number. (Sharpens further once GSC performance is wired in.)
+ */
+export async function getScoreCalibration(bizId = DEFAULT_BIZ): Promise<ScoreCalibrationVM> {
+  const bestScore = (d: { grades: { overall: number }[] }) => d.grades[0]?.overall ?? 0;
+  if (!hasDatabase) {
+    return {
+      acceptedCount: 0, acceptedAvg: null, acceptedMin: null,
+      rejectedCount: 0, rejectedAvg: null, recommended: null,
+      note: "No data yet — using an industry-realistic default while the loop learns.",
+    };
+  }
+
+  const grade = { grades: { orderBy: { overall: "desc" as const }, take: 1 } };
+  const [accepted, rejected] = await Promise.all([
+    prisma.draft.findMany({
+      where: { businessId: bizId, OR: [{ status: "PUBLISHED" }, { feedback: { some: { verdict: "LIKE" } } }] },
+      include: grade,
+    }),
+    prisma.draft.findMany({
+      where: { businessId: bizId, OR: [{ rejectedAt: { not: null } }, { feedback: { some: { verdict: "REJECT" } } }] },
+      include: grade,
+    }),
+  ]);
+
+  const acc = accepted.map(bestScore).filter((s) => s > 0);
+  const rej = rejected.map(bestScore).filter((s) => s > 0);
+  const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
+  const acceptedMin = acc.length ? Math.min(...acc) : null;
+
+  // Recommend the lowest score you were willing to ship, floored above the
+  // rejected average, clamped to a realistic band. Needs a little data first.
+  let recommended: number | null = null;
+  let note = "Publish or reject a few pieces and I'll suggest a bar from your own decisions.";
+  if (acc.length >= 3) {
+    const rejAvg = avg(rej);
+    let r = acceptedMin ?? 70;
+    if (rejAvg !== null) r = Math.max(r, rejAvg + 1);
+    recommended = Math.max(60, Math.min(85, r));
+    note = `Based on ${acc.length} accepted vs ${rej.length} rejected pieces.`;
+  }
+
+  return {
+    acceptedCount: acc.length, acceptedAvg: avg(acc), acceptedMin,
+    rejectedCount: rej.length, rejectedAvg: avg(rej), recommended, note,
   };
 }
 
@@ -532,7 +584,8 @@ export async function getReadyForReview(bizId = DEFAULT_BIZ): Promise<PolishDraf
   const threshold = business?.qualityThreshold ?? 85;
   const drafts = await prisma.draft.findMany({
     where: { businessId: bizId, status: "PASSED", scheduledFor: null, rejectedAt: null },
-    include: { brief: true, grades: { orderBy: { version: "desc" }, take: 1 } },
+    // Best grade the piece achieved — matches the stored best-version body.
+    include: { brief: true, grades: { orderBy: { overall: "desc" }, take: 1 } },
     orderBy: { updatedAt: "desc" },
   });
   // Only genuinely-graded pieces — filters out any placeholder/seed rows that
@@ -547,11 +600,12 @@ export async function getNeedsPolish(bizId = DEFAULT_BIZ): Promise<PolishDraftVM
   const threshold = business?.qualityThreshold ?? 85;
 
   const drafts = await prisma.draft.findMany({
-    where: { businessId: bizId, status: "FAILED" },
-    include: { brief: true, grades: { orderBy: { version: "desc" }, take: 1 } },
+    where: { businessId: bizId, status: "FAILED", rejectedAt: null },
+    include: { brief: true, grades: { orderBy: { overall: "desc" }, take: 1 } },
     orderBy: { updatedAt: "desc" },
   });
-  return drafts.map((d) => toPolishVM(d, threshold));
+  // Only genuine near-misses — pieces whose best score is still below the bar.
+  return drafts.map((d) => toPolishVM(d, threshold)).filter((vm) => vm.overall < vm.threshold);
 }
 
 /** A single draft for the focused polish page. Returns null if not found. */

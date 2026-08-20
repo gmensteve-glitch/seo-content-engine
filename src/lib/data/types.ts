@@ -27,6 +27,16 @@ export interface PipelineHealthVM {
   lastActivityLabel: string; // human "12m ago" / "no activity yet"
 }
 
+export interface ScoreCalibrationVM {
+  acceptedCount: number; // pieces you published or liked
+  acceptedAvg: number | null;
+  acceptedMin: number | null; // lowest score you were willing to ship
+  rejectedCount: number;
+  rejectedAvg: number | null;
+  recommended: number | null; // data-driven suggested quality bar
+  note: string;
+}
+
 export interface Kpis {
   livePages: number;
   indexed: number;

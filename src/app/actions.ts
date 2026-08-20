@@ -16,6 +16,7 @@ import {
   generateIdeas,
   setLocalRatio,
   setQualityThreshold,
+  requestBoostAllNearMisses,
 } from "@/lib/pipeline/service";
 import { getBusiness } from "@/lib/data/repo";
 
@@ -44,6 +45,15 @@ export async function setQualityThresholdAction(formData: FormData): Promise<voi
   const bizId = bizFromForm ? String(bizFromForm) : (await getBusiness()).id;
   if (Number.isFinite(threshold)) await setQualityThreshold(bizId, threshold);
   revalidatePath("/ideas");
+  revalidatePath("/");
+}
+
+/** Auto-improve every near-miss (data boost + keep-best revises) in the background. */
+export async function boostAllNearMissesAction(formData: FormData): Promise<void> {
+  const bizFromForm = formData.get("businessId");
+  const bizId = bizFromForm ? String(bizFromForm) : (await getBusiness()).id;
+  await requestBoostAllNearMisses(bizId);
+  revalidatePath("/review");
   revalidatePath("/");
 }
 

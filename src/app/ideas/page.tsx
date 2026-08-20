@@ -1,6 +1,6 @@
 import { Shell } from "@/components/shell";
 import { PageHeader, Pill } from "@/components/ui";
-import { getIdeas, getBusiness } from "@/lib/data/repo";
+import { getIdeas, getBusiness, getScoreCalibration } from "@/lib/data/repo";
 import {
   buildBriefAction,
   dismissIdeaAction,
@@ -28,7 +28,11 @@ function tier(score: number): {
 }
 
 export default async function IdeasPage() {
-  const [ideas, business] = await Promise.all([getIdeas(), getBusiness()]);
+  const [ideas, business, calibration] = await Promise.all([
+    getIdeas(),
+    getBusiness(),
+    getScoreCalibration(),
+  ]);
   const localRatio = business.localRatio;
   const qualityThreshold = business.qualityThreshold;
   const localCount = ideas.filter((i) => i.kind === "LOCAL").length;
@@ -108,6 +112,37 @@ export default async function IdeasPage() {
           Lower = more pieces reach Ready (you catch weaker ones), higher = only near-perfect
           pieces get through. You picked volume-first — try 70.
         </p>
+
+        {/* Calibration — learns the "good enough" bar from your own decisions */}
+        <div className="mt-3 rounded-lg bg-[var(--surface-2)] px-3 py-2.5">
+          <div className="text-[11px] font-medium text-[var(--muted)]">
+            📈 Calibration — what&apos;s actually working
+          </div>
+          {calibration.acceptedCount > 0 || calibration.rejectedCount > 0 ? (
+            <div className="mt-1 text-[11.5px] text-[var(--text)]">
+              You&apos;ve accepted <b>{calibration.acceptedCount}</b>
+              {calibration.acceptedAvg !== null && ` (avg ${calibration.acceptedAvg}, low ${calibration.acceptedMin})`} and
+              rejected <b>{calibration.rejectedCount}</b>
+              {calibration.rejectedAvg !== null && ` (avg ${calibration.rejectedAvg})`}.
+              {calibration.recommended !== null && (
+                <>
+                  {" "}
+                  Suggested bar: <b className="text-[var(--success)]">{calibration.recommended}</b>.
+                  {calibration.recommended !== qualityThreshold && (
+                    <form action={setQualityThresholdAction} className="mt-1.5 inline-block">
+                      <input type="hidden" name="threshold" value={calibration.recommended} />
+                      <button className="rounded-md bg-[var(--success-bg)] px-2 py-1 text-[11px] font-medium text-[var(--success)]">
+                        Apply {calibration.recommended}
+                      </button>
+                    </form>
+                  )}
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="mt-1 text-[11.5px] text-[var(--muted)]">{calibration.note}</div>
+          )}
+        </div>
       </div>
 
       {/* Color legend */}

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { PageHeader } from "@/components/ui";
 import { getNeedsPolish } from "@/lib/data/repo";
+import { boostAllNearMissesAction } from "@/app/actions";
 import { Sparkles, ArrowRight, Tag, CheckCircle2, PartyPopper } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -17,14 +18,23 @@ export default async function ReviewPage({
     <Shell>
       <div className="mb-4 flex items-start justify-between gap-4">
         <PageHeader
-          title="Needs your experience"
-          subtitle="Near-misses that just fell short of the quality bar. Open one, add a real detail, re-grade — it passes and moves to the calendar."
+          title="Near-misses"
+          subtitle="Pieces below the quality bar. The engine auto-boosts new ones with real data on its own — this is just where you can watch it, or boost the whole backlog at once."
         />
-        {drafts.length > 0 && (
-          <span className="shrink-0 rounded-full bg-[var(--warn-bg)] px-3 py-1 text-[12px] font-medium text-[var(--warn)]">
-            {drafts.length} to polish
-          </span>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {drafts.length > 0 && (
+            <>
+              <span className="rounded-full bg-[var(--warn-bg)] px-3 py-1 text-[12px] font-medium text-[var(--warn)]">
+                {drafts.length} below bar
+              </span>
+              <form action={boostAllNearMissesAction}>
+                <button className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-2 text-[13px] font-medium text-white hover:brightness-110">
+                  <Sparkles size={14} /> Boost all
+                </button>
+              </form>
+            </>
+          )}
+        </div>
       </div>
 
       {passed && (

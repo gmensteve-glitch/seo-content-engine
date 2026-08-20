@@ -465,11 +465,36 @@ export async function listPublishedBlogs(businessId: string): Promise<PublishedB
   }
 }
 
-/** Set the min grade a piece must hit to reach the Ready list (0–100). */
-export async function setQualityThreshold(businessId: string, threshold: number): Promise<void> {
+/**
+ * Promote FAILED near-misses whose BEST grade already clears the bar to PASSED,
+ * so they flow into Ready. No AI re-run — it just re-reads scores against the
+ * current threshold. Returns how many were promoted.
+ */
+export async function promoteQualifyingDrafts(businessId: string): Promise<number> {
+  requireDb();
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+  const threshold = business?.qualityThreshold ?? 85;
+  const failed = await prisma.draft.findMany({
+    where: { businessId, status: "FAILED", rejectedAt: null },
+    include: { grades: { orderBy: { overall: "desc" }, take: 1 } },
+  });
+  let promoted = 0;
+  for (const d of failed) {
+    if ((d.grades[0]?.overall ?? 0) >= threshold) {
+      await prisma.draft.update({ where: { id: d.id }, data: { status: "PASSED" } });
+      promoted++;
+    }
+  }
+  return promoted;
+}
+
+/** Set the min grade a piece must hit to reach the Ready list (0–100). Lowering
+ *  it promotes any near-miss that already clears the new bar. */
+export async function setQualityThreshold(businessId: string, threshold: number): Promise<number> {
   requireDb();
   const clamped = Math.max(50, Math.min(95, Math.round(threshold)));
   await prisma.business.update({ where: { id: businessId }, data: { qualityThreshold: clamped } });
+  return promoteQualifyingDrafts(businessId);
 }
 
 export async function autoAdvanceAll(): Promise<Record<string, number>> {
@@ -644,11 +669,10 @@ export async function processQueuedDrafts(max = 10): Promise<number> {
           select: { status: true },
         });
         if (after?.status === "FAILED") {
-          const r = await boostDraft(claimed.id).catch((e) => {
-            console.error(`[worker] auto-boost failed for ${claimed.id}:`, e instanceof Error ? e.message : e);
-            return null;
+          // Auto-improve to the piece's ceiling (data boost + keep-best revises).
+          await autoImproveDraft(claimed.id).catch((e) => {
+            console.error(`[worker] auto-improve failed for ${claimed.id}:`, e instanceof Error ? e.message : e);
           });
-          if (r?.passed) console.log(`[worker] auto-boost lifted draft ${claimed.id} to ${r.overall} (PASSED)`);
         }
       } catch (e) {
         console.error(
@@ -918,6 +942,76 @@ export async function boostDraft(draftId: string): Promise<{
   return { overall, passed, usedProducts: res.products.length, usedSources: res.sources.length };
 }
 
+/**
+ * Auto-improve a near-miss to its ceiling with NO human involvement: one data
+ * boost, then up to 2 keep-best writer revise+regrade passes. Stops early once
+ * it passes or stops improving. This is what turns a 65 into the best score the
+ * piece can reach on its own.
+ */
+export async function autoImproveDraft(draftId: string): Promise<void> {
+  requireDb();
+  const boost = await boostDraft(draftId).catch((e) => {
+    console.error(`[auto-improve] boost failed for ${draftId}:`, e instanceof Error ? e.message : e);
+    return null;
+  });
+  if (boost?.passed) return;
+
+  for (let pass = 0; pass < 2; pass++) {
+    const draft = await prisma.draft.findUnique({
+      where: { id: draftId },
+      include: {
+        brief: { include: { idea: true } },
+        business: true,
+        grades: { orderBy: { overall: "desc" }, take: 1 },
+      },
+    });
+    if (!draft) return;
+    const threshold = draft.business.qualityThreshold;
+    const best = draft.grades[0];
+    if (!best || best.overall >= threshold) return; // passed or nothing to improve
+
+    const spec = toBriefSpec(draft.brief);
+    const weakest = weakestDimensions(best.dimensions as never).slice(0, 3);
+    const candidate = finalizeDraftBody(await reviseDraft(draft.bodyMd, best.feedback ?? "", weakest), {
+      title: draft.title,
+      brandName: draft.business.name,
+      isoDate: new Date().toISOString().slice(0, 10),
+      metaDescription: deriveMetaDescription(draft.bodyMd, draft.title),
+    });
+    const grade = await gradeDraft(candidate, JSON.stringify(spec), threshold);
+    const nextVersion = (best.version ?? draft.version) + 1;
+    await prisma.grade.create({
+      data: {
+        draftId,
+        overall: grade.overall,
+        passed: grade.passed,
+        dimensions: grade.dimensions as unknown as Prisma.InputJsonValue,
+        feedback: grade.feedback,
+        version: nextVersion,
+      },
+    });
+    // Keep-best: only adopt the revision if it graded at least as high.
+    if (grade.overall >= best.overall) {
+      await prisma.draft.update({
+        where: { id: draftId },
+        data: { bodyMd: candidate, version: nextVersion, status: grade.passed ? "PASSED" : "FAILED" },
+      });
+      if (grade.passed) return;
+    }
+  }
+}
+
+/** Request an auto-improve boost on EVERY near-miss (clears a backlog in one go).
+ *  Flags them; the background boost worker drains them with autoImproveDraft. */
+export async function requestBoostAllNearMisses(businessId: string): Promise<number> {
+  requireDb();
+  const result = await prisma.draft.updateMany({
+    where: { businessId, status: "FAILED", rejectedAt: null, boostRequestedAt: null },
+    data: { boostRequestedAt: new Date() },
+  });
+  return result.count;
+}
+
 /** Mark a draft for a background boost (the on-demand "Boost with data" button).
  *  Returns fast; the boost worker runs the heavy work out of band. */
 export async function requestBoost(draftId: string): Promise<void> {
@@ -949,7 +1043,7 @@ export async function processBoostRequests(max = 5): Promise<number> {
       });
       if (!d) break;
       try {
-        await boostDraft(d.id);
+        await autoImproveDraft(d.id);
       } catch (e) {
         console.error(`[boost] failed for ${d.id}:`, e instanceof Error ? e.message : e);
       } finally {
