@@ -35,7 +35,7 @@ async function trackDraftCost<T>(draftId: string, fn: () => Promise<T>): Promise
 }
 import { serpTop } from "@/lib/connectors/dataforseo";
 import { scrapeMany } from "@/lib/connectors/firecrawl";
-import { fetchGscRows, strikingDistance, decayingPages } from "@/lib/connectors/gsc";
+import { fetchGscRows, strikingDistance, decayingPages, gscQuery } from "@/lib/connectors/gsc";
 import { dataforseoEnabled, firecrawlEnabled, gscEnabled } from "@/lib/env";
 import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
@@ -379,6 +379,111 @@ export async function replenishAllIdeas(floor = 6): Promise<Record<string, numbe
     }
   }
   return result;
+}
+
+// ─────────────────────────────────────────────────────────────
+// GSC sync — pull Search Console data into the DB so it accumulates.
+// Feeds rank tracking (KeywordRank), decay/winner detection (PagePerformance),
+// and the ideator's live opportunity signal.
+// ─────────────────────────────────────────────────────────────
+
+/** Normalize a URL for matching GSC pages against our Page rows. */
+function normalizeUrl(u: string): string {
+  return u
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
+/** Midnight-UTC Date for a YYYY-MM-DD string (stable keys for upserts). */
+function dayDate(iso: string): Date {
+  return new Date(`${iso}T00:00:00.000Z`);
+}
+
+function isoDay(daysAgo: number): string {
+  return new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Pull the last few complete days of Search Console data for a business and
+ * persist it: PagePerformance for pages the engine published (matched by URL),
+ * and KeywordRank for the top queries (the time series that shows keywords
+ * climbing). Idempotent — re-running a day overwrites that day's row. Backfills
+ * a short window each run so an occasional missed tick self-heals.
+ */
+export async function syncGscPerformance(
+  businessId: string,
+  opts?: { days?: number; topKeywords?: number },
+): Promise<{ pages: number; keywords: number }> {
+  if (!gscEnabled()) return { pages: 0, keywords: 0 };
+  const backfill = opts?.days ?? 3;
+  const topKeywords = opts?.topKeywords ?? 200;
+
+  // GSC data lags ~1–2 days; day offset 1 is the freshest complete day.
+  const pages = await prisma.page.findMany({
+    where: { businessId, publishedAt: { not: null } },
+    select: { id: true, url: true },
+  });
+  const pageByUrl = new Map(pages.map((p) => [normalizeUrl(p.url), p.id]));
+
+  let pageWrites = 0;
+  let kwWrites = 0;
+
+  for (let offset = 1; offset <= backfill; offset++) {
+    const iso = isoDay(offset + 1); // +1 for the reporting lag
+    const date = dayDate(iso);
+
+    // Page-level → PagePerformance (only for pages we know about).
+    if (pageByUrl.size > 0) {
+      const rows = await gscQuery({ startDate: iso, endDate: iso, dimensions: ["page"], rowLimit: 1000 });
+      for (const r of rows ?? []) {
+        const pid = pageByUrl.get(normalizeUrl(r.page ?? ""));
+        if (!pid) continue;
+        await prisma.pagePerformance.upsert({
+          where: { pageId_date: { pageId: pid, date } },
+          create: { pageId: pid, date, impressions: r.impressions, clicks: r.clicks, ctr: r.ctr, position: r.position },
+          update: { impressions: r.impressions, clicks: r.clicks, ctr: r.ctr, position: r.position },
+        });
+        pageWrites++;
+      }
+    }
+
+    // Query-level → KeywordRank (top queries by impressions, to bound writes).
+    const qRows = await gscQuery({ startDate: iso, endDate: iso, dimensions: ["query"], rowLimit: 1000 });
+    const top = (qRows ?? []).sort((a, b) => b.impressions - a.impressions).slice(0, topKeywords);
+    for (const r of top) {
+      if (!r.query) continue;
+      await prisma.keywordRank.upsert({
+        where: { businessId_query_date: { businessId, query: r.query, date } },
+        create: { businessId, query: r.query, date, position: r.position, impressions: r.impressions, clicks: r.clicks, ctr: r.ctr },
+        update: { position: r.position, impressions: r.impressions, clicks: r.clicks, ctr: r.ctr },
+      });
+      kwWrites++;
+    }
+  }
+
+  return { pages: pageWrites, keywords: kwWrites };
+}
+
+/** Sync GSC for every active business. Called on a daily cadence by the scheduler. */
+export async function syncGscAll(): Promise<Record<string, { pages: number; keywords: number }>> {
+  requireDb();
+  if (!gscEnabled()) return {};
+  const businesses = await prisma.business.findMany({
+    where: { status: { in: ["ACTIVE", "ONBOARDING"] } },
+    select: { id: true },
+  });
+  const out: Record<string, { pages: number; keywords: number }> = {};
+  for (const b of businesses) {
+    try {
+      out[b.id] = await syncGscPerformance(b.id);
+    } catch (e) {
+      out[b.id] = { pages: 0, keywords: 0 };
+      console.error("[gsc-sync] business failed:", e instanceof Error ? e.message : e);
+    }
+  }
+  return out;
 }
 
 // ─────────────────────────────────────────────────────────────

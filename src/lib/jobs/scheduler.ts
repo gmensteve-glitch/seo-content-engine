@@ -19,6 +19,7 @@ import { inngestEnabled } from "@/lib/env";
 const WORKER_INTERVAL_MS = 45 * 1000; // drain the pipeline queue every 45s
 const ADVANCE_INTERVAL_MS = 20 * 60 * 1000; // auto-advance the pipeline every 20 min
 const REPLENISH_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
+const GSC_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // pull Search Console data twice a day
 const BOOT_DELAY_MS = 30 * 1000; // let the server settle before the first tick
 
 // Survive module re-evaluation / HMR: stash the singleton on globalThis.
@@ -52,6 +53,24 @@ async function replenishTick(): Promise<void> {
     if (total) console.log(`[scheduler] replenished ${total} idea(s) across businesses`);
   } catch (e) {
     console.error("[scheduler] replenish tick failed:", e instanceof Error ? e.message : e);
+  }
+}
+
+// GSC sync: pull Search Console data into the DB so it accumulates (rank
+// history, page performance). No-ops when GSC isn't configured.
+async function gscSyncTick(): Promise<void> {
+  try {
+    const { syncGscAll } = await import("@/lib/pipeline/service");
+    const out = await syncGscAll();
+    const totals = Object.values(out).reduce(
+      (a, b) => ({ pages: a.pages + b.pages, keywords: a.keywords + b.keywords }),
+      { pages: 0, keywords: 0 },
+    );
+    if (totals.pages || totals.keywords) {
+      console.log(`[scheduler] GSC sync wrote ${totals.pages} page + ${totals.keywords} keyword row(s)`);
+    }
+  } catch (e) {
+    console.error("[scheduler] GSC sync tick failed:", e instanceof Error ? e.message : e);
   }
 }
 
@@ -91,10 +110,12 @@ export function startScheduler(): void {
     void boostTick();
     void replenishTick();
     void autoAdvanceTick();
+    void gscSyncTick();
   }, BOOT_DELAY_MS);
 
   setInterval(() => void workerTick(), WORKER_INTERVAL_MS);
   setInterval(() => void boostTick(), WORKER_INTERVAL_MS);
   setInterval(() => void autoAdvanceTick(), ADVANCE_INTERVAL_MS);
   setInterval(() => void replenishTick(), REPLENISH_INTERVAL_MS);
+  setInterval(() => void gscSyncTick(), GSC_SYNC_INTERVAL_MS);
 }

@@ -70,6 +70,31 @@ function isoDaysAgo(days: number): string {
 }
 
 /**
+ * Authenticated query with explicit dates/dimensions — the low-level entry point
+ * used by the daily sync (which pulls one day at a time). Returns null when GSC
+ * isn't configured so callers degrade gracefully.
+ */
+export async function gscQuery(opts: {
+  startDate: string;
+  endDate: string;
+  dimensions: GscQueryOpts["dimensions"];
+  rowLimit?: number;
+}): Promise<GscRow[] | null> {
+  if (!gscEnabled()) return null;
+  const siteUrl = process.env.GSC_SITE_URL!;
+  const accessToken = await getGoogleAccessToken(GSC_SCOPE);
+  if (!accessToken) return null;
+  return searchAnalytics({
+    siteUrl,
+    accessToken,
+    startDate: opts.startDate,
+    endDate: opts.endDate,
+    dimensions: opts.dimensions,
+    rowLimit: opts.rowLimit ?? 1000,
+  });
+}
+
+/**
  * One-call entry point: authenticate via the service account and pull the last
  * `days` of Search Console data for the configured site. Returns null when GSC
  * isn't configured (no key or no site URL) so callers degrade gracefully.

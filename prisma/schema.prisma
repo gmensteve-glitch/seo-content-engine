@@ -73,8 +73,27 @@ model Business {
   drafts       Draft[]
   pages        Page[]
   schedules    Schedule[]
+  keywordRanks KeywordRank[]
 
   @@index([domain])
+}
+
+// Daily query-level ranking snapshot from Search Console. One row per
+// (business, query, day) — the time series that lets us watch a keyword climb
+// from page 2 to page 1 after the engine ships content for it.
+model KeywordRank {
+  id          String   @id @default(cuid())
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId  String
+  query       String
+  date        DateTime @db.Date
+  position    Float
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  ctr         Float    @default(0)
+
+  @@unique([businessId, query, date])
+  @@index([businessId, query])
 }
 
 enum BizStatus {
