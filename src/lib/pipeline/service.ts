@@ -243,7 +243,8 @@ async function buildPerformanceNote(
   });
 
   if (pages.length === 0) {
-    return "No content published yet — prioritize breadth: seed each pillar with a strong cornerstone piece.";
+    const base = "No content published yet — prioritize breadth: seed each pillar with a strong cornerstone piece.";
+    return gscNote ? `${gscNote}\n\n${base}` : base;
   }
 
   const counts = new Map<string, number>();
@@ -275,7 +276,8 @@ async function buildPerformanceNote(
     if (decaying.length) rankNote += ` On the cusp (page 2 — worth supporting with cluster links): ${decaying.join("; ")}.`;
   }
 
-  return `Live-content coverage by pillar (fewest first — favor the thin ones): ${coverage}.${rankNote}`;
+  const coverageNote = `Live-content coverage by pillar (fewest first — favor the thin ones): ${coverage}.${rankNote}`;
+  return gscNote ? `${gscNote}\n\n${coverageNote}` : coverageNote;
 }
 
 /**

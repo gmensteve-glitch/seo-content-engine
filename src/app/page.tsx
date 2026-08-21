@@ -13,6 +13,7 @@ import {
   getPipelineHealth,
   getGoalDiagnostics,
   getCostSummary,
+  getSeoOpportunities,
 } from "@/lib/data/repo";
 import { setQualityThresholdAction, boostAllNearMissesAction } from "@/app/actions";
 import {
@@ -33,12 +34,14 @@ import {
   MapPin,
   BookOpen,
   DollarSign,
+  TrendingUp,
+  TrendingDown,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
-  const [biz, kpis, briefs, needsPolish, ready, pipeline, connectors, health, goal, cost] =
+  const [biz, kpis, briefs, needsPolish, ready, pipeline, connectors, health, goal, cost, seo] =
     await Promise.all([
       getBusiness(),
       getKpis(),
@@ -50,6 +53,7 @@ export default async function OverviewPage() {
       getPipelineHealth(),
       getGoalDiagnostics(),
       getCostSummary(),
+      getSeoOpportunities(),
     ]);
 
   const readyTotal = goal.readyLocal + goal.readyEver;
@@ -345,6 +349,78 @@ export default async function OverviewPage() {
           </Link>
         )}
       </Card>
+
+      {/* 2c) SEO opportunities — live from Search Console; the engine targets these */}
+      {seo.connected && (
+        <>
+          <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium text-[var(--muted)]">
+            <TrendingUp size={13} /> SEO opportunities
+            <span className="ml-1 flex items-center gap-1 rounded-full bg-[var(--success-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--success)]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)]" /> live from Search Console
+            </span>
+            <span className="ml-auto text-[11px] text-[var(--subtle)]">
+              {seo.totalClicks28d.toLocaleString()} clicks · {seo.totalImpressions28d.toLocaleString()} impressions / 28d
+            </span>
+          </div>
+          <Card className="mb-5">
+            {seo.striking.length > 0 ? (
+              <>
+                <div className="mb-3 text-[12.5px] text-[var(--muted)]">
+                  You rank on <b className="text-[var(--text)]">page 2</b> for these — one strong
+                  piece each pushes them to page 1. The engine now targets them automatically.
+                </div>
+                <div className="space-y-1.5">
+                  {seo.striking.map((k) => {
+                    // Bar shows opportunity size (impressions), capped for layout.
+                    const pct = Math.min(100, (k.impressions / (seo.striking[0]?.impressions || 1)) * 100);
+                    return (
+                      <div key={k.query} className="flex items-center gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="truncate text-[13px] font-medium">{k.query}</span>
+                            <span className="shrink-0 text-[11px] text-[var(--muted)]">
+                              pos {k.position.toFixed(0)} · {k.impressions.toLocaleString()} impr/mo
+                            </span>
+                          </div>
+                          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]">
+                            <div
+                              className="h-full rounded-full bg-[var(--accent)]"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className="text-[12.5px] text-[var(--muted)]">
+                No page-2 keywords right now — nothing sitting in striking distance. The engine will
+                keep building broad coverage.
+              </div>
+            )}
+
+            {seo.decaying.length > 0 && (
+              <div className="mt-4 border-t border-[var(--border)] pt-3">
+                <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-[var(--warn)]">
+                  <TrendingDown size={12} /> Decaying — refresh these
+                </div>
+                <div className="space-y-1">
+                  {seo.decaying.map((d) => (
+                    <div key={d.path} className="flex items-center justify-between gap-2 text-[12px]">
+                      <span className="truncate text-[var(--muted)]">{d.path}</span>
+                      <span className="shrink-0 text-[var(--warn)]">
+                        ↓{d.dropPct}% ({d.priorClicks}→{d.recentClicks} clk)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Card>
+        </>
+      )}
 
       {/* 3) Search performance — honest: real only once GSC is connected */}
       <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium text-[var(--muted)]">

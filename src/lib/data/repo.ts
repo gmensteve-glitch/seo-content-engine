@@ -24,7 +24,10 @@ import type {
   ScheduledItemVM,
   CalendarEntryVM,
   PolishDraftVM,
+  SeoOpportunitiesVM,
 } from "@/lib/data/types";
+import { fetchGscRows, strikingDistance, decayingPages } from "@/lib/connectors/gsc";
+import { gscEnabled } from "@/lib/env";
 import {
   BUSINESSES,
   KPIS,
@@ -328,6 +331,55 @@ export async function getCostSummary(bizId = DEFAULT_BIZ): Promise<CostSummaryVM
     todayCount: todayRows.length,
     byBand,
   };
+}
+
+/**
+ * Live Google Search Console opportunities for the Overview panel: the page-2
+ * "striking distance" keywords worth targeting, and the pages decaying enough to
+ * refresh. Returns { connected: false } when GSC isn't wired or returns no data,
+ * so the panel can prompt to connect instead of showing an empty state.
+ */
+export async function getSeoOpportunities(): Promise<SeoOpportunitiesVM> {
+  const empty: SeoOpportunitiesVM = {
+    connected: false,
+    totalClicks28d: 0,
+    totalImpressions28d: 0,
+    striking: [],
+    decaying: [],
+  };
+  if (!gscEnabled()) return empty;
+  try {
+    const [rows, decaying] = await Promise.all([
+      fetchGscRows({ days: 28, dimensions: ["query"], rowLimit: 1000 }),
+      decayingPages({ window: 28, minPriorClicks: 20, minDropPct: 30 }),
+    ]);
+    if (!rows) return empty;
+
+    const striking = strikingDistance(rows)
+      .slice(0, 12)
+      .map((r) => ({
+        query: r.query,
+        position: r.position,
+        impressions: r.impressions,
+        clicks: r.clicks,
+      }));
+
+    return {
+      connected: true,
+      totalClicks28d: rows.reduce((a, r) => a + r.clicks, 0),
+      totalImpressions28d: rows.reduce((a, r) => a + r.impressions, 0),
+      striking,
+      decaying: (decaying ?? []).slice(0, 6).map((d) => ({
+        path: d.page.replace(/^https?:\/\/[^/]+/, ""),
+        dropPct: d.dropPct,
+        recentClicks: d.recentClicks,
+        priorClicks: d.priorClicks,
+      })),
+    };
+  } catch (e) {
+    console.error("[gsc] getSeoOpportunities failed:", e instanceof Error ? e.message : e);
+    return empty;
+  }
 }
 
 export async function getKpis(bizId = DEFAULT_BIZ): Promise<Kpis> {

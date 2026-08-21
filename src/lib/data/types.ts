@@ -53,6 +53,31 @@ export interface GoalDiagnosticsVM {
   poolEver: number;
 }
 
+/** A page-2 keyword we're close to ranking on page 1 for — a content target. */
+export interface StrikingKeywordVM {
+  query: string;
+  position: number; // avg rank (11–20)
+  impressions: number; // monthly
+  clicks: number;
+}
+
+/** A live page losing traffic vs. the prior window — a refresh target. */
+export interface DecayingPageVM {
+  path: string; // URL path (host stripped)
+  dropPct: number; // 0–100
+  recentClicks: number;
+  priorClicks: number;
+}
+
+/** Live Search Console opportunities for the Overview panel. */
+export interface SeoOpportunitiesVM {
+  connected: boolean; // GSC service account wired + returning data
+  totalClicks28d: number;
+  totalImpressions28d: number;
+  striking: StrikingKeywordVM[]; // page-2 money keywords, best first
+  decaying: DecayingPageVM[]; // pages to refresh
+}
+
 export interface ScoreCalibrationVM {
   acceptedCount: number; // pieces you published or liked
   acceptedAvg: number | null;
