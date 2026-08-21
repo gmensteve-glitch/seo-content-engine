@@ -8,6 +8,8 @@ export const firecrawlEnabled = () => Boolean(process.env.FIRECRAWL_API_KEY);
 export const dataforseoEnabled = () =>
   Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
 export const mapsEnabled = () => Boolean(process.env.GOOGLE_MAPS_API_KEY);
+export const gscEnabled = () =>
+  Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_JSON && process.env.GSC_SITE_URL);
 export const unsplashEnabled = () => Boolean(process.env.UNSPLASH_ACCESS_KEY);
 export const inngestEnabled = () => Boolean(process.env.INNGEST_EVENT_KEY);
 export const encryptionEnabled = () => Boolean(process.env.CONNECTOR_ENCRYPTION_KEY);
