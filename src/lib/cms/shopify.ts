@@ -90,9 +90,13 @@ export class ShopifyAdapter implements CmsAdapter {
             summary_html: input.metaDescription,
             tags: (input.tags ?? []).join(", "),
             metafields: this.seoMetafields(input),
-            ...(input.heroImageUrl
-              ? { image: { src: input.heroImageUrl, alt: input.heroImageAlt } }
-              : {}),
+            // AI images arrive as base64 → Shopify hosts them via `attachment`;
+            // stock/product photos have a hosted URL → `src`.
+            ...(input.heroImageBase64
+              ? { image: { attachment: input.heroImageBase64, alt: input.heroImageAlt } }
+              : input.heroImageUrl
+                ? { image: { src: input.heroImageUrl, alt: input.heroImageAlt } }
+                : {}),
           },
         }),
       }

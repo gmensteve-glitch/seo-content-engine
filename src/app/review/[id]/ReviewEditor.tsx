@@ -17,6 +17,7 @@ import {
   ThumbsUp,
   ThumbsDown,
   Eye,
+  Image as ImageIcon,
 } from "lucide-react";
 
 export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
@@ -40,6 +41,10 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   }>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [imgBusy, setImgBusy] = useState<null | "ai" | "stock">(null);
+  const [hasImg, setHasImg] = useState(initial.hasHeroImage);
+  const [imgSource, setImgSource] = useState<string | null>(initial.heroImageSource);
+  const [imgVer, setImgVer] = useState(0); // cache-bust the <img> after a swap
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const gap = vm.threshold - vm.overall;
@@ -52,6 +57,31 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       body: JSON.stringify(body),
     });
     return { ok: res.ok, data: await res.json().catch(() => ({})) };
+  }
+
+  // Generate a fresh AI image, or swap to a real stock photo, for the hero.
+  async function rotateImage(prefer: "ai" | "stock") {
+    setImgBusy(prefer);
+    setNote(
+      prefer === "ai"
+        ? "Generating a new image… (~10–20s)"
+        : "Finding a stock photo…",
+    );
+    try {
+      const { ok, data } = await post("/api/review/image", { draftId: vm.id, prefer });
+      if (!ok || !data.hasImage) {
+        setNote(data.error ? `Error: ${data.error}` : "Couldn't get an image — is the image key set?");
+        setImgBusy(null);
+        return;
+      }
+      setHasImg(true);
+      setImgSource((data.source as string) ?? null);
+      setImgVer((v) => v + 1);
+      setNote(prefer === "ai" ? "New image generated." : "Swapped to a stock photo.");
+    } catch {
+      setNote("Network error — try again.");
+    }
+    setImgBusy(null);
   }
 
   async function run(
@@ -379,6 +409,47 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
           {note}
         </div>
       )}
+
+      {/* Hero image — generate a new one, or swap to a real stock photo */}
+      <div className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3">
+        <div className="mb-2 flex items-center gap-2">
+          <ImageIcon size={13} className="text-[var(--accent)]" />
+          <span className="text-[12px] font-medium">Hero image</span>
+          {imgSource && (
+            <span className="rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-[10px] text-[var(--muted)]">
+              {imgSource === "ai" ? "AI-generated" : imgSource === "unsplash" ? "stock photo" : "product photo"}
+            </span>
+          )}
+          <div className="ml-auto flex items-center gap-1.5">
+            <button
+              onClick={() => rotateImage("ai")}
+              disabled={imgBusy !== null}
+              className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+            >
+              <Sparkles size={13} /> {imgBusy === "ai" ? "Generating…" : hasImg ? "Generate new" : "Generate image"}
+            </button>
+            <button
+              onClick={() => rotateImage("stock")}
+              disabled={imgBusy !== null}
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-1.5 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+            >
+              <RefreshCw size={12} /> {imgBusy === "stock" ? "Finding…" : "Use a stock photo"}
+            </button>
+          </div>
+        </div>
+        {hasImg ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`/api/review/image?draftId=${vm.id}&v=${imgVer}`}
+            alt={vm.title}
+            className="max-h-72 w-full rounded-lg object-cover"
+          />
+        ) : (
+          <div className="flex items-center justify-center rounded-lg border border-dashed border-[var(--border-strong)] py-8 text-[12px] text-[var(--muted)]">
+            No image yet — generate one, or the engine will add one automatically.
+          </div>
+        )}
+      </div>
 
       {/* Read the post — highlight any text to reword it, or preview the final render */}
       <div className="mb-1.5 flex items-center gap-2">

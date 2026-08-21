@@ -797,6 +797,9 @@ type PolishRow = {
   brief: { targetKeyword: string; idea?: { kind: string } | null };
   grades: { overall: number; feedback: string | null; dimensions: unknown; version: number }[];
   costCents?: number;
+  heroImageData?: string | null;
+  heroImageUrl?: string | null;
+  heroImageSource?: string | null;
 };
 
 /** Map a draft (+ its latest grade + brief) into the polish view-model. */
@@ -824,6 +827,8 @@ function toPolishVM(d: PolishRow, threshold: number): PolishDraftVM {
     loop: g?.version ?? 1,
     experienceNotes: extractExperienceNotes(d.bodyMd),
     costCents: d.costCents ?? 0,
+    hasHeroImage: Boolean(d.heroImageData || d.heroImageUrl),
+    heroImageSource: d.heroImageSource ?? null,
     updatedAt: d.updatedAt.toISOString(),
   };
 }

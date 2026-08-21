@@ -858,6 +858,17 @@ export async function processQueuedDrafts(max = 10): Promise<number> {
               console.error(`[worker] auto-improve failed for ${claimed.id}:`, e instanceof Error ? e.message : e);
             });
           }
+          // Give a passed piece a hero image now, so the Ready stack is complete
+          // (swappable later on the review page). Best-effort — never block a pass.
+          const final = await prisma.draft.findUnique({
+            where: { id: claimed.id },
+            select: { status: true },
+          });
+          if (final?.status === "PASSED") {
+            await ensureHeroImage(claimed.id).catch((e) => {
+              console.error(`[worker] hero image failed for ${claimed.id}:`, e instanceof Error ? e.message : e);
+            });
+          }
         });
       } catch (e) {
         console.error(
@@ -1427,6 +1438,76 @@ export async function publishScheduled(now: Date = new Date()): Promise<{ publis
   return { published };
 }
 
+// Rough per-image cost of Gemini image generation, in cents (for the per-blog
+// cost tracker). Approximate — the exact price varies by model/resolution.
+const GEMINI_IMAGE_CENTS = 4;
+
+/** The store's product-image lookup, if a CMS connector is configured. */
+async function productImageLookup(
+  businessId: string,
+  platform: CmsPlatform,
+): Promise<((q: string) => Promise<{ url: string; alt: string } | null>) | undefined> {
+  if (!encryptionEnabled()) return undefined;
+  const connector = await prisma.connector.findUnique({
+    where: { businessId_type: { businessId, type: cmsConnectorType(platform) } },
+  });
+  if (!connector || connector.status !== "CONNECTED") return undefined;
+  try {
+    const config = decryptJson(connector.configEnc);
+    const adapter = getCmsAdapter(platform, config);
+    return adapter.sourceProductImage?.bind(adapter);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Make sure a draft has a hero image, storing it on the draft so the review page
+ * can show and swap it. `prefer` ("ai" | "stock") + `force` drive the review
+ * page's "generate a new image" / "use a stock photo" buttons. AI images add
+ * their cost to the per-blog tracker. Returns a small status for the UI.
+ */
+export async function ensureHeroImage(
+  draftId: string,
+  opts?: { prefer?: "ai" | "stock"; force?: boolean },
+): Promise<{ hasImage: boolean; source: string | null; alt: string }> {
+  requireDb();
+  const draft = await prisma.draft.findUnique({
+    where: { id: draftId },
+    include: { brief: true, business: true },
+  });
+  if (!draft) throw new Error(`Draft ${draftId} not found`);
+
+  if (!opts?.force && (draft.heroImageData || draft.heroImageUrl)) {
+    return { hasImage: true, source: draft.heroImageSource, alt: draft.heroImageAlt ?? "" };
+  }
+
+  const platform = draft.business.cmsPlatform.toLowerCase() as CmsPlatform;
+  const productImage = await productImageLookup(draft.businessId, platform);
+  const hero = await sourceHeroImage(
+    { title: draft.title, keyword: draft.brief.targetKeyword, productImage },
+    { prefer: opts?.prefer },
+  ).catch(() => null);
+  if (!hero) return { hasImage: false, source: null, alt: "" };
+
+  await prisma.draft.update({
+    where: { id: draftId },
+    data: {
+      heroImageUrl: hero.url || null,
+      heroImageData: hero.base64 ?? null,
+      heroImageMime: hero.mime ?? null,
+      heroImageAlt: hero.alt,
+      heroImageSource: hero.source,
+    },
+  });
+  if (hero.source === "ai") {
+    await prisma.draft
+      .update({ where: { id: draftId }, data: { costCents: { increment: GEMINI_IMAGE_CENTS } } })
+      .catch(() => {});
+  }
+  return { hasImage: true, source: hero.source, alt: hero.alt };
+}
+
 /**
  * Take a finalized draft LIVE: insert surgical internal links (against the
  * current set of published pages), source a hero image, push to the CMS, then
@@ -1466,12 +1547,17 @@ export async function publishNow(
     try {
       const config = decryptJson(connector.configEnc);
       const adapter = getCmsAdapter(platform, config);
-      // Source a tasteful hero image + alt (Unsplash, or a store product photo).
-      const hero = await sourceHeroImage({
-        title: draft.title,
-        keyword: draft.brief.targetKeyword,
-        productImage: adapter.sourceProductImage?.bind(adapter),
-      }).catch(() => null);
+      // Use the hero image chosen on the review page; generate/source one now if
+      // the draft doesn't have one yet (headless/auto-publish path).
+      if (!draft.heroImageData && !draft.heroImageUrl) {
+        await ensureHeroImage(draft.id).catch((e) =>
+          console.error("[publish] hero image failed:", e instanceof Error ? e.message : e),
+        );
+      }
+      const heroRow = await prisma.draft.findUnique({
+        where: { id: draft.id },
+        select: { heroImageUrl: true, heroImageData: true, heroImageAlt: true },
+      });
 
       // Guarantee no dead link ships: validate every link against the live site
       // (and in-page anchors against the rendered headings). Anything that
@@ -1513,12 +1599,19 @@ export async function publishNow(
         slug,
         metaDescription,
         seoTitle: draft.title,
-        heroImageUrl: hero?.url,
-        heroImageAlt: hero?.alt,
+        heroImageUrl: heroRow?.heroImageUrl ?? undefined,
+        heroImageBase64: heroRow?.heroImageData ?? undefined,
+        heroImageAlt: heroRow?.heroImageAlt ?? undefined,
         publishState,
       });
       cmsId = res.cmsId;
       url = res.url;
+      // Shopify now hosts the image — drop the base64 blob to reclaim DB space.
+      if (heroRow?.heroImageData) {
+        await prisma.draft
+          .update({ where: { id: draft.id }, data: { heroImageData: null } })
+          .catch(() => {});
+      }
       // Shopify admin editor URL — where a hidden draft can be reviewed/previewed.
       const storeDomain = (config as Record<string, unknown>).storeDomain;
       if (platform === "shopify" && typeof storeDomain === "string" && cmsId) {

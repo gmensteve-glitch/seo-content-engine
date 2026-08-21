@@ -217,6 +217,10 @@ export interface PolishDraftVM {
   experienceNotes: string[];
   /** LLM cost to produce this piece, in cents. */
   costCents: number;
+  /** Whether a hero image has been chosen/generated for this piece. */
+  hasHeroImage: boolean;
+  /** How the current hero image was sourced: "ai" | "unsplash" | "product". */
+  heroImageSource: string | null;
   updatedAt: string;
 }
 

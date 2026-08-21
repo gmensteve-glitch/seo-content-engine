@@ -16,8 +16,11 @@ export interface PublishInput {
   seoTitle?: string;
   /** Optional tags/collection hints the platform may use. */
   tags?: string[];
-  /** Optional hero image URL. */
+  /** Optional hero image URL (stock/product photo). */
   heroImageUrl?: string;
+  /** Optional hero image bytes as base64 (AI-generated) — the CMS hosts it.
+   *  Takes precedence over heroImageUrl when both are present. */
+  heroImageBase64?: string;
   /** Alt text for the hero image (SEO + accessibility). */
   heroImageAlt?: string;
   /** Publish immediately vs save as draft in the CMS. */

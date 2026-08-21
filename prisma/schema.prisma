@@ -272,6 +272,14 @@ model Draft {
   // Accumulated LLM cost to produce this piece, in cents (write + grade + revise
   // + boost + improve). Powers per-blog cost + cost-vs-score analytics.
   costCents    Float       @default(0)
+  // Hero image, chosen at write time and swappable on the review page. For an
+  // AI-generated image the bytes live in heroImageData (base64) until publish
+  // (Shopify then hosts it); for a stock/product photo only heroImageUrl is set.
+  heroImageUrl    String?
+  heroImageAlt    String?  @db.Text
+  heroImageData   String?  @db.Text // base64 (AI images), cleared after publish
+  heroImageMime   String?
+  heroImageSource String?  // "ai" | "unsplash" | "product"
   grades       Grade[]
   page         Page?
   feedback     DraftFeedback[]
