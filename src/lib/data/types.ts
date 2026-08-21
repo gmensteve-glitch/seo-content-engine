@@ -31,6 +31,8 @@ export interface CostSummaryVM {
   count: number; // pieces with recorded cost
   totalCents: number;
   avgCents: number | null; // average cost per blog
+  todayCents: number; // spend on pieces created today
+  todayCount: number;
   byBand: { band: string; avgCents: number; count: number }[]; // cost by score band
 }
 

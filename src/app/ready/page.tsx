@@ -21,8 +21,13 @@ function Row({ d }: { d: PolishDraftVM }) {
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13.5px] font-medium">{d.title}</div>
-        <div className="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--muted)]">
-          <Tag size={10} /> {d.targetKeyword}
+        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--muted)]">
+          <span className="flex items-center gap-1 truncate">
+            <Tag size={10} /> {d.targetKeyword}
+          </span>
+          {d.costCents > 0 && (
+            <span className="shrink-0 text-[var(--subtle)]">${(d.costCents / 100).toFixed(2)}</span>
+          )}
         </div>
       </div>
       <ArrowRight size={14} className="shrink-0 text-[var(--accent)]" />

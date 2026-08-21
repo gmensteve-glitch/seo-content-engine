@@ -12,6 +12,7 @@ import {
   getConnectors,
   getPipelineHealth,
   getGoalDiagnostics,
+  getCostSummary,
 } from "@/lib/data/repo";
 import { setQualityThresholdAction, boostAllNearMissesAction } from "@/app/actions";
 import {
@@ -31,12 +32,13 @@ import {
   Wand2,
   MapPin,
   BookOpen,
+  DollarSign,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
-  const [biz, kpis, briefs, needsPolish, ready, pipeline, connectors, health, goal] =
+  const [biz, kpis, briefs, needsPolish, ready, pipeline, connectors, health, goal, cost] =
     await Promise.all([
       getBusiness(),
       getKpis(),
@@ -47,10 +49,14 @@ export default async function OverviewPage() {
       getConnectors(),
       getPipelineHealth(),
       getGoalDiagnostics(),
+      getCostSummary(),
     ]);
 
   const readyTotal = goal.readyLocal + goal.readyEver;
   const atGoal = goal.limiting === "none";
+  const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+  const shortfall = Math.max(0, goal.total - readyTotal);
+  const projectedFillCents = cost.avgCents !== null ? shortfall * cost.avgCents : null;
 
   const inProgress = pipeline.filter((c) => c.stage === "in_progress").length;
   const gscConnected = connectors.find((c) => c.type === "GSC")?.status === "connected";
@@ -172,6 +178,28 @@ export default async function OverviewPage() {
           <div className="mt-4 rounded-xl border border-[var(--success)] bg-[var(--success-bg)] px-4 py-3 text-[13px] text-[var(--success)]">
             <span className="font-medium">All set.</span> {goal.readyLocal} local + {goal.readyEver}{" "}
             evergreen are stacked and clean — go publish the good ones.
+          </div>
+        )}
+
+        {/* Spend — cost of the goal, in real dollars */}
+        {cost.avgCents !== null && (
+          <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-1 border-t border-[var(--border)] pt-3 text-[12px]">
+            <span className="flex items-center gap-1.5 text-[var(--muted)]">
+              <DollarSign size={13} /> Today&apos;s pieces:{" "}
+              <b className="text-[var(--text)]">{usd(cost.todayCents)}</b>
+              <span className="text-[var(--subtle)]">({cost.todayCount})</span>
+            </span>
+            <span className="text-[var(--muted)]">
+              Avg / blog: <b className="text-[var(--text)]">{usd(cost.avgCents)}</b>
+            </span>
+            {projectedFillCents !== null && shortfall > 0 && (
+              <span className="text-[var(--muted)]">
+                To fill {shortfall} more: <b className="text-[var(--text)]">~{usd(projectedFillCents)}</b>
+              </span>
+            )}
+            <Link href="/performance" className="ml-auto text-[var(--accent)] hover:underline">
+              cost by score →
+            </Link>
           </div>
         )}
       </div>

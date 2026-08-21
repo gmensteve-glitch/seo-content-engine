@@ -285,14 +285,21 @@ export async function getGoalDiagnostics(bizId = DEFAULT_BIZ): Promise<GoalDiagn
 /** Real per-blog cost, and cost broken down by score band — the actual $/quality
  *  curve from recorded token usage (replaces estimates). */
 export async function getCostSummary(bizId = DEFAULT_BIZ): Promise<CostSummaryVM> {
-  const empty: CostSummaryVM = { count: 0, totalCents: 0, avgCents: null, byBand: [] };
+  const empty: CostSummaryVM = {
+    count: 0, totalCents: 0, avgCents: null, todayCents: 0, todayCount: 0, byBand: [],
+  };
   if (!hasDatabase) return empty;
 
   const drafts = await prisma.draft.findMany({
     where: { businessId: bizId, costCents: { gt: 0 } },
-    select: { costCents: true, grades: { orderBy: { overall: "desc" }, take: 1 } },
+    select: { costCents: true, createdAt: true, grades: { orderBy: { overall: "desc" }, take: 1 } },
   });
   if (drafts.length === 0) return empty;
+
+  const startOfDay = new Date();
+  startOfDay.setUTCHours(0, 0, 0, 0);
+  const todayRows = drafts.filter((d) => d.createdAt >= startOfDay);
+  const todayCents = todayRows.reduce((a, d) => a + d.costCents, 0);
 
   const rows = drafts.map((d) => ({ cost: d.costCents, score: d.grades[0]?.overall ?? 0 }));
   const totalCents = rows.reduce((a, r) => a + r.cost, 0);
@@ -313,7 +320,14 @@ export async function getCostSummary(bizId = DEFAULT_BIZ): Promise<CostSummaryVM
     };
   }).filter((b) => b.count > 0);
 
-  return { count: rows.length, totalCents, avgCents: totalCents / rows.length, byBand };
+  return {
+    count: rows.length,
+    totalCents,
+    avgCents: totalCents / rows.length,
+    todayCents,
+    todayCount: todayRows.length,
+    byBand,
+  };
 }
 
 export async function getKpis(bizId = DEFAULT_BIZ): Promise<Kpis> {
