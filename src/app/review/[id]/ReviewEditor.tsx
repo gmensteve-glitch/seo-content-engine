@@ -24,7 +24,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   const [selection, setSelection] = useState("");
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState<
-    null | "boost" | "edit" | "regrade" | "schedule" | "publish" | "feedback"
+    null | "edit" | "regrade" | "schedule" | "publish" | "feedback"
   >(null);
   const [note, setNote] = useState("");
   const [done, setDone] = useState<null | { label: string; href: string }>(null);
@@ -130,42 +130,6 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       setNote("Passage updated. Re-grade to see the new score.");
     });
 
-  // Boost runs in the BACKGROUND (research + enrich + re-grade is too slow for one
-  // request). Kick it, then poll until it finishes so the button never hangs.
-  async function boost() {
-    setBusy("boost");
-    setNote("Boosting with your real product + web data… this runs in the background (~1–2 min).");
-    try {
-      const start = await post("/api/review/boost", { draftId: vm.id });
-      if (!start.ok) {
-        setNote(start.data.error ? `Error: ${start.data.error}` : "Couldn't start the boost.");
-        setBusy(null);
-        return;
-      }
-      const before = vm.overall;
-      for (let i = 0; i < 48; i++) {
-        await new Promise((r) => setTimeout(r, 5000));
-        const res = await fetch(`/api/review/draft?draftId=${vm.id}`);
-        const data = await res.json().catch(() => ({}));
-        if (data.draft) setVm(data.draft as PolishDraftVM);
-        if (!data.boosting) {
-          const now = (data.draft?.overall ?? before) as number;
-          setNote(
-            now > before
-              ? `Boost done — score moved ${before} → ${now}.`
-              : `Boost done — re-graded to ${now}. (If nothing moved, there wasn't enough new data to add.)`,
-          );
-          setBusy(null);
-          return;
-        }
-      }
-      setNote("Still boosting — give it another moment, then refresh.");
-      setBusy(null);
-    } catch {
-      setNote("Network error — try again.");
-      setBusy(null);
-    }
-  }
 
   const regrade = () =>
     run("regrade", "/api/review/regrade", { draftId: vm.id }, (d) => {
@@ -389,21 +353,24 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
           </div>
         </div>
       ) : !passed ? (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <button
-            onClick={boost}
-            disabled={busy !== null}
-            className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
-          >
-            <Sparkles size={15} /> {busy === "boost" ? "Boosting…" : "Boost with data"}
-          </button>
-          <button
-            onClick={regrade}
-            disabled={busy !== null}
-            className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-2 text-[13px] text-[var(--muted)] hover:bg-[var(--surface-2)] disabled:opacity-50"
-          >
-            <RefreshCw size={14} /> {busy === "regrade" ? "Grading…" : "Re-grade"}
-          </button>
+        <div className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-3">
+          <div className="flex items-start gap-2 text-[12.5px]">
+            <Sparkles size={15} className="mt-0.5 shrink-0 text-[var(--accent)]" />
+            <span>
+              <b>Already boosted to {vm.overall}.</b> The engine ran its data boost and revisions
+              automatically — this is its ceiling, just under your bar of {vm.threshold}. Add a real
+              detail below and re-grade to push it over, or reject it.
+            </span>
+          </div>
+          <div className="mt-2.5">
+            <button
+              onClick={regrade}
+              disabled={busy !== null}
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-2 text-[13px] text-[var(--muted)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+            >
+              <RefreshCw size={14} /> {busy === "regrade" ? "Grading…" : "Re-grade"}
+            </button>
+          </div>
         </div>
       ) : null}
 
