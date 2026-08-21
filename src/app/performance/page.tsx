@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
-import { getLivePages, getBusiness } from "@/lib/data/repo";
+import { getLivePages, getBusiness, getCostSummary } from "@/lib/data/repo";
 import { listPublishedBlogs } from "@/lib/pipeline/service";
-import { BarChart3, TrendingUp, PenLine, FileText, ExternalLink } from "lucide-react";
+import { BarChart3, TrendingUp, PenLine, FileText, ExternalLink, DollarSign } from "lucide-react";
+
+const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 const FLAG_TONE = {
   boost: "warn",
@@ -16,9 +18,10 @@ export const dynamic = "force-dynamic";
 
 export default async function PerformancePage() {
   const biz = await getBusiness();
-  const [pages, published] = await Promise.all([
+  const [pages, published, cost] = await Promise.all([
     getLivePages(),
     listPublishedBlogs(biz.id).catch(() => []),
+    getCostSummary(biz.id),
   ]);
 
   return (
@@ -27,6 +30,46 @@ export default async function PerformancePage() {
         title="Performance"
         subtitle="Results from Google Search Console + GA4. The engine turns these signals into improvement tasks."
       />
+
+      {/* Cost per blog — the real $/quality curve from recorded token usage */}
+      <Card className="mb-4">
+        <div className="mb-3 flex items-center gap-2">
+          <DollarSign size={16} className="text-[var(--accent)]" />
+          <h2 className="text-[15px] font-medium">Cost per blog</h2>
+          {cost.avgCents !== null && (
+            <span className="ml-auto text-[13px] text-[var(--muted)]">
+              avg <b className="text-[var(--text)]">{usd(cost.avgCents)}</b> · {cost.count} tracked
+            </span>
+          )}
+        </div>
+        {cost.avgCents === null ? (
+          <p className="text-[12px] text-[var(--subtle)]">
+            No cost data yet — new pieces record their token cost as the engine produces them.
+          </p>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="mb-1 text-[11px] text-[var(--subtle)]">Average cost by quality score</div>
+            {cost.byBand.map((b) => {
+              const max = Math.max(...cost.byBand.map((x) => x.avgCents), 1);
+              const pct = (b.avgCents / max) * 100;
+              return (
+                <div key={b.band} className="flex items-center gap-3 text-[12px]">
+                  <span className="w-14 shrink-0 text-[var(--muted)]">{b.band}</span>
+                  <div className="h-4 flex-1 overflow-hidden rounded bg-[var(--surface-2)]">
+                    <div
+                      className="h-full rounded bg-[var(--accent)]"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="w-24 shrink-0 text-right text-[var(--text)]">
+                    {usd(b.avgCents)} <span className="text-[var(--subtle)]">×{b.count}</span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
 
       {/* All published posts — straight from your live blog */}
       <Card className="mb-4">

@@ -27,6 +27,13 @@ export interface PipelineHealthVM {
   lastActivityLabel: string; // human "12m ago" / "no activity yet"
 }
 
+export interface CostSummaryVM {
+  count: number; // pieces with recorded cost
+  totalCents: number;
+  avgCents: number | null; // average cost per blog
+  byBand: { band: string; avgCents: number; count: number }[]; // cost by score band
+}
+
 export interface GoalDiagnosticsVM {
   total: number; // the goal (e.g. 10)
   localTarget: number;
@@ -165,6 +172,8 @@ export interface PolishDraftVM {
   loop: number;
   /** The writer's "Add your experience" callouts, extracted for a checklist. */
   experienceNotes: string[];
+  /** LLM cost to produce this piece, in cents. */
+  costCents: number;
   updatedAt: string;
 }
 

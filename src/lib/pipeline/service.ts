@@ -21,6 +21,18 @@ import { planLinks, applyLinks, type LinkTarget, type PlannedLink } from "@/lib/
 import { generateIdeaProposals, type IdeationContext } from "@/lib/agents/ideator";
 import { enrichDraft, rewritePassage, hasResources, type EnrichResources } from "@/lib/agents/enricher";
 import { finalizeDraftBody } from "@/lib/agents/finalize";
+import { withCostScope } from "@/lib/ai/cost";
+
+/** Run `fn` in a cost scope and add whatever it spent to the draft's running total. */
+async function trackDraftCost<T>(draftId: string, fn: () => Promise<T>): Promise<T> {
+  const { result, cents } = await withCostScope(fn);
+  if (cents > 0) {
+    await prisma.draft
+      .update({ where: { id: draftId }, data: { costCents: { increment: cents } } })
+      .catch(() => {});
+  }
+  return result;
+}
 import { serpTop } from "@/lib/connectors/dataforseo";
 import { scrapeMany } from "@/lib/connectors/firecrawl";
 import { dataforseoEnabled, firecrawlEnabled } from "@/lib/env";
@@ -671,19 +683,21 @@ export async function processQueuedDrafts(max = 10): Promise<number> {
       const claimed = await claimNextDraft();
       if (!claimed) break;
       try {
-        await runPipelineForBrief(claimed.briefId);
-        // Auto-boost a near-miss with our own data (no human needed). Runs once
-        // here; FAILED drafts aren't re-claimed, so it never loops.
-        const after = await prisma.draft.findUnique({
-          where: { id: claimed.id },
-          select: { status: true },
-        });
-        if (after?.status === "FAILED") {
-          // Auto-improve to the piece's ceiling (data boost + keep-best revises).
-          await autoImproveDraft(claimed.id).catch((e) => {
-            console.error(`[worker] auto-improve failed for ${claimed.id}:`, e instanceof Error ? e.message : e);
+        await trackDraftCost(claimed.id, async () => {
+          await runPipelineForBrief(claimed.briefId);
+          // Auto-boost a near-miss with our own data (no human needed). Runs once
+          // here; FAILED drafts aren't re-claimed, so it never loops.
+          const after = await prisma.draft.findUnique({
+            where: { id: claimed.id },
+            select: { status: true },
           });
-        }
+          if (after?.status === "FAILED") {
+            // Auto-improve to the piece's ceiling (data boost + keep-best revises).
+            await autoImproveDraft(claimed.id).catch((e) => {
+              console.error(`[worker] auto-improve failed for ${claimed.id}:`, e instanceof Error ? e.message : e);
+            });
+          }
+        });
       } catch (e) {
         console.error(
           `[worker] pipeline failed for draft ${claimed.id}:`,
@@ -1069,7 +1083,7 @@ export async function processBoostRequests(max = 5): Promise<number> {
       });
       if (!d) break;
       try {
-        await autoImproveDraft(d.id);
+        await trackDraftCost(d.id, () => autoImproveDraft(d.id));
       } catch (e) {
         console.error(`[boost] failed for ${d.id}:`, e instanceof Error ? e.message : e);
       } finally {

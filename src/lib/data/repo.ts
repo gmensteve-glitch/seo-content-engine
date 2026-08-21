@@ -12,6 +12,7 @@ import type {
   PipelineHealthVM,
   ScoreCalibrationVM,
   GoalDiagnosticsVM,
+  CostSummaryVM,
   PipelineCard,
   IdeaVM,
   BriefVM,
@@ -279,6 +280,40 @@ export async function getGoalDiagnostics(bizId = DEFAULT_BIZ): Promise<GoalDiagn
     recommendedBar, projectedLocal: proj.local, projectedEver: proj.ever,
     limiting, poolLocal: localScores.length, poolEver: everScores.length,
   };
+}
+
+/** Real per-blog cost, and cost broken down by score band — the actual $/quality
+ *  curve from recorded token usage (replaces estimates). */
+export async function getCostSummary(bizId = DEFAULT_BIZ): Promise<CostSummaryVM> {
+  const empty: CostSummaryVM = { count: 0, totalCents: 0, avgCents: null, byBand: [] };
+  if (!hasDatabase) return empty;
+
+  const drafts = await prisma.draft.findMany({
+    where: { businessId: bizId, costCents: { gt: 0 } },
+    select: { costCents: true, grades: { orderBy: { overall: "desc" }, take: 1 } },
+  });
+  if (drafts.length === 0) return empty;
+
+  const rows = drafts.map((d) => ({ cost: d.costCents, score: d.grades[0]?.overall ?? 0 }));
+  const totalCents = rows.reduce((a, r) => a + r.cost, 0);
+
+  const BANDS: { band: string; lo: number; hi: number }[] = [
+    { band: "< 70", lo: 0, hi: 69 },
+    { band: "70–73", lo: 70, hi: 73 },
+    { band: "74–76", lo: 74, hi: 76 },
+    { band: "77–79", lo: 77, hi: 79 },
+    { band: "80+", lo: 80, hi: 1000 },
+  ];
+  const byBand = BANDS.map((b) => {
+    const inBand = rows.filter((r) => r.score >= b.lo && r.score <= b.hi);
+    return {
+      band: b.band,
+      count: inBand.length,
+      avgCents: inBand.length ? inBand.reduce((a, r) => a + r.cost, 0) / inBand.length : 0,
+    };
+  }).filter((b) => b.count > 0);
+
+  return { count: rows.length, totalCents, avgCents: totalCents / rows.length, byBand };
 }
 
 export async function getKpis(bizId = DEFAULT_BIZ): Promise<Kpis> {
@@ -630,6 +665,7 @@ type PolishRow = {
   updatedAt: Date;
   brief: { targetKeyword: string; idea?: { kind: string } | null };
   grades: { overall: number; feedback: string | null; dimensions: unknown; version: number }[];
+  costCents?: number;
 };
 
 /** Map a draft (+ its latest grade + brief) into the polish view-model. */
@@ -656,6 +692,7 @@ function toPolishVM(d: PolishRow, threshold: number): PolishDraftVM {
     dimensions,
     loop: g?.version ?? 1,
     experienceNotes: extractExperienceNotes(d.bodyMd),
+    costCents: d.costCents ?? 0,
     updatedAt: d.updatedAt.toISOString(),
   };
 }

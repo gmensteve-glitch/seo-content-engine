@@ -215,6 +215,9 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
         <span className="text-[12.5px] text-[var(--muted)]">
           / 100 · {passed ? `passed threshold (${vm.threshold})` : `${gap} below threshold (${vm.threshold})`} · loop{" "}
           {vm.loop}
+          {vm.costCents > 0 && (
+            <> · cost <b className="text-[var(--text)]">${(vm.costCents / 100).toFixed(2)}</b></>
+          )}
         </span>
       </div>
 

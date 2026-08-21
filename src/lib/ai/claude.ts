@@ -16,6 +16,7 @@
 // params (adaptive thinking, output_config) — the wire shape is correct.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { recordUsage } from "@/lib/ai/cost";
 
 const HAIKU = "claude-haiku-4-5-20251001";
 const SONNET = "claude-sonnet-5";
@@ -78,6 +79,7 @@ export async function completeText(opts: CompleteOpts): Promise<string> {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const msg = (await client().messages.create(body as any)) as Anthropic.Message;
+  recordUsage(body.model, msg.usage);
   if (msg.stop_reason === "refusal") {
     throw new Error("Claude declined this request (refusal).");
   }
@@ -101,6 +103,7 @@ export async function structured<T>(opts: StructuredOpts<T>): Promise<T> {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const msg = (await client().messages.create(body as any)) as Anthropic.Message;
+  recordUsage(body.model, msg.usage);
   if (msg.stop_reason === "refusal") {
     throw new Error("Claude declined this request (refusal).");
   }
