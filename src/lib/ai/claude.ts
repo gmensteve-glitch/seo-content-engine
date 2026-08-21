@@ -47,16 +47,33 @@ export interface CompleteOpts {
   system?: string;
   model?: string;
   maxTokens?: number;
+  /** Cheap, low-stakes stage (ideation, extraction): pin to a small model and
+   *  ignore the global PIPELINE_MODEL override — brainstorming never needs a
+   *  premium model, so it stays cheap even during a premium run. */
+  cheap?: boolean;
+}
+
+/** Cache the (stable) system prompt so it isn't re-billed at full price on every
+ *  call. Behavior-identical — same text, same position — just cached. */
+function cachedSystem(system?: string) {
+  if (!system) return undefined;
+  return [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
+}
+
+/** Resolve the model: cheap stages stay pinned; everything else honors the
+ *  global PIPELINE_MODEL override. */
+function resolveModel(opts: CompleteOpts, fallback: string): string {
+  if (opts.cheap) return opts.model ?? MODELS.ideas;
+  return process.env.PIPELINE_MODEL || opts.model || fallback;
 }
 
 /** Free-form text generation (e.g. the writer). */
 export async function completeText(opts: CompleteOpts): Promise<string> {
   const body = {
-    // PIPELINE_MODEL (if set) overrides every stage — a global cost/speed lever.
-    model: process.env.PIPELINE_MODEL || opts.model || MODELS.writer,
+    model: resolveModel(opts, MODELS.writer),
     max_tokens: opts.maxTokens ?? 16000,
     thinking: { type: "adaptive" },
-    system: opts.system,
+    system: cachedSystem(opts.system),
     messages: [{ role: "user", content: opts.prompt }],
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -75,10 +92,10 @@ export interface StructuredOpts<_T> extends CompleteOpts {
 /** Schema-constrained JSON output (research, grader). Returns the parsed object. */
 export async function structured<T>(opts: StructuredOpts<T>): Promise<T> {
   const body = {
-    model: process.env.PIPELINE_MODEL || opts.model || MODELS.grader,
+    model: resolveModel(opts, MODELS.grader),
     max_tokens: opts.maxTokens ?? 16000,
     thinking: { type: "adaptive" },
-    system: opts.system,
+    system: cachedSystem(opts.system),
     messages: [{ role: "user", content: opts.prompt }],
     output_config: { format: { type: "json_schema", schema: opts.schema } },
   };
