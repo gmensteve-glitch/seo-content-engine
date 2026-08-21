@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { PolishDraftVM } from "@/lib/data/types";
 import { Bar } from "@/components/ui";
@@ -76,12 +76,9 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
     }
   }
 
-  async function togglePreview() {
-    if (showPreview) {
-      setShowPreview(false);
-      return;
-    }
-    setPreviewLoading(true);
+  // Fetch the rendered preview. First statement is `await`, so no synchronous
+  // setState in the mount effect.
+  const loadPreview = useCallback(async () => {
     try {
       const res = await fetch(`/api/review/preview?draftId=${vm.id}`);
       const data = await res.json().catch(() => ({}));
@@ -93,6 +90,28 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       }
     } catch {
       setNote("Network error building preview.");
+    }
+  }, [vm.id]);
+
+  // Land on the rendered "as it'll look on the site" view by default. loadPreview
+  // only setState after an await (fetch), so this is a safe fetch-on-mount.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadPreview();
+  }, [loadPreview]);
+
+  async function togglePreview() {
+    if (showPreview) {
+      setShowPreview(false);
+      return;
+    }
+    if (preview) {
+      setShowPreview(true);
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      await loadPreview();
     } finally {
       setPreviewLoading(false);
     }
@@ -397,7 +416,8 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       {/* Read the post — highlight any text to reword it, or preview the final render */}
       <div className="mb-1.5 flex items-center gap-2">
         <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--subtle)]">
-          <MousePointerClick size={12} /> {showPreview ? "Final post preview (as it will publish)" : "The post — highlight any line to reword it"}
+          <MousePointerClick size={12} />{" "}
+          {showPreview ? "How it'll look on your site" : "Source — highlight any line to reword it"}
         </div>
         <button
           onClick={togglePreview}
@@ -405,7 +425,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
           className="ml-auto flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-2.5 py-1 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)] disabled:opacity-50"
         >
           <Eye size={13} />
-          {previewLoading ? "Rendering…" : showPreview ? "Show source" : "Preview final post"}
+          {previewLoading ? "Rendering…" : showPreview ? "Edit / reword source" : "View as published"}
         </button>
       </div>
 
@@ -456,10 +476,12 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
             <div className="text-[16px] leading-snug text-[#1a0dab]">{preview.seoTitle}</div>
             <div className="text-[12.5px] leading-snug text-[#4d5156]">{preview.metaDescription}</div>
           </div>
-          <div
-            className="prose-preview max-h-[55vh] overflow-y-auto rounded-lg border border-[var(--border)] bg-white p-5 text-[14px] leading-relaxed text-[#1a1a1a]"
-            dangerouslySetInnerHTML={{ __html: preview.html }}
-          />
+          {/* Rendered like a real blog page — white readable column + article typography */}
+          <div className="max-h-[70vh] overflow-y-auto rounded-xl border border-[var(--border)] bg-white">
+            <div className="mx-auto max-w-[720px] px-6 py-8">
+              <article className="article-preview" dangerouslySetInnerHTML={{ __html: preview.html }} />
+            </div>
+          </div>
         </>
       ) : (
         <div
