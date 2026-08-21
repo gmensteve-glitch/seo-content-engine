@@ -953,20 +953,36 @@ export async function boostDraft(draftId: string): Promise<{
 }
 
 /**
- * Auto-improve a near-miss to its ceiling with NO human involvement: one data
- * boost, then up to 2 keep-best writer revise+regrade passes. Stops early once
- * it passes or stops improving. This is what turns a 65 into the best score the
- * piece can reach on its own.
+ * Auto-improve a near-miss with NO human involvement: one data boost, then ONE
+ * keep-best revise+regrade — but only spend tokens on pieces within striking
+ * distance of the bar. A piece far below (a lost cause) is left alone rather than
+ * burning a dozen long LLM calls on it. Cost-bounded by design.
  */
 export async function autoImproveDraft(draftId: string): Promise<void> {
   requireDb();
+
+  // Cheap pre-check: skip pieces that already pass, or are too far below the bar
+  // to be worth the (expensive) boost + revise. Only "close" near-misses qualify.
+  const pre = await prisma.draft.findUnique({
+    where: { id: draftId },
+    include: {
+      business: { select: { qualityThreshold: true } },
+      grades: { orderBy: { overall: "desc" }, take: 1 },
+    },
+  });
+  if (!pre) return;
+  const bar = pre.business.qualityThreshold;
+  const best0 = pre.grades[0]?.overall ?? 0;
+  if (best0 >= bar) return; // already passes
+  if (best0 > 0 && best0 < bar - 15) return; // too far — don't throw tokens at it
+
   const boost = await boostDraft(draftId).catch((e) => {
     console.error(`[auto-improve] boost failed for ${draftId}:`, e instanceof Error ? e.message : e);
     return null;
   });
   if (boost?.passed) return;
 
-  for (let pass = 0; pass < 2; pass++) {
+  for (let pass = 0; pass < 1; pass++) {
     const draft = await prisma.draft.findUnique({
       where: { id: draftId },
       include: {

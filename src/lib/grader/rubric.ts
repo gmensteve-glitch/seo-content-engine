@@ -86,7 +86,7 @@ export type GradeResult = {
 export const DEFAULT_THRESHOLD = 85;
 
 /** Max self-revision loops before flagging a human. */
-export const MAX_REVISION_LOOPS = 3;
+export const MAX_REVISION_LOOPS = 2;
 
 export function computeOverall(dimensions: Record<string, DimensionScore>): number {
   return Math.round(
