@@ -35,7 +35,8 @@ async function trackDraftCost<T>(draftId: string, fn: () => Promise<T>): Promise
 }
 import { serpTop } from "@/lib/connectors/dataforseo";
 import { scrapeMany } from "@/lib/connectors/firecrawl";
-import { dataforseoEnabled, firecrawlEnabled } from "@/lib/env";
+import { fetchGscRows, strikingDistance, decayingPages } from "@/lib/connectors/gsc";
+import { dataforseoEnabled, firecrawlEnabled, gscEnabled } from "@/lib/env";
 import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
@@ -179,7 +180,60 @@ function normTitle(s: string): string {
  * Degrades gracefully — before analytics are connected it still reports which
  * pillars are under-served so ideation stays smart.
  */
-async function buildPerformanceNote(businessId: string, pillars: string[]): Promise<string> {
+/**
+ * Live Search Console opportunities, formatted as an emphatic instruction block
+ * for the ideator. Striking-distance queries (ranking page 2, real impressions)
+ * are the highest-ROI new content — one strong piece pushes them to page 1.
+ * Returns "" when GSC isn't connected, so ideation degrades gracefully.
+ */
+async function buildGscOpportunityNote(existingTitles: string[] = []): Promise<string> {
+  if (!gscEnabled()) return "";
+  try {
+    const [rows, decaying] = await Promise.all([
+      fetchGscRows({ days: 28, dimensions: ["query"], rowLimit: 1000 }),
+      decayingPages({ window: 28, minPriorClicks: 20, minDropPct: 30 }),
+    ]);
+    if (!rows) return "";
+
+    const have = new Set(existingTitles.map((t) => t.toLowerCase()));
+    const striking = strikingDistance(rows)
+      // Skip queries we clearly already have a titled piece for.
+      .filter((r) => !have.has(r.query.toLowerCase()))
+      .slice(0, 12);
+
+    let note = "";
+    if (striking.length) {
+      const list = striking
+        .map((r) => `"${r.query}" (pos ${r.position.toFixed(0)}, ${r.impressions} impressions/mo)`)
+        .join("; ");
+      note +=
+        `PRIORITY SEARCH OPPORTUNITIES — this site already ranks on PAGE 2 for these real queries; ` +
+        `each has strong monthly impressions but few clicks because it's just off page 1. ` +
+        `At least half your ideas MUST directly target these keywords (or a tightly-focused long-tail of them) ` +
+        `to push them onto page 1 — this is where the traffic and revenue are: ${list}.`;
+    }
+    if (decaying && decaying.length) {
+      const list = decaying
+        .slice(0, 4)
+        .map((d) => `${d.page.replace(/^https?:\/\/[^/]+/, "")} (down ${d.dropPct}%)`)
+        .join("; ");
+      note += ` DECAYING PAGES (losing traffic — propose fresh supporting/cluster content that links to and reinforces these topics): ${list}.`;
+    }
+    return note;
+  } catch (e) {
+    console.error("[gsc] opportunity note failed:", e instanceof Error ? e.message : e);
+    return "";
+  }
+}
+
+async function buildPerformanceNote(
+  businessId: string,
+  pillars: string[],
+  existingTitles: string[] = [],
+): Promise<string> {
+  // Live search-demand signal comes first — it's the strongest steer we have.
+  const gscNote = await buildGscOpportunityNote(existingTitles);
+
   const pages = await prisma.page.findMany({
     where: { businessId, publishedAt: { not: null } },
     include: {
@@ -247,7 +301,7 @@ export async function generateIdeas(businessId: string, count = 6): Promise<numb
   const existingTitles = [...ideas.map((i) => i.title), ...drafts.map((d) => d.title)];
   const seen = new Set(existingTitles.map(normTitle));
 
-  const performanceNote = await buildPerformanceNote(businessId, pillarNames);
+  const performanceNote = await buildPerformanceNote(businessId, pillarNames, existingTitles);
 
   // Split the batch by the business's local/evergreen target ratio.
   const targetLocal = Math.round((count * (business.localRatio ?? 50)) / 100);
