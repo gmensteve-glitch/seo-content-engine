@@ -14,6 +14,7 @@ import {
   getGoalDiagnostics,
   getCostSummary,
   getSeoOpportunities,
+  getKeywordMovers,
 } from "@/lib/data/repo";
 import { setQualityThresholdAction, boostAllNearMissesAction } from "@/app/actions";
 import {
@@ -41,7 +42,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
-  const [biz, kpis, briefs, needsPolish, ready, pipeline, connectors, health, goal, cost, seo] =
+  const [biz, kpis, briefs, needsPolish, ready, pipeline, connectors, health, goal, cost, seo, movers] =
     await Promise.all([
       getBusiness(),
       getKpis(),
@@ -54,6 +55,7 @@ export default async function OverviewPage() {
       getGoalDiagnostics(),
       getCostSummary(),
       getSeoOpportunities(),
+      getKeywordMovers(),
     ]);
 
   const readyTotal = goal.readyLocal + goal.readyEver;
@@ -422,6 +424,44 @@ export default async function OverviewPage() {
         </>
       )}
 
+      {/* 2d) Movers — rank movement from stored history (needs a few days of data) */}
+      {seo.connected && (
+        <>
+          <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium text-[var(--muted)]">
+            <TrendingUp size={13} /> Movers
+            {movers.hasHistory && (
+              <span className="text-[11px] text-[var(--subtle)]">vs {movers.daysSpan}d ago</span>
+            )}
+          </div>
+          <Card className="mb-5">
+            {!movers.hasHistory ? (
+              <div className="flex items-center gap-2.5 py-1 text-[12.5px] text-[var(--muted)]">
+                <Loader2 size={15} className="text-[var(--subtle)]" />
+                Collecting rank data — movers appear once there are a few days of history. Check
+                back in a day or two.
+              </div>
+            ) : (
+              <div className="grid gap-5 sm:grid-cols-2">
+                <MoverColumn
+                  title="Climbing"
+                  icon={<TrendingUp size={13} className="text-[var(--success)]" />}
+                  tone="success"
+                  rows={movers.climbers}
+                  empty="No climbers yet this week."
+                />
+                <MoverColumn
+                  title="Slipping"
+                  icon={<TrendingDown size={13} className="text-[var(--warn)]" />}
+                  tone="warn"
+                  rows={movers.droppers}
+                  empty="Nothing slipping — good."
+                />
+              </div>
+            )}
+          </Card>
+        </>
+      )}
+
       {/* 3) Search performance — honest: real only once GSC is connected */}
       <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium text-[var(--muted)]">
         <Search size={13} /> Search performance
@@ -485,6 +525,48 @@ function GoalBar({
           style={{ width: `${pct}%` }}
         />
       </div>
+    </div>
+  );
+}
+
+/** One side of the Movers panel — climbers or droppers. */
+function MoverColumn({
+  title,
+  icon,
+  tone,
+  rows,
+  empty,
+}: {
+  title: string;
+  icon: ReactNode;
+  tone: "success" | "warn";
+  rows: { query: string; position: number; delta: number }[];
+  empty: string;
+}) {
+  const color = tone === "success" ? "text-[var(--success)]" : "text-[var(--warn)]";
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-[var(--muted)]">
+        {icon} {title}
+      </div>
+      {rows.length === 0 ? (
+        <div className="text-[12px] text-[var(--subtle)]">{empty}</div>
+      ) : (
+        <div className="space-y-1.5">
+          {rows.map((m) => (
+            <div key={m.query} className="flex items-center justify-between gap-2 text-[12.5px]">
+              <span className="truncate">{m.query}</span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="text-[11px] text-[var(--muted)]">pos {m.position.toFixed(0)}</span>
+                <span className={`font-medium ${color}`}>
+                  {m.delta > 0 ? "▲" : "▼"}
+                  {Math.abs(m.delta).toFixed(0)}
+                </span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

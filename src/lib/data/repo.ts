@@ -25,6 +25,7 @@ import type {
   CalendarEntryVM,
   PolishDraftVM,
   SeoOpportunitiesVM,
+  MoversVM,
 } from "@/lib/data/types";
 import { fetchGscRows, strikingDistance, decayingPages } from "@/lib/connectors/gsc";
 import { gscEnabled } from "@/lib/env";
@@ -380,6 +381,70 @@ export async function getSeoOpportunities(): Promise<SeoOpportunitiesVM> {
     console.error("[gsc] getSeoOpportunities failed:", e instanceof Error ? e.message : e);
     return empty;
   }
+}
+
+/**
+ * Rank movement from the stored KeywordRank history: compares the most recent
+ * snapshot to one ~7 days earlier (or the earliest we have) and surfaces the
+ * keywords that climbed toward page 1 and those slipping. Returns
+ * hasHistory:false until at least two snapshot days exist, so the UI can show a
+ * "collecting data" state rather than an empty one.
+ */
+export async function getKeywordMovers(bizId = DEFAULT_BIZ): Promise<MoversVM> {
+  const empty: MoversVM = { hasHistory: false, daysSpan: 0, climbers: [], droppers: [] };
+  if (!hasDatabase) return empty;
+
+  // Distinct snapshot days, newest first.
+  const days = await prisma.keywordRank.findMany({
+    where: { businessId: bizId },
+    distinct: ["date"],
+    select: { date: true },
+    orderBy: { date: "desc" },
+    take: 30,
+  });
+  if (days.length < 2) return empty;
+
+  const latest = days[0].date;
+  const weekMs = 7 * 86_400_000;
+  // Prefer a snapshot ~7 days back; else the oldest we have.
+  const prior =
+    days.find((d) => latest.getTime() - d.date.getTime() >= weekMs)?.date ??
+    days[days.length - 1].date;
+  const daysSpan = Math.round((latest.getTime() - prior.getTime()) / 86_400_000);
+
+  const [latestRows, priorRows] = await Promise.all([
+    prisma.keywordRank.findMany({
+      where: { businessId: bizId, date: latest },
+      select: { query: true, position: true, impressions: true },
+    }),
+    prisma.keywordRank.findMany({
+      where: { businessId: bizId, date: prior },
+      select: { query: true, position: true },
+    }),
+  ]);
+
+  const priorPos = new Map(priorRows.map((r) => [r.query, r.position]));
+  const movers = latestRows
+    .filter((r) => r.impressions >= 10 && priorPos.has(r.query))
+    .map((r) => ({
+      query: r.query,
+      position: r.position,
+      impressions: r.impressions,
+      // Lower position = better rank, so improvement = prior − latest.
+      delta: (priorPos.get(r.query) as number) - r.position,
+    }))
+    .filter((m) => Math.abs(m.delta) >= 0.5); // ignore rank noise
+
+  const climbers = movers
+    .filter((m) => m.delta > 0)
+    .sort((a, b) => b.delta - a.delta)
+    .slice(0, 6);
+  const droppers = movers
+    .filter((m) => m.delta < 0)
+    .sort((a, b) => a.delta - b.delta)
+    .slice(0, 6);
+
+  return { hasHistory: true, daysSpan, climbers, droppers };
 }
 
 export async function getKpis(bizId = DEFAULT_BIZ): Promise<Kpis> {

@@ -69,6 +69,22 @@ export interface DecayingPageVM {
   priorClicks: number;
 }
 
+/** A keyword whose rank moved between two stored snapshots. */
+export interface KeywordMoverVM {
+  query: string;
+  position: number; // latest average rank
+  delta: number; // positions improved since prior (positive = climbed up)
+  impressions: number; // latest monthly, for weighting
+}
+
+/** Rank movement over time, for the Overview "Movers" strip. */
+export interface MoversVM {
+  hasHistory: boolean; // ≥2 distinct snapshot days exist
+  daysSpan: number; // days between the compared snapshots
+  climbers: KeywordMoverVM[]; // moved toward page 1, best first
+  droppers: KeywordMoverVM[]; // slipping, worst first
+}
+
 /** Live Search Console opportunities for the Overview panel. */
 export interface SeoOpportunitiesVM {
   connected: boolean; // GSC service account wired + returning data
