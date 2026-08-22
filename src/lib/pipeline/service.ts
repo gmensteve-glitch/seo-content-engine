@@ -1462,6 +1462,61 @@ async function productImageLookup(
 }
 
 /**
+ * Turn accumulated image feedback into a steering clause appended to every image
+ * prompt — the "training" signal. Rejections become "Avoid …", likes become
+ * "Prefer …". Returns undefined when there's no feedback yet.
+ */
+async function buildImageSteer(businessId: string): Promise<string | undefined> {
+  const fb = await prisma.imageFeedback.findMany({
+    where: { businessId },
+    orderBy: { createdAt: "desc" },
+    take: 40,
+  });
+  if (!fb.length) return undefined;
+  const uniq = (rows: typeof fb) => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const r of rows) {
+      const s = r.reason.trim();
+      const key = s.toLowerCase();
+      if (s && !seen.has(key)) {
+        seen.add(key);
+        out.push(s);
+      }
+      if (out.length >= 6) break;
+    }
+    return out;
+  };
+  const avoid = uniq(fb.filter((f) => f.verdict === "REJECT"));
+  const prefer = uniq(fb.filter((f) => f.verdict === "LIKE"));
+  const parts: string[] = [];
+  if (avoid.length) parts.push(`Avoid, based on prior rejected images: ${avoid.join("; ")}.`);
+  if (prefer.length) parts.push(`Prefer, based on images that worked: ${prefer.join("; ")}.`);
+  return parts.length ? parts.join(" ") : undefined;
+}
+
+/**
+ * Record operator feedback on a generated image. Business-scoped so it steers
+ * all future generations (see buildImageSteer). The review page calls this, then
+ * regenerates on a reject so the fix is immediate.
+ */
+export async function recordImageFeedback(
+  draftId: string,
+  verdict: "LIKE" | "REJECT",
+  reason: string,
+): Promise<void> {
+  requireDb();
+  const draft = await prisma.draft.findUnique({
+    where: { id: draftId },
+    select: { businessId: true },
+  });
+  if (!draft) throw new Error(`Draft ${draftId} not found`);
+  await prisma.imageFeedback.create({
+    data: { businessId: draft.businessId, draftId, verdict, reason: reason.slice(0, 500) },
+  });
+}
+
+/**
  * Make sure a draft has a hero image, storing it on the draft so the review page
  * can show and swap it. `prefer` ("ai" | "stock") + `force` drive the review
  * page's "generate a new image" / "use a stock photo" buttons. AI images add
@@ -1484,8 +1539,9 @@ export async function ensureHeroImage(
 
   const platform = draft.business.cmsPlatform.toLowerCase() as CmsPlatform;
   const productImage = await productImageLookup(draft.businessId, platform);
+  const steer = await buildImageSteer(draft.businessId);
   const hero = await sourceHeroImage(
-    { title: draft.title, keyword: draft.brief.targetKeyword, productImage },
+    { title: draft.title, keyword: draft.brief.targetKeyword, productImage, steer },
     { prefer: opts?.prefer },
   ).catch(() => null);
   if (!hero) return { hasImage: false, source: null, alt: "" };

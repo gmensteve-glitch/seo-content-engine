@@ -6,7 +6,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma, hasDatabase } from "@/lib/db";
-import { ensureHeroImage } from "@/lib/pipeline/service";
+import { ensureHeroImage, recordImageFeedback } from "@/lib/pipeline/service";
 
 export const dynamic = "force-dynamic";
 
@@ -36,13 +36,26 @@ export async function GET(req: Request): Promise<Response> {
 
 export async function POST(req: Request): Promise<Response> {
   if (!hasDatabase) return NextResponse.json({ error: "no DATABASE_URL" }, { status: 400 });
-  const { draftId, prefer } = (await req.json().catch(() => ({}))) as {
+  const { draftId, prefer, feedback } = (await req.json().catch(() => ({}))) as {
     draftId?: string;
     prefer?: "ai" | "stock";
+    feedback?: { verdict?: "LIKE" | "REJECT"; reason?: string };
   };
   if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
 
   try {
+    // Feedback path: record it (steers all future images). On a reject, also
+    // regenerate now so the learned "avoid" applies to the replacement image.
+    if (feedback?.verdict) {
+      await recordImageFeedback(draftId, feedback.verdict, feedback.reason ?? feedback.verdict);
+      if (feedback.verdict === "REJECT") {
+        const result = await ensureHeroImage(draftId, { prefer: "ai", force: true });
+        return NextResponse.json({ ...result, regenerated: true });
+      }
+      return NextResponse.json({ recorded: true });
+    }
+
+    // Generate / rotate path.
     const result = await ensureHeroImage(draftId, { prefer, force: true });
     return NextResponse.json(result);
   } catch (e) {

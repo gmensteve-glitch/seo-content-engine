@@ -20,6 +20,16 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 
+// Preset image rejections. The `reason` is a full instruction — it's both stored
+// as feedback and injected into future image prompts as a learned "avoid" rule.
+const IMAGE_REJECTS: { label: string; reason: string }[] = [
+  { label: "Floating", reason: "the subject was floating or not resting on a surface — keep it firmly grounded on a real surface with proper contact shadows" },
+  { label: "Looks fake / AI", reason: "it looked fake, CGI, or AI-generated — it must look like a real professional photograph, not a render" },
+  { label: "Wrong subject", reason: "the subject was wrong or confusing for the topic — depict the actual subject of the article clearly" },
+  { label: "Off-brand", reason: "the tone was off-brand — keep it more dignified, understated, and respectful" },
+  { label: "Too cluttered", reason: "the composition was too busy — use a simpler, cleaner composition with one clear subject" },
+];
+
 export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   const [vm, setVm] = useState<PolishDraftVM>(initial);
   const [selection, setSelection] = useState("");
@@ -41,7 +51,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   }>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [imgBusy, setImgBusy] = useState<null | "ai" | "stock">(null);
+  const [imgBusy, setImgBusy] = useState<null | "ai" | "stock" | "like" | "reject">(null);
   const [hasImg, setHasImg] = useState(initial.hasHeroImage);
   const [imgSource, setImgSource] = useState<string | null>(initial.heroImageSource);
   const [imgVer, setImgVer] = useState(0); // cache-bust the <img> after a swap
@@ -78,6 +88,35 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       setImgSource((data.source as string) ?? null);
       setImgVer((v) => v + 1);
       setNote(prefer === "ai" ? "New image generated." : "Swapped to a stock photo.");
+    } catch {
+      setNote("Network error — try again.");
+    }
+    setImgBusy(null);
+  }
+
+  // Leave feedback on the current image. A LIKE is just recorded (steers future
+  // images); a REJECT records the reason AND regenerates now with it applied.
+  async function imageFeedback(verdict: "LIKE" | "REJECT", reason: string) {
+    setImgBusy(verdict === "LIKE" ? "like" : "reject");
+    setNote(verdict === "LIKE" ? "Saving your feedback…" : `Rejected (“${reason}”) — regenerating with that in mind…`);
+    try {
+      const { ok, data } = await post("/api/review/image", {
+        draftId: vm.id,
+        feedback: { verdict, reason },
+      });
+      if (!ok) {
+        setNote(data.error ? `Error: ${data.error}` : "Couldn't save feedback.");
+        setImgBusy(null);
+        return;
+      }
+      if (data.regenerated) {
+        setHasImg(Boolean(data.hasImage));
+        setImgSource((data.source as string) ?? null);
+        setImgVer((v) => v + 1);
+        setNote("New image generated with your feedback applied. It'll keep learning from every rating.");
+      } else {
+        setNote("Thanks — noted. Future images will lean this way.");
+      }
     } catch {
       setNote("Network error — try again.");
     }
@@ -438,12 +477,39 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
           </div>
         </div>
         {hasImg ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={`/api/review/image?draftId=${vm.id}&v=${imgVer}`}
-            alt={vm.title}
-            className="max-h-72 w-full rounded-lg object-cover"
-          />
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={`/api/review/image?draftId=${vm.id}&v=${imgVer}`}
+              alt={vm.title}
+              className="max-h-72 w-full rounded-lg object-cover"
+            />
+            {/* Feedback — trains future image generation for this business */}
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-[11px] text-[var(--muted)]">Rate this image:</span>
+              <button
+                onClick={() => imageFeedback("LIKE", "This style works well — more like this")}
+                disabled={imgBusy !== null}
+                className="flex items-center gap-1 rounded-full border border-[var(--success)] px-2.5 py-1 text-[11px] text-[var(--success)] hover:bg-[var(--success-bg)] disabled:opacity-50"
+              >
+                <ThumbsUp size={11} /> Good
+              </button>
+              {IMAGE_REJECTS.map((r) => (
+                <button
+                  key={r.label}
+                  onClick={() => imageFeedback("REJECT", r.reason)}
+                  disabled={imgBusy !== null}
+                  className="flex items-center gap-1 rounded-full border border-[var(--border-strong)] px-2.5 py-1 text-[11px] text-[var(--muted)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+                  title={`Reject: ${r.reason}`}
+                >
+                  <ThumbsDown size={11} /> {r.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[10.5px] text-[var(--subtle)]">
+              Rejecting regenerates with your note applied — and every rating trains future images.
+            </p>
+          </>
         ) : (
           <div className="flex items-center justify-center rounded-lg border border-dashed border-[var(--border-strong)] py-8 text-[12px] text-[var(--muted)]">
             No image yet — generate one, or the engine will add one automatically.

@@ -74,8 +74,24 @@ model Business {
   pages        Page[]
   schedules    Schedule[]
   keywordRanks KeywordRank[]
+  imageFeedback ImageFeedback[]
 
   @@index([domain])
+}
+
+// Feedback on generated hero images — business-scoped so it accumulates into a
+// persistent "avoid / prefer" steer that's injected into every future image
+// prompt. This is how the operator "trains" image generation without fine-tuning.
+model ImageFeedback {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+  draftId    String? // which draft's image prompted this (optional)
+  verdict    String // "LIKE" | "REJECT"
+  reason     String   @db.Text // preset tag(s) + optional freeform note
+  createdAt  DateTime @default(now())
+
+  @@index([businessId, createdAt])
 }
 
 // Daily query-level ranking snapshot from Search Console. One row per

@@ -30,6 +30,9 @@ export interface ImageRequest {
   keyword: string;
   /** Optional store-product image lookup (from the CMS adapter). */
   productImage?: (query: string) => Promise<{ url: string; alt: string } | null>;
+  /** Learned steer from operator image feedback ("Avoid … Prefer …"), appended
+   *  to the generation prompt so rejections/likes shape future images. */
+  steer?: string;
 }
 
 /**
@@ -78,7 +81,7 @@ export async function sourceHeroImage(
 
 /** Generate a bespoke hero via Gemini. Null if generation is off or fails. */
 async function generateHeroImage(req: ImageRequest): Promise<HeroImage | null> {
-  const prompt = await buildImagePrompt(req.title, req.keyword);
+  const prompt = await buildImagePrompt(req.title, req.keyword, req.steer);
   const img = await generateImage(prompt);
   if (!img) return null;
   const alt = await altText(req.title, `a photograph illustrating ${req.keyword || req.title}`);
@@ -88,23 +91,34 @@ async function generateHeroImage(req: ImageRequest): Promise<HeroImage | null> {
 /**
  * Turn an article into a concrete, tasteful photo brief for the image model.
  * Hard guardrails keep it appropriate for a funeral/casket brand (dignified,
- * never graphic, no faces, no text). Uses a cheap model when available.
+ * never graphic, no faces, no text) AND fight the two failure modes: floating/
+ * gravity-defying objects and the plasticky "AI slop" look. `steer` carries the
+ * operator's learned feedback. Uses a cheap model to write the scene.
  */
-async function buildImagePrompt(title: string, keyword: string): Promise<string> {
+async function buildImagePrompt(title: string, keyword: string, steer?: string): Promise<string> {
+  // Realism + physical-plausibility guardrails — the anti-floating, anti-slop core.
   const GUARD =
-    "Photorealistic editorial photograph, documentary style, soft natural lighting, shallow depth of field. " +
-    "Tasteful, respectful, calm. No text, no watermarks, no logos, no human faces, " +
-    "nothing graphic or distressing, never a body or a funeral in progress.";
-  const fallback = `A tasteful, respectful photograph illustrating an article titled "${title}". ${GUARD}`;
+    "Shot as a real photograph on a full-frame DSLR with a 50mm lens, natural realistic lighting " +
+    "and physically accurate soft shadows and contact shadows where objects meet surfaces. " +
+    "The main subject sits firmly and level on a solid surface, stand, or floor — never floating, " +
+    "tilted, or defying gravity. True real-world proportions and materials; no warping, no melted or " +
+    "duplicated parts, no extra or malformed handles, hardware, or limbs. " +
+    "Documentary editorial style, tasteful, respectful, calm. " +
+    "Absolutely NO text, watermarks, logos, captions, or UI. No human faces. " +
+    "NOT a 3D render, NOT CGI, NOT an illustration or cartoon, no glossy over-saturated 'AI' look — " +
+    "it must be indistinguishable from a real professional photograph. " +
+    "Nothing graphic or distressing, never a body or a funeral in progress.";
+  const steerClause = steer && steer.trim() ? ` ${steer.trim()}` : "";
+  const fallback = `A tasteful, respectful, realistic photograph illustrating an article titled "${title}". ${GUARD}${steerClause}`;
   if (!aiEnabled()) return fallback;
   try {
     const scene = await completeText({
       model: MODELS.ideas,
       cheap: true,
       maxTokens: 120,
-      prompt: `In ONE vivid sentence, describe a tasteful real-world PHOTOGRAPH to illustrate a blog article titled "${title}" (topic: ${keyword}), for a funeral/casket retailer. It must be dignified and appropriate — prefer craftsmanship, materials (wood grain, brass), quiet interiors, flowers, or serene nature. Never show a body, a grieving person's face, or a funeral in progress. Reply with only the scene description, no preamble.`,
+      prompt: `In ONE vivid sentence, describe a tasteful, realistic real-world PHOTOGRAPH to illustrate a blog article titled "${title}" (topic: ${keyword}), for a funeral/casket retailer. It must be dignified and appropriate — prefer craftsmanship, materials (wood grain, brass), quiet interiors, flowers, or serene nature, with the subject clearly resting on a real surface. Never show a body, a grieving person's face, or a funeral in progress. Reply with only the scene description, no preamble.`,
     });
-    return `${(scene || "").trim() || title}. ${GUARD}`;
+    return `${(scene || "").trim() || title}. ${GUARD}${steerClause}`;
   } catch {
     return fallback;
   }
