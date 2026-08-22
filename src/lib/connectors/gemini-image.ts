@@ -21,40 +21,44 @@ export function geminiImageModel(): string {
 }
 
 /**
- * Generate a single image for `prompt`. Returns null on any failure (missing
- * key, API error, no image in the response) so the caller can fall back.
+ * Generate a single image for `prompt`.
+ * - Returns null ONLY when no key is configured (so callers can fall back).
+ * - THROWS on a real failure (API error, no image in the response) with a
+ *   readable message, so an explicit "generate" request can surface the reason
+ *   instead of silently swapping to a stock photo.
  */
 export async function generateImage(prompt: string): Promise<GeneratedImage | null> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
 
-  try {
-    const res = await fetch(`${BASE}/${geminiImageModel()}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
-      }),
-    });
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      console.error(`[gemini-image] HTTP ${res.status} ${detail.slice(0, 200)}`);
-      return null;
+  const res = await fetch(`${BASE}/${geminiImageModel()}:generateContent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    // Pull Google's human-readable message out of the error envelope if present.
+    let msg = detail.slice(0, 300);
+    try {
+      const j = JSON.parse(detail) as { error?: { message?: string } };
+      if (j.error?.message) msg = j.error.message;
+    } catch {
+      /* keep raw text */
     }
-    const data = (await res.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> } }>;
-    };
-    for (const part of data.candidates?.[0]?.content?.parts ?? []) {
-      const inline = part.inlineData;
-      if (inline?.data) {
-        return { base64: inline.data, mime: inline.mimeType || "image/png" };
-      }
-    }
-    console.error("[gemini-image] response contained no image data");
-    return null;
-  } catch (e) {
-    console.error("[gemini-image] request failed:", e instanceof Error ? e.message : e);
-    return null;
+    throw new Error(`Gemini image ${res.status}: ${msg}`);
   }
+  const data = (await res.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> } }>;
+  };
+  for (const part of data.candidates?.[0]?.content?.parts ?? []) {
+    const inline = part.inlineData;
+    if (inline?.data) {
+      return { base64: inline.data, mime: inline.mimeType || "image/png" };
+    }
+  }
+  throw new Error("Gemini returned no image (safety filter or empty response).");
 }

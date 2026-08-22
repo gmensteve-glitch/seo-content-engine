@@ -49,14 +49,19 @@ export async function POST(req: Request): Promise<Response> {
     if (feedback?.verdict) {
       await recordImageFeedback(draftId, feedback.verdict, feedback.reason ?? feedback.verdict);
       if (feedback.verdict === "REJECT") {
-        const result = await ensureHeroImage(draftId, { prefer: "ai", force: true });
+        const result = await ensureHeroImage(draftId, { prefer: "ai", aiOnly: true, force: true });
         return NextResponse.json({ ...result, regenerated: true });
       }
       return NextResponse.json({ recorded: true });
     }
 
-    // Generate / rotate path.
-    const result = await ensureHeroImage(draftId, { prefer, force: true });
+    // Generate / rotate path. "ai" is strict (surface errors instead of silently
+    // serving a stock photo); "stock" explicitly wants a real photo.
+    const result = await ensureHeroImage(draftId, {
+      prefer,
+      aiOnly: prefer === "ai",
+      force: true,
+    });
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json(

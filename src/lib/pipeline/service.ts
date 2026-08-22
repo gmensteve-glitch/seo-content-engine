@@ -1524,7 +1524,7 @@ export async function recordImageFeedback(
  */
 export async function ensureHeroImage(
   draftId: string,
-  opts?: { prefer?: "ai" | "stock"; force?: boolean },
+  opts?: { prefer?: "ai" | "stock"; force?: boolean; aiOnly?: boolean },
 ): Promise<{ hasImage: boolean; source: string | null; alt: string }> {
   requireDb();
   const draft = await prisma.draft.findUnique({
@@ -1540,10 +1540,12 @@ export async function ensureHeroImage(
   const platform = draft.business.cmsPlatform.toLowerCase() as CmsPlatform;
   const productImage = await productImageLookup(draft.businessId, platform);
   const steer = await buildImageSteer(draft.businessId);
-  const hero = await sourceHeroImage(
-    { title: draft.title, keyword: draft.brief.targetKeyword, productImage, steer },
-    { prefer: opts?.prefer },
-  ).catch(() => null);
+  const req = { title: draft.title, keyword: draft.brief.targetKeyword, productImage, steer };
+  // Strict AI ("generate new" from the UI) lets errors propagate so the user
+  // sees the real reason; the auto path swallows and falls back to stock.
+  const hero = opts?.aiOnly
+    ? await sourceHeroImage(req, { prefer: "ai", aiOnly: true })
+    : await sourceHeroImage(req, { prefer: opts?.prefer }).catch(() => null);
   if (!hero) return { hasImage: false, source: null, alt: "" };
 
   await prisma.draft.update({

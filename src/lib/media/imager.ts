@@ -44,13 +44,29 @@ export interface ImageRequest {
  */
 export async function sourceHeroImage(
   req: ImageRequest,
-  opts?: { prefer?: "ai" | "stock" },
+  opts?: { prefer?: "ai" | "stock"; aiOnly?: boolean },
 ): Promise<HeroImage | null> {
   const preferStock = opts?.prefer === "stock";
 
+  // Strict AI: an explicit "generate a new AI image" request. Do NOT fall back
+  // to stock — surface the real reason so the UI can show it.
+  if (opts?.aiOnly) {
+    if (!geminiImageEnabled()) {
+      throw new Error(
+        "AI image generation isn't enabled — set GEMINI_API_KEY in the environment and redeploy.",
+      );
+    }
+    const ai = await generateHeroImage(req); // throws on API failure
+    if (ai) return ai;
+    throw new Error("Image generation returned nothing — try again.");
+  }
+
   // 1. AI-generated first (unless the caller explicitly wants a stock photo).
   if (!preferStock && geminiImageEnabled()) {
-    const ai = await generateHeroImage(req).catch(() => null);
+    const ai = await generateHeroImage(req).catch((e) => {
+      console.error("[imager] AI generation failed, falling back:", e instanceof Error ? e.message : e);
+      return null;
+    });
     if (ai) return ai;
   }
 
