@@ -36,7 +36,11 @@ export async function generateImage(prompt: string): Promise<GeneratedImage | nu
     headers: { "Content-Type": "application/json", "x-goog-api-key": key },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+      // 16:9 so the hero fills a wide blog banner without being cropped to a strip.
+      generationConfig: {
+        responseModalities: ["TEXT", "IMAGE"],
+        imageConfig: { aspectRatio: "16:9" },
+      },
     }),
   });
   if (!res.ok) {

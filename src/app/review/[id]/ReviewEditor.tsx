@@ -546,7 +546,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
             <img
               src={`/api/review/image?draftId=${vm.id}&v=${imgVer}`}
               alt={vm.title}
-              className="max-h-72 w-full rounded-lg object-cover"
+              className="aspect-[16/9] w-full rounded-lg object-cover"
             />
             {/* Feedback — trains future image generation for this business */}
             <div className="mt-2 flex flex-wrap items-center gap-1.5">

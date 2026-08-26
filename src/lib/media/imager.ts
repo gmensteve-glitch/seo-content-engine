@@ -112,14 +112,15 @@ async function generateHeroImage(req: ImageRequest): Promise<HeroImage | null> {
  * operator's learned feedback. Uses a cheap model to write the scene.
  */
 async function buildImagePrompt(title: string, keyword: string, steer?: string): Promise<string> {
-  // Realism + physical-plausibility guardrails — the anti-floating, anti-slop core.
+  // Realism + composition guardrails — anti-floating, anti-slop, full-frame 16:9.
   const GUARD =
+    "Wide 16:9 landscape editorial photograph with the subject shown in FULL, centered, with " +
+    "generous breathing room around it — never cropped tight or cut off at the edges. " +
     "Shot as a real photograph on a full-frame DSLR with a 50mm lens, natural realistic lighting " +
     "and physically accurate soft shadows and contact shadows where objects meet surfaces. " +
-    "The main subject sits firmly and level on a solid surface, stand, or floor — never floating, " +
-    "tilted, or defying gravity. True real-world proportions and materials; no warping, no melted or " +
-    "duplicated parts, no extra or malformed handles, hardware, or limbs. " +
-    "Documentary editorial style, tasteful, respectful, calm. " +
+    "Any main object sits firmly and level on a solid surface — never floating, tilted, or defying " +
+    "gravity. True real-world proportions and materials; no warping, no melted or duplicated parts, " +
+    "no extra or malformed hardware or limbs. Documentary editorial style, tasteful, respectful, calm. " +
     "Absolutely NO text, watermarks, logos, captions, or UI. No human faces. " +
     "NOT a 3D render, NOT CGI, NOT an illustration or cartoon, no glossy over-saturated 'AI' look — " +
     "it must be indistinguishable from a real professional photograph. " +
@@ -131,8 +132,10 @@ async function buildImagePrompt(title: string, keyword: string, steer?: string):
     const scene = await completeText({
       model: MODELS.ideas,
       cheap: true,
-      maxTokens: 120,
-      prompt: `In ONE vivid sentence, describe a tasteful, realistic real-world PHOTOGRAPH to illustrate a blog article titled "${title}" (topic: ${keyword}), for a funeral/casket retailer. It must be dignified and appropriate — prefer craftsmanship, materials (wood grain, brass), quiet interiors, flowers, or serene nature, with the subject clearly resting on a real surface. Never show a body, a grieving person's face, or a funeral in progress. Reply with only the scene description, no preamble.`,
+      maxTokens: 130,
+      prompt: `In ONE vivid sentence, describe a tasteful, realistic real-world PHOTOGRAPH to illustrate a blog article titled "${title}" (topic: ${keyword}), for a funeral/casket retailer.
+Choose the single most fitting subject for THIS specific article — it does NOT have to be a casket. Pick whatever best represents the topic, for variety: e.g. a casket or its craftsmanship (wood grain, brass) ONLY when the article is about caskets; otherwise consider white floral arrangements, a serene landscape or soft sky, a hand writing a letter or holding a keepsake, documents or paperwork on a desk, a quiet chapel or memorial interior, lit candles, a peaceful cemetery or headstone, or an urn — whatever genuinely matches the article.
+It must be dignified and appropriate, with the subject clearly in a real setting. Never show a body, a grieving person's face, or a funeral in progress. Reply with only the scene description, no preamble.`,
     });
     return `${(scene || "").trim() || title}. ${GUARD}${steerClause}`;
   } catch {
