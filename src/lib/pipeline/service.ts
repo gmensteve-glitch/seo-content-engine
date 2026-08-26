@@ -1533,6 +1533,110 @@ export async function recordImageFeedback(
   });
 }
 
+/** Max image options kept per draft (bounds DB growth). */
+const MAX_GALLERY = 12;
+
+/**
+ * Append an image to the draft's gallery, mark it the selected one, and mirror
+ * it into the scalar hero* fields (used by publish + the image endpoint).
+ * Prunes the oldest options past MAX_GALLERY.
+ */
+async function storeHeroImage(
+  draftId: string,
+  img: { url?: string | null; base64?: string | null; mime?: string | null; alt: string; source: string },
+): Promise<{ imageId: string }> {
+  const created = await prisma.draftImage.create({
+    data: {
+      draftId,
+      source: img.source,
+      mime: img.mime ?? null,
+      data: img.base64 ?? null,
+      url: img.url || null,
+      alt: img.alt.slice(0, 300),
+    },
+    select: { id: true },
+  });
+  await prisma.draft.update({
+    where: { id: draftId },
+    data: {
+      heroImageUrl: img.url || null,
+      heroImageData: img.base64 ?? null,
+      heroImageMime: img.mime ?? null,
+      heroImageAlt: img.alt.slice(0, 300),
+      heroImageSource: img.source,
+      selectedImageId: created.id,
+    },
+  });
+  const extras = await prisma.draftImage.findMany({
+    where: { draftId },
+    orderBy: { createdAt: "desc" },
+    skip: MAX_GALLERY,
+    select: { id: true },
+  });
+  if (extras.length) {
+    await prisma.draftImage.deleteMany({ where: { id: { in: extras.map((e) => e.id) } } });
+  }
+  return { imageId: created.id };
+}
+
+/** The draft's image gallery (newest first). Backfills a row from the legacy
+ *  scalar hero fields for drafts created before the gallery existed. */
+export async function listDraftImages(
+  draftId: string,
+): Promise<{ id: string; source: string; selected: boolean; createdAt: string }[]> {
+  requireDb();
+  const draft = await prisma.draft.findUnique({
+    where: { id: draftId },
+    select: { selectedImageId: true, heroImageData: true, heroImageUrl: true, heroImageMime: true, heroImageAlt: true, heroImageSource: true, title: true },
+  });
+  if (!draft) return [];
+  let images = await prisma.draftImage.findMany({
+    where: { draftId },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, source: true, createdAt: true },
+  });
+  // Backfill: an older draft has a hero image but no gallery rows yet.
+  if (images.length === 0 && (draft.heroImageData || draft.heroImageUrl)) {
+    const { imageId } = await storeHeroImage(draftId, {
+      url: draft.heroImageUrl,
+      base64: draft.heroImageData,
+      mime: draft.heroImageMime,
+      alt: draft.heroImageAlt || draft.title,
+      source: draft.heroImageSource || "ai",
+    });
+    images = [{ id: imageId, source: draft.heroImageSource || "ai", createdAt: new Date() }];
+  }
+  const selectedId = (await prisma.draft.findUnique({ where: { id: draftId }, select: { selectedImageId: true } }))?.selectedImageId;
+  return images.map((i) => ({
+    id: i.id,
+    source: i.source,
+    selected: i.id === selectedId,
+    createdAt: i.createdAt.toISOString(),
+  }));
+}
+
+/** Make a gallery image the selected hero (mirrors it into the scalar fields). */
+export async function selectDraftImage(
+  draftId: string,
+  imageId: string,
+): Promise<{ hasImage: boolean; source: string }> {
+  requireDb();
+  const img = await prisma.draftImage.findFirst({ where: { id: imageId, draftId } });
+  if (!img) throw new Error("Image not found");
+  await prisma.draft.update({
+    where: { id: draftId },
+    data: {
+      heroImageUrl: img.url,
+      heroImageData: img.data,
+      heroImageMime: img.mime,
+      heroImageAlt: img.alt,
+      heroImageSource: img.source,
+      selectedImageId: img.id,
+    },
+  });
+  return { hasImage: true, source: img.source };
+}
+
 /**
  * Store an operator-uploaded hero image on the draft (base64). Used by the
  * review page's "Upload your own" — always wins over AI/stock until changed.
@@ -1552,15 +1656,12 @@ export async function setUploadedHeroImage(
     select: { title: true, heroImageAlt: true },
   });
   if (!draft) throw new Error(`Draft ${draftId} not found`);
-  await prisma.draft.update({
-    where: { id: draftId },
-    data: {
-      heroImageData: base64,
-      heroImageMime: mime,
-      heroImageUrl: null,
-      heroImageSource: "upload",
-      heroImageAlt: (alt || draft.heroImageAlt || draft.title).slice(0, 300),
-    },
+  await storeHeroImage(draftId, {
+    base64,
+    mime,
+    url: null,
+    source: "upload",
+    alt: alt || draft.heroImageAlt || draft.title,
   });
   return { hasImage: true, source: "upload" };
 }
@@ -1597,15 +1698,12 @@ export async function ensureHeroImage(
     : await sourceHeroImage(req, { prefer: opts?.prefer }).catch(() => null);
   if (!hero) return { hasImage: false, source: null, alt: "" };
 
-  await prisma.draft.update({
-    where: { id: draftId },
-    data: {
-      heroImageUrl: hero.url || null,
-      heroImageData: hero.base64 ?? null,
-      heroImageMime: hero.mime ?? null,
-      heroImageAlt: hero.alt,
-      heroImageSource: hero.source,
-    },
+  await storeHeroImage(draftId, {
+    url: hero.url,
+    base64: hero.base64,
+    mime: hero.mime,
+    alt: hero.alt,
+    source: hero.source,
   });
   if (hero.source === "ai") {
     await prisma.draft

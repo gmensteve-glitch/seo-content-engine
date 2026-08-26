@@ -19,6 +19,7 @@ import {
   Eye,
   Image as ImageIcon,
   Upload,
+  Loader2,
 } from "lucide-react";
 
 // Preset image rejections. The `reason` is a full instruction — it's both stored
@@ -52,7 +53,9 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   }>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [imgBusy, setImgBusy] = useState<null | "ai" | "stock" | "like" | "reject" | "upload">(null);
+  const [imgBusy, setImgBusy] = useState<null | "ai" | "stock" | "like" | "reject" | "upload" | "select">(null);
+  const [gallery, setGallery] = useState<{ id: string; source: string; selected: boolean }[]>([]);
+  const [suggesting, setSuggesting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [hasImg, setHasImg] = useState(initial.hasHeroImage);
   const [imgSource, setImgSource] = useState<string | null>(initial.heroImageSource);
@@ -69,6 +72,62 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       body: JSON.stringify(body),
     });
     return { ok: res.ok, data: await res.json().catch(() => ({})) };
+  }
+
+  const refreshGallery = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/review/image?draftId=${vm.id}&list=1`);
+      const data = await res.json().catch(() => ({}));
+      setGallery(data.images ?? []);
+    } catch {
+      /* leave gallery as-is */
+    }
+  }, [vm.id]);
+
+  // Load the gallery on mount; if the draft has no image at all, auto-suggest one.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(`/api/review/image?draftId=${vm.id}&list=1`);
+      const data = await res.json().catch(() => ({}));
+      const imgs = data.images ?? [];
+      if (cancelled) return;
+      setGallery(imgs);
+      if (imgs.length === 0 && !hasImg) {
+        setSuggesting(true);
+        const r = await post("/api/review/image", { draftId: vm.id, suggest: true });
+        if (!cancelled && r.ok && r.data.hasImage) {
+          setHasImg(true);
+          setImgSource((r.data.source as string) ?? null);
+          setImgVer((v) => v + 1);
+        }
+        if (!cancelled) {
+          setSuggesting(false);
+          await refreshGallery();
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pick a previous image from the gallery as the hero.
+  async function selectImage(id: string) {
+    setImgBusy("select");
+    try {
+      const { ok, data } = await post("/api/review/image", { draftId: vm.id, selectImageId: id });
+      if (ok && data.hasImage) {
+        setHasImg(true);
+        setImgSource((data.source as string) ?? null);
+        setImgVer((v) => v + 1);
+        await refreshGallery();
+      }
+    } catch {
+      /* ignore */
+    }
+    setImgBusy(null);
   }
 
   // Generate a fresh AI image, or swap to a real stock photo, for the hero.
@@ -90,6 +149,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       setImgSource((data.source as string) ?? null);
       setImgVer((v) => v + 1);
       setNote(prefer === "ai" ? "New image generated." : "Swapped to a stock photo.");
+      await refreshGallery();
     } catch {
       setNote("Network error — try again.");
     }
@@ -116,6 +176,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
         setImgSource((data.source as string) ?? null);
         setImgVer((v) => v + 1);
         setNote("New image generated with your feedback applied. It'll keep learning from every rating.");
+        await refreshGallery();
       } else {
         setNote("Thanks — noted. Future images will lean this way.");
       }
@@ -157,6 +218,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       setImgSource("upload");
       setImgVer((v) => v + 1);
       setNote("Your image is set.");
+      await refreshGallery();
     } catch {
       setNote("Couldn't read that file — try again.");
     }
@@ -446,6 +508,29 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
         </div>
         {hasImg ? (
           <>
+            {/* Options tried — click a thumbnail to use it, so nothing's lost */}
+            {gallery.length > 1 && (
+              <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
+                {gallery.map((g) => (
+                  <button
+                    key={g.id}
+                    onClick={() => selectImage(g.id)}
+                    disabled={imgBusy !== null}
+                    title={g.source === "ai" ? "AI-generated" : g.source === "upload" ? "your upload" : g.source}
+                    className={`shrink-0 overflow-hidden rounded-md border-2 disabled:opacity-50 ${
+                      g.selected ? "border-[var(--accent)]" : "border-transparent hover:border-[var(--border-strong)]"
+                    }`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/review/image?draftId=${vm.id}&imageId=${g.id}`}
+                      alt=""
+                      className="h-14 w-24 object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={`/api/review/image?draftId=${vm.id}&v=${imgVer}`}
@@ -478,6 +563,10 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
               Rejecting regenerates with your note applied — and every rating trains future images.
             </p>
           </>
+        ) : suggesting ? (
+          <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--border-strong)] py-8 text-[12px] text-[var(--muted)]">
+            <Loader2 size={15} className="animate-spin text-[var(--accent)]" /> Suggesting an image…
+          </div>
         ) : (
           <div className="flex items-center justify-center rounded-lg border border-dashed border-[var(--border-strong)] py-8 text-[12px] text-[var(--muted)]">
             No image yet — generate one, or the engine will add one automatically.

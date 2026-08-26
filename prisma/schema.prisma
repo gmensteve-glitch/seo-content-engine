@@ -97,6 +97,23 @@ model ImageFeedback {
 // Daily query-level ranking snapshot from Search Console. One row per
 // (business, query, day) — the time series that lets us watch a keyword climb
 // from page 2 to page 1 after the engine ships content for it.
+// One image option for a draft's hero. Generating, fetching a stock photo, or
+// uploading appends a row here instead of overwriting — so the review page can
+// show every option tried and let the operator pick a previous one.
+model DraftImage {
+  id        String   @id @default(cuid())
+  draft     Draft    @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  draftId   String
+  source    String // "ai" | "unsplash" | "product" | "upload"
+  mime      String?
+  data      String?  @db.Text // base64 (AI/upload)
+  url       String? // hosted URL (stock/product)
+  alt       String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([draftId, createdAt])
+}
+
 model KeywordRank {
   id          String   @id @default(cuid())
   business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -295,7 +312,11 @@ model Draft {
   heroImageAlt    String?  @db.Text
   heroImageData   String?  @db.Text // base64 (AI images), cleared after publish
   heroImageMime   String?
-  heroImageSource String?  // "ai" | "unsplash" | "product"
+  heroImageSource String?  // "ai" | "unsplash" | "product" | "upload"
+  // Gallery of image options tried for this draft; the scalar hero* fields above
+  // mirror whichever one is currently selected (selectedImageId).
+  selectedImageId String?
+  images       DraftImage[]
   grades       Grade[]
   page         Page?
   feedback     DraftFeedback[]
