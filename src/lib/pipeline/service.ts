@@ -69,6 +69,23 @@ function asStringArray(v: unknown): string[] {
  * lead with an answer-first bold summary sentence; we prefer that, then fall
  * back to the first substantial paragraph. Clamped to ~155 chars.
  */
+/**
+ * A clean SEO page title (title_tag) ≤ `max` chars — the on-page headline can be
+ * longer, but Google truncates the title tag ~60. Cuts at a word boundary and
+ * drops a dangling separator/conjunction so it reads as a complete phrase.
+ */
+function deriveSeoTitle(title: string, max = 60): string {
+  const t = title.trim().replace(/\s+/g, " ");
+  if (t.length <= max) return t;
+  let cut = t.slice(0, max);
+  const sp = cut.lastIndexOf(" ");
+  if (sp > 30) cut = cut.slice(0, sp);
+  cut = cut.replace(/[\s,;:.\-–—|&]+$/, "").trim();
+  cut = cut.replace(/\s+(and|or|the|a|an|to|of|for|with|in|on|&)$/i, "").trim();
+  cut = cut.replace(/[\s,;:.\-–—|&]+$/, "").trim(); // strip a separator the conjunction may have exposed
+  return cut;
+}
+
 function deriveMetaDescription(md: string, fallback: string): string {
   const clamp = (s: string) =>
     s.length > 155 ? s.slice(0, 152).replace(/\s+\S*$/, "").trimEnd() + "…" : s;
@@ -1371,7 +1388,7 @@ export async function renderPublishPreview(draftId: string): Promise<{
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/(\s*\n){3,}/g, "\n\n")
     .trim();
-  const seoTitle = draft.title;
+  const seoTitle = deriveSeoTitle(draft.title);
   const metaDescription = deriveMetaDescription(draft.bodyMd, draft.title);
   const issues = [...preflightPublish(html).issues, ...metaIssues(seoTitle, metaDescription)];
   return {
@@ -1517,6 +1534,38 @@ export async function recordImageFeedback(
 }
 
 /**
+ * Store an operator-uploaded hero image on the draft (base64). Used by the
+ * review page's "Upload your own" — always wins over AI/stock until changed.
+ */
+export async function setUploadedHeroImage(
+  draftId: string,
+  base64: string,
+  mime: string,
+  alt?: string,
+): Promise<{ hasImage: boolean; source: string }> {
+  requireDb();
+  if (!/^image\//i.test(mime)) throw new Error("Unsupported file — please upload an image (JPG, PNG, WebP).");
+  // base64 length ≈ 4/3 of byte size; cap ~10MB of actual bytes.
+  if (base64.length > 14_000_000) throw new Error("Image too large — keep it under ~10MB.");
+  const draft = await prisma.draft.findUnique({
+    where: { id: draftId },
+    select: { title: true, heroImageAlt: true },
+  });
+  if (!draft) throw new Error(`Draft ${draftId} not found`);
+  await prisma.draft.update({
+    where: { id: draftId },
+    data: {
+      heroImageData: base64,
+      heroImageMime: mime,
+      heroImageUrl: null,
+      heroImageSource: "upload",
+      heroImageAlt: (alt || draft.heroImageAlt || draft.title).slice(0, 300),
+    },
+  });
+  return { hasImage: true, source: "upload" };
+}
+
+/**
  * Make sure a draft has a hero image, storing it on the draft so the review page
  * can show and swap it. `prefer` ("ai" | "stock") + `force` drive the review
  * page's "generate a new image" / "use a stock photo" buttons. AI images add
@@ -1643,9 +1692,10 @@ export async function publishNow(
       // BUFFER: final gate. If the rendered HTML still has garbage, or the SEO
       // title/meta description is missing or malformed, refuse to publish.
       const metaDescription = deriveMetaDescription(draft.bodyMd, draft.title);
+      const seoTitle = deriveSeoTitle(draft.title);
       const issues = [
         ...preflightPublish(html).issues,
-        ...metaIssues(draft.title, metaDescription),
+        ...metaIssues(seoTitle, metaDescription),
       ];
       if (issues.length) {
         throw new Error(`Pre-publish check failed — not published: ${issues.join("; ")}`);
@@ -1656,7 +1706,7 @@ export async function publishNow(
         html,
         slug,
         metaDescription,
-        seoTitle: draft.title,
+        seoTitle,
         heroImageUrl: heroRow?.heroImageUrl ?? undefined,
         heroImageBase64: heroRow?.heroImageData ?? undefined,
         heroImageAlt: heroRow?.heroImageAlt ?? undefined,

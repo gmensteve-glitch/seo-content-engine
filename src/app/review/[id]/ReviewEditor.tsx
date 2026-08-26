@@ -18,6 +18,7 @@ import {
   ThumbsDown,
   Eye,
   Image as ImageIcon,
+  Upload,
 } from "lucide-react";
 
 // Preset image rejections. The `reason` is a full instruction — it's both stored
@@ -51,7 +52,8 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   }>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [imgBusy, setImgBusy] = useState<null | "ai" | "stock" | "like" | "reject">(null);
+  const [imgBusy, setImgBusy] = useState<null | "ai" | "stock" | "like" | "reject" | "upload">(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [hasImg, setHasImg] = useState(initial.hasHeroImage);
   const [imgSource, setImgSource] = useState<string | null>(initial.heroImageSource);
   const [imgVer, setImgVer] = useState(0); // cache-bust the <img> after a swap
@@ -119,6 +121,44 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       }
     } catch {
       setNote("Network error — try again.");
+    }
+    setImgBusy(null);
+  }
+
+  // Upload your own hero image — read as base64 client-side, store on the draft.
+  async function uploadImage(file: File) {
+    if (!file.type.startsWith("image/")) {
+      setNote("That's not an image file — pick a JPG, PNG, or WebP.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setNote("Image too large — keep it under 10MB.");
+      return;
+    }
+    setImgBusy("upload");
+    setNote(`Uploading “${file.name}”…`);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(String(r.result).split(",")[1] ?? "");
+        r.onerror = () => reject(new Error("read failed"));
+        r.readAsDataURL(file);
+      });
+      const { ok, data } = await post("/api/review/image", {
+        draftId: vm.id,
+        upload: { base64, mime: file.type },
+      });
+      if (!ok || !data.hasImage) {
+        setNote(data.error ? `Error: ${data.error}` : "Upload failed — try again.");
+        setImgBusy(null);
+        return;
+      }
+      setHasImg(true);
+      setImgSource("upload");
+      setImgVer((v) => v + 1);
+      setNote("Your image is set.");
+    } catch {
+      setNote("Couldn't read that file — try again.");
     }
     setImgBusy(null);
   }
@@ -456,10 +496,16 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
           <span className="text-[12px] font-medium">Hero image</span>
           {imgSource && (
             <span className="rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-[10px] text-[var(--muted)]">
-              {imgSource === "ai" ? "AI-generated" : imgSource === "unsplash" ? "stock photo" : "product photo"}
+              {imgSource === "ai"
+                ? "AI-generated"
+                : imgSource === "unsplash"
+                  ? "stock photo"
+                  : imgSource === "upload"
+                    ? "your upload"
+                    : "product photo"}
             </span>
           )}
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => rotateImage("ai")}
               disabled={imgBusy !== null}
@@ -472,8 +518,26 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
               disabled={imgBusy !== null}
               className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-1.5 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)] disabled:opacity-50"
             >
-              <RefreshCw size={12} /> {imgBusy === "stock" ? "Finding…" : "Use a stock photo"}
+              <RefreshCw size={12} /> {imgBusy === "stock" ? "Finding…" : "Stock photo"}
             </button>
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={imgBusy !== null}
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-1.5 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+            >
+              <Upload size={12} /> {imgBusy === "upload" ? "Uploading…" : "Upload your own"}
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void uploadImage(f);
+                e.target.value = ""; // allow re-selecting the same file
+              }}
+            />
           </div>
         </div>
         {hasImg ? (
