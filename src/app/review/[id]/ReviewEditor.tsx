@@ -363,105 +363,9 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
         )}
       </div>
 
-      {/* Primary actions */}
-      {passed && !done ? (
-        <div className="mb-4 rounded-xl border border-[var(--success)] bg-[var(--success-bg)] p-4">
-          <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-[var(--success)]">
-            <CheckCircle2 size={13} /> Ready to publish
-          </div>
-          <p className="mb-2.5 text-[12px] text-[var(--muted)]">
-            Push it straight to your Shopify blog. Go live now, or drop it in as a hidden
-            draft to eyeball on Shopify first — either way it publishes with its hero image.
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => publish("published")}
-              disabled={busy !== null}
-              className="flex items-center gap-1.5 rounded-lg bg-[var(--success)] px-4 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
-            >
-              <Rocket size={15} /> {busy === "publish" ? "Publishing…" : "Publish to Shopify"}
-            </button>
-            <button
-              onClick={sendAsDraft}
-              disabled={busy !== null}
-              className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-2 text-[13px] text-[var(--muted)] hover:bg-[var(--surface-1)] disabled:opacity-50"
-            >
-              <Rocket size={14} /> {busy === "publish" ? "Sending…" : "Send as hidden draft ↗"}
-            </button>
-          </div>
-
-          {/* Feedback — teach me your taste. LIKE keeps it, REJECT pulls it. */}
-          <div className="mt-4 border-t border-[var(--success)] pt-3">
-            <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">
-              Not quite right, or nailed it? Tell me why
-            </div>
-            {fbMode === null ? (
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => setFbMode("LIKE")}
-                  disabled={busy !== null}
-                  className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 py-1.5 text-[12.5px] text-[var(--text)] hover:bg-[var(--surface-2)] disabled:opacity-50"
-                >
-                  <ThumbsUp size={13} className="text-[var(--success)]" /> I like it because…
-                </button>
-                <button
-                  onClick={() => setFbMode("REJECT")}
-                  disabled={busy !== null}
-                  className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 py-1.5 text-[12.5px] text-[var(--text)] hover:bg-[var(--surface-2)] disabled:opacity-50"
-                >
-                  <ThumbsDown size={13} className="text-[var(--danger)]" /> Reject &amp; why…
-                </button>
-              </div>
-            ) : (
-              <div>
-                <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium">
-                  {fbMode === "LIKE" ? (
-                    <>
-                      <ThumbsUp size={13} className="text-[var(--success)]" /> What worked about this piece?
-                    </>
-                  ) : (
-                    <>
-                      <ThumbsDown size={13} className="text-[var(--danger)]" /> What&apos;s wrong with it? (this pulls it from Ready)
-                    </>
-                  )}
-                </div>
-                <textarea
-                  autoFocus
-                  value={fbText}
-                  onChange={(e) => setFbText(e.target.value)}
-                  rows={2}
-                  placeholder={
-                    fbMode === "LIKE"
-                      ? "e.g. 'great answer-first intro', 'perfect length', 'loved the tone'"
-                      : "e.g. 'intro is boring', 'too salesy', 'wrong angle', 'reads like AI'"
-                  }
-                  className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-[13px]"
-                />
-                <div className="mt-1.5 flex items-center gap-2">
-                  <button
-                    onClick={submitFeedback}
-                    disabled={busy !== null || !fbText.trim()}
-                    className={`rounded-lg px-3.5 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-50 ${
-                      fbMode === "REJECT" ? "bg-[var(--danger)]" : "bg-[var(--success)]"
-                    } hover:brightness-110`}
-                  >
-                    {busy === "feedback" ? "Saving…" : fbMode === "REJECT" ? "Reject & log reason" : "Save feedback"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setFbMode(null);
-                      setFbText("");
-                    }}
-                    className="text-[12px] text-[var(--muted)] hover:text-[var(--text)]"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      ) : !passed ? (
+      {/* Near-miss: the engine already boosted; human adds a detail or rejects.
+          The "Ready to publish" panel is rendered at the BOTTOM of the page. */}
+      {!passed ? (
         <div className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3.5 py-3">
           <div className="flex items-start gap-2 text-[12.5px]">
             <Sparkles size={15} className="mt-0.5 shrink-0 text-[var(--accent)]" />
@@ -658,6 +562,106 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
           className="max-h-[55vh] overflow-y-auto whitespace-pre-wrap rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-4 text-[13.5px] leading-relaxed text-[var(--text)] selection:bg-[var(--accent)] selection:text-white"
         >
           {vm.bodyMd}
+        </div>
+      )}
+
+      {/* Ready to publish — moved to the bottom so you review, then publish */}
+      {passed && !done && (
+        <div className="mt-5 rounded-xl border border-[var(--success)] bg-[var(--success-bg)] p-4">
+          <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-[var(--success)]">
+            <CheckCircle2 size={13} /> Ready to publish
+          </div>
+          <p className="mb-2.5 text-[12px] text-[var(--muted)]">
+            Push it straight to your Shopify blog. Go live now, or drop it in as a hidden
+            draft to eyeball on Shopify first — either way it publishes with its hero image.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => publish("published")}
+              disabled={busy !== null}
+              className="flex items-center gap-1.5 rounded-lg bg-[var(--success)] px-4 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+            >
+              <Rocket size={15} /> {busy === "publish" ? "Publishing…" : "Publish to Shopify"}
+            </button>
+            <button
+              onClick={sendAsDraft}
+              disabled={busy !== null}
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-2 text-[13px] text-[var(--muted)] hover:bg-[var(--surface-1)] disabled:opacity-50"
+            >
+              <Rocket size={14} /> {busy === "publish" ? "Sending…" : "Send as hidden draft ↗"}
+            </button>
+          </div>
+
+          {/* Feedback — teach me your taste. LIKE keeps it, REJECT pulls it. */}
+          <div className="mt-4 border-t border-[var(--success)] pt-3">
+            <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[var(--muted)]">
+              Not quite right, or nailed it? Tell me why
+            </div>
+            {fbMode === null ? (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setFbMode("LIKE")}
+                  disabled={busy !== null}
+                  className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 py-1.5 text-[12.5px] text-[var(--text)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+                >
+                  <ThumbsUp size={13} className="text-[var(--success)]" /> I like it because…
+                </button>
+                <button
+                  onClick={() => setFbMode("REJECT")}
+                  disabled={busy !== null}
+                  className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 py-1.5 text-[12.5px] text-[var(--text)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+                >
+                  <ThumbsDown size={13} className="text-[var(--danger)]" /> Reject &amp; why…
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium">
+                  {fbMode === "LIKE" ? (
+                    <>
+                      <ThumbsUp size={13} className="text-[var(--success)]" /> What worked about this piece?
+                    </>
+                  ) : (
+                    <>
+                      <ThumbsDown size={13} className="text-[var(--danger)]" /> What&apos;s wrong with it? (this pulls it from Ready)
+                    </>
+                  )}
+                </div>
+                <textarea
+                  autoFocus
+                  value={fbText}
+                  onChange={(e) => setFbText(e.target.value)}
+                  rows={2}
+                  placeholder={
+                    fbMode === "LIKE"
+                      ? "e.g. 'great answer-first intro', 'perfect length', 'loved the tone'"
+                      : "e.g. 'intro is boring', 'too salesy', 'wrong angle', 'reads like AI'"
+                  }
+                  className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-[13px]"
+                />
+                <div className="mt-1.5 flex items-center gap-2">
+                  <button
+                    onClick={submitFeedback}
+                    disabled={busy !== null || !fbText.trim()}
+                    className={`rounded-lg px-3.5 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-50 ${
+                      fbMode === "REJECT" ? "bg-[var(--danger)]" : "bg-[var(--success)]"
+                    } hover:brightness-110`}
+                  >
+                    {busy === "feedback" ? "Saving…" : fbMode === "REJECT" ? "Reject & log reason" : "Save feedback"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setFbMode(null);
+                      setFbText("");
+                    }}
+                    className="text-[12px] text-[var(--muted)] hover:text-[var(--text)]"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
