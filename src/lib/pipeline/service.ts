@@ -303,7 +303,11 @@ async function buildPerformanceNote(
  * as PROPOSED. Returns the number actually added. This is the top of the funnel;
  * the human still gates each idea → brief → approval downstream.
  */
-export async function generateIdeas(businessId: string, count = 6): Promise<number> {
+export async function generateIdeas(
+  businessId: string,
+  count = 6,
+  mix?: { local: number; evergreen: number },
+): Promise<number> {
   requireDb();
   const business = await prisma.business.findUnique({
     where: { id: businessId },
@@ -323,8 +327,11 @@ export async function generateIdeas(businessId: string, count = 6): Promise<numb
 
   const performanceNote = await buildPerformanceNote(businessId, pillarNames, existingTitles);
 
-  // Split the batch by the business's local/evergreen target ratio.
-  const targetLocal = Math.round((count * (business.localRatio ?? 50)) / 100);
+  // Split the batch by the business's local/evergreen target ratio — unless the
+  // caller passes an explicit mix (used by replenish to target the SHORT kind).
+  const targetLocal = mix ? mix.local : Math.round((count * (business.localRatio ?? 50)) / 100);
+  const targetEvergreen = mix ? mix.evergreen : count - targetLocal;
+  const total = mix ? mix.local + mix.evergreen : count;
   const ctx: IdeationContext = {
     businessName: business.name,
     profileMd: business.profileMd ?? business.name,
@@ -332,9 +339,9 @@ export async function generateIdeas(businessId: string, count = 6): Promise<numb
     pillars: pillarNames,
     existingTitles,
     performanceNote,
-    count,
+    count: total,
     targetLocal,
-    targetEvergreen: count - targetLocal,
+    targetEvergreen,
   };
 
   const proposals = await generateIdeaProposals(ctx);
@@ -375,10 +382,16 @@ export async function replenishIdeas(businessId: string, floorPerKind = 6): Prom
     prisma.idea.count({ where: { businessId, status: "PROPOSED", kind: "LOCAL" } }),
     prisma.idea.count({ where: { businessId, status: "PROPOSED", kind: "EVERGREEN" } }),
   ]);
-  const deficit = Math.max(floorPerKind - local, floorPerKind - evergreen);
-  if (deficit <= 0) return 0;
-  // Generate ~2× the deficit so, after the ratio split, the short kind is covered.
-  return generateIdeas(businessId, deficit * 2);
+  // Only top up the kind(s) actually short — don't pile on a category that's
+  // already full. Over-generate ~1.6× since dedup drops some. This is what keeps
+  // the Ready mix honest to the ratio: local supply never starves.
+  const needLocal = Math.max(0, floorPerKind - local);
+  const needEver = Math.max(0, floorPerKind - evergreen);
+  if (needLocal + needEver <= 0) return 0;
+  return generateIdeas(businessId, needLocal + needEver, {
+    local: Math.ceil(needLocal * 1.6),
+    evergreen: Math.ceil(needEver * 1.6),
+  });
 }
 
 /** Replenish ideas for every active/onboarding business. Returns per-business counts. */
