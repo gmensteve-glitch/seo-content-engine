@@ -92,11 +92,20 @@ export async function POST(req: Request): Promise<Response> {
       return NextResponse.json(await setUploadedHeroImage(draftId, upload.base64, upload.mime));
     }
 
-    // Rate the image. A reject regenerates with the learned "avoid" applied.
+    // Rate the image. A reject regenerates the SAME kind you're looking at:
+    // a stock photo → a different stock photo; an AI image → a new AI image
+    // (with the learned "avoid" applied).
     if (feedback?.verdict) {
       await recordImageFeedback(draftId, feedback.verdict, feedback.reason ?? feedback.verdict);
       if (feedback.verdict === "REJECT") {
-        const result = await ensureHeroImage(draftId, { prefer: "ai", aiOnly: true, force: true });
+        const cur = await prisma.draft.findUnique({
+          where: { id: draftId },
+          select: { heroImageSource: true },
+        });
+        const isStock = cur?.heroImageSource === "unsplash" || cur?.heroImageSource === "product";
+        const result = isStock
+          ? await ensureHeroImage(draftId, { prefer: "stock", force: true })
+          : await ensureHeroImage(draftId, { prefer: "ai", aiOnly: true, force: true });
         return NextResponse.json({ ...result, regenerated: true });
       }
       return NextResponse.json({ recorded: true });

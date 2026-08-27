@@ -508,26 +508,36 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
         </div>
         {hasImg ? (
           <>
-            {/* Options tried — click a thumbnail to use it, so nothing's lost */}
+            {/* Options tried — pick any one, so nothing's lost */}
             {gallery.length > 1 && (
               <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
                 {gallery.map((g) => (
-                  <button
-                    key={g.id}
-                    onClick={() => selectImage(g.id)}
-                    disabled={imgBusy !== null}
-                    title={g.source === "ai" ? "AI-generated" : g.source === "upload" ? "your upload" : g.source}
-                    className={`shrink-0 overflow-hidden rounded-md border-2 disabled:opacity-50 ${
-                      g.selected ? "border-[var(--accent)]" : "border-transparent hover:border-[var(--border-strong)]"
-                    }`}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={`/api/review/image?draftId=${vm.id}&imageId=${g.id}`}
-                      alt=""
-                      className="h-14 w-24 object-cover"
-                    />
-                  </button>
+                  <div key={g.id} className="shrink-0">
+                    <div
+                      className={`overflow-hidden rounded-md border-2 ${
+                        g.selected ? "border-[var(--accent)]" : "border-transparent"
+                      }`}
+                      title={g.source === "ai" ? "AI-generated" : g.source === "upload" ? "your upload" : g.source}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`/api/review/image?draftId=${vm.id}&imageId=${g.id}`}
+                        alt=""
+                        className="h-14 w-24 object-cover"
+                      />
+                    </div>
+                    <button
+                      onClick={() => selectImage(g.id)}
+                      disabled={imgBusy !== null || g.selected}
+                      className={`mt-1 w-full rounded py-0.5 text-[10px] disabled:opacity-100 ${
+                        g.selected
+                          ? "font-medium text-[var(--accent)]"
+                          : "border border-[var(--border-strong)] text-[var(--muted)] hover:bg-[var(--surface-2)]"
+                      }`}
+                    >
+                      {imgBusy === "select" ? "…" : g.selected ? "✓ In use" : "Select"}
+                    </button>
+                  </div>
                 ))}
               </div>
             )}

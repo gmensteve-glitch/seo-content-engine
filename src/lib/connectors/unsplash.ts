@@ -12,15 +12,20 @@ export interface StockPhoto {
   credit: string; // photographer attribution (Unsplash guideline)
 }
 
-/** Search Unsplash for the best photo matching a query. Returns null if the
- *  key is missing, nothing matches, or the request fails. */
-export async function searchPhoto(query: string): Promise<StockPhoto | null> {
+/** Search Unsplash for a photo matching a query. Picks a random result from the
+ *  top matches (so repeat calls vary) and can skip a URL you already have, so a
+ *  "regenerate stock" gives a genuinely different photo. Returns null if the key
+ *  is missing, nothing matches, or the request fails. */
+export async function searchPhoto(
+  query: string,
+  opts?: { excludeUrl?: string },
+): Promise<StockPhoto | null> {
   const key = process.env.UNSPLASH_ACCESS_KEY;
   if (!key) return null;
 
   try {
     const res = await fetch(
-      `${BASE}/search/photos?query=${encodeURIComponent(query)}&per_page=3&orientation=landscape&content_filter=high`,
+      `${BASE}/search/photos?query=${encodeURIComponent(query)}&per_page=12&orientation=landscape&content_filter=high`,
       { headers: { Authorization: `Client-ID ${key}` } },
     );
     if (!res.ok) return null;
@@ -32,10 +37,13 @@ export async function searchPhoto(query: string): Promise<StockPhoto | null> {
         user?: { name?: string };
       }>;
     };
-    const hit = data.results?.[0];
-    if (!hit?.urls?.regular) return null;
+    const pool = (data.results ?? []).filter(
+      (r) => r.urls?.regular && r.urls.regular !== opts?.excludeUrl,
+    );
+    if (pool.length === 0) return null;
+    const hit = pool[Math.floor(Math.random() * pool.length)];
     return {
-      url: hit.urls.regular,
+      url: hit.urls!.regular!,
       description: hit.description || hit.alt_description || query,
       credit: hit.user?.name ? `Photo by ${hit.user.name} on Unsplash` : "Unsplash",
     };

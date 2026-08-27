@@ -1690,7 +1690,14 @@ export async function ensureHeroImage(
   const platform = draft.business.cmsPlatform.toLowerCase() as CmsPlatform;
   const productImage = await productImageLookup(draft.businessId, platform);
   const steer = await buildImageSteer(draft.businessId);
-  const req = { title: draft.title, keyword: draft.brief.targetKeyword, productImage, steer };
+  const req = {
+    title: draft.title,
+    keyword: draft.brief.targetKeyword,
+    productImage,
+    steer,
+    // Avoid handing back the same stock photo when regenerating a stock image.
+    excludeStockUrl: draft.heroImageUrl ?? undefined,
+  };
   // Strict AI ("generate new" from the UI) lets errors propagate so the user
   // sees the real reason; the auto path swallows and falls back to stock.
   const hero = opts?.aiOnly

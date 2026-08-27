@@ -33,6 +33,8 @@ export interface ImageRequest {
   /** Learned steer from operator image feedback ("Avoid … Prefer …"), appended
    *  to the generation prompt so rejections/likes shape future images. */
   steer?: string;
+  /** A stock-photo URL to avoid, so "regenerate stock" returns a different one. */
+  excludeStockUrl?: string;
 }
 
 /**
@@ -72,7 +74,7 @@ export async function sourceHeroImage(
 
   // 2. Real stock photo (Unsplash), then a store product photo.
   const query = imageQuery(req.keyword || req.title);
-  const photo = await searchPhoto(query).catch(() => null);
+  const photo = await searchPhoto(query, { excludeUrl: req.excludeStockUrl }).catch(() => null);
   if (photo) {
     return {
       url: photo.url,
