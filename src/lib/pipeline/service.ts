@@ -1829,7 +1829,7 @@ export async function publishNow(
       const storeDomain = (config as Record<string, unknown>).storeDomain;
       if (platform === "shopify" && typeof storeDomain === "string" && cmsId) {
         const handle = storeDomain.replace(/^https?:\/\//, "").replace(/\.myshopify\.com$/, "");
-        adminUrl = `https://admin.shopify.com/store/${handle}/articles/${cmsId}`;
+        adminUrl = `https://admin.shopify.com/store/${handle}/content/articles/${cmsId}`;
       }
     } catch {
       cmsId = null;

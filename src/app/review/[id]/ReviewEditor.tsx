@@ -37,7 +37,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   const [selection, setSelection] = useState("");
   const [instruction, setInstruction] = useState("");
   const [busy, setBusy] = useState<
-    null | "edit" | "regrade" | "schedule" | "publish" | "feedback"
+    null | "edit" | "regrade" | "schedule" | "publish" | "draft" | "feedback"
   >(null);
   const [note, setNote] = useState("");
   const [done, setDone] = useState<null | { label: string; href: string }>(null);
@@ -321,7 +321,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   // then point it at the admin URL once the API returns.
   const sendAsDraft = () => {
     const win = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
-    run("publish", "/api/review/publish", { draftId: vm.id, publishState: "draft" }, (d) => {
+    run("draft", "/api/review/publish", { draftId: vm.id, publishState: "draft" }, (d) => {
       const target = (d.adminUrl as string) || (d.url as string) || "";
       if (win) {
         if (target) win.location.href = target;
@@ -375,26 +375,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
         </span>
       </div>
 
-      {/* Success banner after publish */}
-      {done && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-[var(--success)] bg-[var(--success-bg)] px-3 py-2.5 text-[13px] text-[var(--success)]">
-          <CheckCircle2 size={16} /> {done.label}.
-          {done.href.startsWith("http") ? (
-            <a
-              href={done.href}
-              target="_blank"
-              rel="noreferrer"
-              className="ml-1 font-medium underline"
-            >
-              View on Shopify ↗
-            </a>
-          ) : (
-            <Link href={done.href} className="ml-1 font-medium underline">
-              See it
-            </Link>
-          )}
-        </div>
-      )}
+      {/* Success is shown at the bottom, next to the publish action. */}
 
       {/* FULL scorecard — every dimension, always visible */}
       <div className="mb-4 space-y-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4">
@@ -664,6 +645,30 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
         </div>
       )}
 
+      {/* Success (shown here, where you clicked, with a reliable Shopify link) */}
+      {done && (
+        <div className="mt-5 rounded-xl border border-[var(--success)] bg-[var(--success-bg)] p-4">
+          <div className="flex flex-wrap items-center gap-2 text-[13px] text-[var(--success)]">
+            <CheckCircle2 size={16} />
+            <span className="font-medium">{done.label}.</span>
+            {done.href.startsWith("http") ? (
+              <a
+                href={done.href}
+                target="_blank"
+                rel="noreferrer"
+                className="ml-auto flex items-center gap-1.5 rounded-lg bg-[var(--success)] px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110"
+              >
+                Open in Shopify ↗
+              </a>
+            ) : (
+              <Link href={done.href} className="ml-auto font-medium underline">
+                See it →
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Ready to publish — moved to the bottom so you review, then publish */}
       {passed && !done && (
         <div className="mt-5 rounded-xl border border-[var(--success)] bg-[var(--success-bg)] p-4">
@@ -687,7 +692,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
               disabled={busy !== null}
               className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-3 py-2 text-[13px] text-[var(--muted)] hover:bg-[var(--surface-1)] disabled:opacity-50"
             >
-              <Rocket size={14} /> {busy === "publish" ? "Sending…" : "Send as hidden draft ↗"}
+              <Rocket size={14} /> {busy === "draft" ? "Sending…" : "Send as hidden draft ↗"}
             </button>
           </div>
 
