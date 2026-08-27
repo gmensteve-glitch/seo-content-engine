@@ -25,6 +25,7 @@ QUALITY — this is what gets it ranked:
 - Take a clear point of view / thesis. Own the wedge from the brief; don't hedge.
 - Use concrete, verifiable specifics: real price ranges, real timeframes, named standards or regulations — but ONLY ones you are confident are real. NEVER invent a statute, statistic, citation, or source.
 - Author personas / pen names, a first-person voice, quotes, and general experience descriptions ("years in funeral service", "has helped many families") are all allowed and encouraged for warmth and authority. The ONE thing never to fabricate is a verifiable credential NUMBER or ID: no made-up professional license numbers, certification numbers, registration IDs, or membership numbers (e.g. "LFD #4471, California"). This applies in the visible text AND in the JSON-LD author. A persona may describe general background and speak in quotes, but must never cite a specific license/registration/certification number that doesn't exist.
+- NEVER fabricate operational logistics or process steps as if they were fact. Do NOT invent specific delivery timelines, hour-by-hour or day-by-day shipping schedules ("Hour 0–48: build and crate"), named carriers, aircraft types, airport routes, transfer points, courier methods, or a step-by-step "how a casket travels from order to delivery" process. Presented as fact, these read as PROMISES and create real liability with funeral homes and grieving families when they're wrong. When the topic touches shipping, delivery, timing, or logistics, stay BROAD and general: explain that timelines and routing vary by carrier, destination, and season, and tell the reader to confirm exact timing, requirements, and handoffs directly with the funeral home and the shipping provider. Being usefully general always beats being confidently specific about a process you cannot guarantee. Likewise, never assert how a SPECIFIC funeral home operates (its exact steps, fees, hours, or timelines) as fact — describe general industry norms and tell the reader to verify with their chosen home.
 - Write like an experienced practitioner: specific, plain, reassuring.
 - BAN these AI-slop tells: em-dash overuse, "in conclusion", "it's important to note", "when it comes to", "navigate/navigating", "delve", "in today's world", and reflexive hedging ("generally", "typically", "often") unless genuinely warranted.
 - Write the strongest, COMPLETE version you can using the personas, general experience, and verifiable specifics allowed above. This pipeline is fully automated — there is no human to fill in blanks later. Do NOT insert placeholder callouts, bracketed TODOs, "[add …]" notes, or "> **Add your experience:**" markers. The piece must be finished and publishable exactly as written.
@@ -33,10 +34,15 @@ TONE — warm and personal: you're talking to a grieving family, not writing a s
 
 Write in the brand voice provided.`;
 
-export async function writeDraft(brief: BriefSpec, brandVoice: string): Promise<string> {
+export async function writeDraft(
+  brief: BriefSpec,
+  brandVoice: string,
+  houseRules = "",
+): Promise<string> {
   if (!aiEnabled()) return offlineDraft(brief, brandVoice);
 
-  const prompt = `BRAND VOICE:\n${brandVoice}\n\nBRIEF:\nTitle: ${brief.title}\nTarget keyword: ${brief.targetKeyword}\nAngle / wedge: ${brief.angle}\nTarget length: ~${brief.wordTarget} words\nRequired schema: ${brief.requiredSchema.join(", ")}\nOutline:\n${brief.outline.map((s) => `- ${s}`).join("\n")}\nQuestions to answer:\n${brief.questions.map((q) => `- ${q}`).join("\n")}\nGap to fill (what competitors miss): ${brief.gap}\n\n${TEMPLATE_GUIDANCE}`;
+  const rules = houseRules.trim() ? `\n\n${houseRules.trim()}\n` : "";
+  const prompt = `BRAND VOICE:\n${brandVoice}\n\nBRIEF:\nTitle: ${brief.title}\nTarget keyword: ${brief.targetKeyword}\nAngle / wedge: ${brief.angle}\nTarget length: ~${brief.wordTarget} words\nRequired schema: ${brief.requiredSchema.join(", ")}\nOutline:\n${brief.outline.map((s) => `- ${s}`).join("\n")}\nQuestions to answer:\n${brief.questions.map((q) => `- ${q}`).join("\n")}\nGap to fill (what competitors miss): ${brief.gap}\n\n${TEMPLATE_GUIDANCE}${rules}`;
 
   return completeText({ model: MODELS.writer, prompt, maxTokens: 20000 });
 }

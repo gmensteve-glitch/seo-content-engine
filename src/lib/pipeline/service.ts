@@ -22,6 +22,7 @@ import { generateIdeaProposals, type IdeationContext } from "@/lib/agents/ideato
 import { enrichDraft, rewritePassage, hasResources, type EnrichResources } from "@/lib/agents/enricher";
 import { finalizeDraftBody } from "@/lib/agents/finalize";
 import { withCostScope } from "@/lib/ai/cost";
+import { completeText, MODELS } from "@/lib/ai/claude";
 
 /** Run `fn` in a cost scope and add whatever it spent to the draft's running total. */
 async function trackDraftCost<T>(draftId: string, fn: () => Promise<T>): Promise<T> {
@@ -36,7 +37,7 @@ async function trackDraftCost<T>(draftId: string, fn: () => Promise<T>): Promise
 import { serpTop } from "@/lib/connectors/dataforseo";
 import { scrapeMany } from "@/lib/connectors/firecrawl";
 import { fetchGscRows, strikingDistance, decayingPages, gscQuery } from "@/lib/connectors/gsc";
-import { dataforseoEnabled, firecrawlEnabled, gscEnabled } from "@/lib/env";
+import { dataforseoEnabled, firecrawlEnabled, gscEnabled, aiEnabled } from "@/lib/env";
 import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
@@ -977,9 +978,11 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
   };
 
   // Write, then auto-finalize (strip placeholders, guarantee valid JSON-LD) so
-  // no mechanical defect is ever graded or shipped.
+  // no mechanical defect is ever graded or shipped. House rules from the owner's
+  // blog feedback are injected so past corrections shape every new blog.
   await prisma.draft.update({ where: { id: draft.id }, data: { status: "DRAFTED" } });
-  const rawBody = await writeDraft(spec, brandVoice);
+  const houseRules = await buildContentGuidance(brief.businessId);
+  const rawBody = await writeDraft(spec, brandVoice, houseRules);
   finalizeCtx.metaDescription = deriveMetaDescription(rawBody, draft.title);
   const body = finalizeDraftBody(rawBody, finalizeCtx);
   draft = await prisma.draft.update({
@@ -1059,6 +1062,148 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
 export async function updateDraftBody(draftId: string, bodyMd: string): Promise<void> {
   requireDb();
   await prisma.draft.update({ where: { id: draftId }, data: { bodyMd } });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Blog feedback loop — fix the current blog AND remember for future ones.
+// ─────────────────────────────────────────────────────────────
+
+/** The standard instruction used to scrub fabricated logistics from a blog. */
+const FABRICATION_NOTE =
+  "Remove any fabricated operational logistics stated as fact: specific delivery timelines, " +
+  "hour-by-hour or day-by-day shipping schedules, named carriers, aircraft, airports, routes, " +
+  "transfer points, courier methods, or step-by-step 'how a casket travels from order to delivery' " +
+  "processes. Replace them with broad, honest guidance — timelines and routing vary by carrier, " +
+  "destination, and season, and the reader should confirm exact timing and requirements with the " +
+  "funeral home and the shipping provider. Never assert how a specific funeral home operates as fact. " +
+  "Keep everything else intact: structure, headings, table of contents, FAQ, warm tone, and links.";
+
+/** Apply a plain-language edit instruction to a blog body, preserving structure
+ *  and the trailing JSON-LD. Returns the original body on any failure. */
+async function reviseBodyWithInstruction(
+  bodyMd: string,
+  title: string,
+  instruction: string,
+): Promise<string> {
+  if (!aiEnabled()) return bodyMd;
+  const jsonFence = bodyMd.match(/```json[\s\S]*?```/i)?.[0];
+  try {
+    const out = await completeText({
+      model: MODELS.writer,
+      maxTokens: 20000,
+      prompt: `You are editing a published-quality blog article. Apply the operator's instruction below, changing ONLY what it requires and preserving everything else — the overall structure, headings, table of contents, FAQ, warm empathetic tone, internal/external links, and the trailing \`\`\`json JSON-LD schema block (keep it valid and complete). Return the FULL revised article in Markdown and nothing else.
+
+OPERATOR INSTRUCTION:
+${instruction}
+
+ARTICLE TITLE: ${title}
+
+ARTICLE (Markdown):
+${bodyMd}`,
+    });
+    let cleaned = (out || "").trim().replace(/^```(?:markdown|md)?\n?|\n?```$/g, "").trim();
+    if (cleaned.length < bodyMd.length * 0.4) return bodyMd; // guard against a truncated/bad response
+    if (jsonFence && !/```json/i.test(cleaned)) cleaned += `\n\n${jsonFence}`;
+    return cleaned;
+  } catch (e) {
+    console.error("[revise] failed:", e instanceof Error ? e.message : e);
+    return bodyMd;
+  }
+}
+
+/**
+ * Operator feedback on a blog: fix THIS blog per the note now, and remember the
+ * note as a house rule so every future blog follows it. Keeps the piece in Ready
+ * (status unchanged). Returns whether the body actually changed.
+ */
+export async function applyBlogFeedback(
+  draftId: string,
+  note: string,
+): Promise<{ changed: boolean }> {
+  requireDb();
+  const clean = note.trim();
+  if (!clean) return { changed: false };
+  const draft = await prisma.draft.findUnique({
+    where: { id: draftId },
+    select: { id: true, businessId: true, bodyMd: true, title: true },
+  });
+  if (!draft) throw new Error(`Draft ${draftId} not found`);
+
+  // Remember it (house rule for future blogs).
+  await prisma.contentFeedback.create({
+    data: { businessId: draft.businessId, draftId, note: clean.slice(0, 1000) },
+  });
+
+  // Fix the current blog.
+  const revised = await trackDraftCost(draftId, () =>
+    reviseBodyWithInstruction(draft.bodyMd, draft.title, clean),
+  );
+  if (revised !== draft.bodyMd) {
+    await prisma.draft.update({ where: { id: draftId }, data: { bodyMd: revised } });
+    return { changed: true };
+  }
+  return { changed: false };
+}
+
+/**
+ * Scrub fabricated logistics from every Ready (PASSED) blog and record the rule
+ * once per business so future blogs avoid it. Best-effort per draft.
+ */
+export async function scrubAllReadyFabrication(
+  businessId?: string,
+): Promise<{ scanned: number; changed: number }> {
+  requireDb();
+  const drafts = await prisma.draft.findMany({
+    where: { status: "PASSED", rejectedAt: null, ...(businessId ? { businessId } : {}) },
+    select: { id: true, businessId: true, bodyMd: true, title: true },
+  });
+  const ruleStored = new Set<string>();
+  let changed = 0;
+  for (const d of drafts) {
+    try {
+      if (!ruleStored.has(d.businessId)) {
+        ruleStored.add(d.businessId);
+        await prisma.contentFeedback
+          .create({ data: { businessId: d.businessId, note: FABRICATION_NOTE.slice(0, 1000) } })
+          .catch(() => {});
+      }
+      const revised = await trackDraftCost(d.id, () =>
+        reviseBodyWithInstruction(d.bodyMd, d.title, FABRICATION_NOTE),
+      );
+      if (revised !== d.bodyMd) {
+        await prisma.draft.update({ where: { id: d.id }, data: { bodyMd: revised } });
+        changed++;
+      }
+    } catch (e) {
+      console.error("[scrub] failed for", d.id, e instanceof Error ? e.message : e);
+    }
+  }
+  return { scanned: drafts.length, changed };
+}
+
+/** House rules from accumulated blog feedback, for the writer's prompt. "" when none. */
+async function buildContentGuidance(businessId: string): Promise<string> {
+  const fb = await prisma.contentFeedback.findMany({
+    where: { businessId },
+    orderBy: { createdAt: "desc" },
+    take: 25,
+    select: { note: true },
+  });
+  if (!fb.length) return "";
+  const seen = new Set<string>();
+  const rules: string[] = [];
+  for (const f of fb) {
+    const n = f.note.trim();
+    const key = n.toLowerCase();
+    if (n && !seen.has(key)) {
+      seen.add(key);
+      rules.push(n);
+    }
+    if (rules.length >= 12) break;
+  }
+  return rules.length
+    ? `HOUSE RULES from the site owner — you MUST follow every one of these:\n${rules.map((r) => `- ${r}`).join("\n")}`
+    : "";
 }
 
 /** Domains we treat as authoritative enough to cite for E-E-A-T. */

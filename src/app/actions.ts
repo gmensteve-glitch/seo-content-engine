@@ -17,8 +17,18 @@ import {
   setLocalRatio,
   setQualityThreshold,
   requestBoostAllNearMisses,
+  scrubAllReadyFabrication,
 } from "@/lib/pipeline/service";
 import { getBusiness } from "@/lib/data/repo";
+
+// Scrub fabricated logistics/timelines from every Ready blog (background — it
+// runs an LLM pass per piece). Fire-and-forget so the request returns fast.
+export async function scrubReadyFabricationAction(): Promise<void> {
+  void scrubAllReadyFabrication().catch((e) =>
+    console.error("[scrub-all] failed:", e instanceof Error ? e.message : e),
+  );
+  revalidatePath("/ready");
+}
 
 export async function buildBriefAction(formData: FormData): Promise<void> {
   await buildBriefFromIdea(String(formData.get("ideaId")));

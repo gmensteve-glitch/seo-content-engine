@@ -75,8 +75,23 @@ model Business {
   schedules    Schedule[]
   keywordRanks KeywordRank[]
   imageFeedback ImageFeedback[]
+  contentFeedback ContentFeedback[]
 
   @@index([domain])
+}
+
+// House rules learned from the operator's blog feedback — business-scoped so
+// they accumulate and are injected into every future draft's writing prompt.
+// The same note that fixes the current blog also steers all future ones.
+model ContentFeedback {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+  draftId    String? // the blog the feedback came from (optional)
+  note       String   @db.Text
+  createdAt  DateTime @default(now())
+
+  @@index([businessId, createdAt])
 }
 
 // Feedback on generated hero images — business-scoped so it accumulates into a

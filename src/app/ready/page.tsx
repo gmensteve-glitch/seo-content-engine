@@ -3,7 +3,8 @@ import { Shell } from "@/components/shell";
 import { PageHeader } from "@/components/ui";
 import { getReadyForReview, getBusiness } from "@/lib/data/repo";
 import type { PolishDraftVM } from "@/lib/data/types";
-import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen } from "lucide-react";
+import { scrubReadyFabricationAction } from "@/app/actions";
+import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen, ShieldCheck } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -90,15 +91,26 @@ export default async function ReadyPage() {
           title="Ready to publish"
           subtitle="Your morning stack — finished, quality-checked pieces. Open one to read it and push it to Shopify."
         />
-        <span
-          className={`shrink-0 rounded-full px-3 py-1 text-[12px] font-medium ${
-            drafts.length >= TOTAL_TARGET
-              ? "bg-[var(--success-bg)] text-[var(--success)]"
-              : "bg-[var(--surface-2)] text-[var(--muted)]"
-          }`}
-        >
-          {drafts.length} / {TOTAL_TARGET} ready
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <form action={scrubReadyFabricationAction}>
+            <button
+              type="submit"
+              title="Rewrite every Ready post to remove fabricated delivery timelines / shipping steps, and remember the rule for future posts"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--border-strong)] px-3 py-1 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            >
+              <ShieldCheck size={13} /> Scrub fabricated claims
+            </button>
+          </form>
+          <span
+            className={`rounded-full px-3 py-1 text-[12px] font-medium ${
+              drafts.length >= TOTAL_TARGET
+                ? "bg-[var(--success-bg)] text-[var(--success)]"
+                : "bg-[var(--surface-2)] text-[var(--muted)]"
+            }`}
+          >
+            {drafts.length} / {TOTAL_TARGET} ready
+          </span>
+        </div>
       </div>
 
       {drafts.length === 0 ? (

@@ -41,7 +41,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   >(null);
   const [note, setNote] = useState("");
   const [done, setDone] = useState<null | { label: string; href: string }>(null);
-  const [fbMode, setFbMode] = useState<null | "LIKE" | "REJECT">(null);
+  const [fbMode, setFbMode] = useState<null | "LIKE" | "REJECT" | "FIX">(null);
   const [fbText, setFbText] = useState("");
   const [preview, setPreview] = useState<null | {
     html: string;
@@ -333,6 +333,10 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
 
   const submitFeedback = () => {
     if (!fbMode || !fbText.trim()) return;
+    if (fbMode === "FIX") {
+      submitFix();
+      return;
+    }
     run("feedback", "/api/review/feedback", { draftId: vm.id, verdict: fbMode, reason: fbText }, () => {
       if (fbMode === "REJECT") {
         setDone({ label: "Rejected — pulled from your Ready list, and your reason is logged", href: "/ready" });
@@ -341,6 +345,21 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
         setFbMode(null);
         setFbText("");
       }
+    });
+  };
+
+  // Fix this blog now per the note, AND remember it for every future blog.
+  const submitFix = () => {
+    if (!fbText.trim()) return;
+    run("feedback", "/api/review/fix", { draftId: vm.id, note: fbText }, (d) => {
+      if (d.draft) setVm(d.draft as PolishDraftVM);
+      setNote(
+        d.changed
+          ? "Fixed this blog with your note — and saved it as a house rule so future blogs follow it."
+          : "Saved as a house rule for future blogs (this one didn't need a change).",
+      );
+      setFbMode(null);
+      setFbText("");
     });
   };
 
@@ -711,6 +730,13 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
                   <ThumbsUp size={13} className="text-[var(--success)]" /> I like it because…
                 </button>
                 <button
+                  onClick={() => setFbMode("FIX")}
+                  disabled={busy !== null}
+                  className="flex items-center gap-1.5 rounded-lg border border-[var(--accent)] bg-[var(--surface-1)] px-3 py-1.5 text-[12.5px] text-[var(--text)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+                >
+                  <Wand2 size={13} className="text-[var(--accent)]" /> Fix it &amp; remember…
+                </button>
+                <button
                   onClick={() => setFbMode("REJECT")}
                   disabled={busy !== null}
                   className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 py-1.5 text-[12.5px] text-[var(--text)] hover:bg-[var(--surface-2)] disabled:opacity-50"
@@ -724,6 +750,10 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
                   {fbMode === "LIKE" ? (
                     <>
                       <ThumbsUp size={13} className="text-[var(--success)]" /> What worked about this piece?
+                    </>
+                  ) : fbMode === "FIX" ? (
+                    <>
+                      <Wand2 size={13} className="text-[var(--accent)]" /> What should I change? I&apos;ll fix this blog now and follow it on every future blog.
                     </>
                   ) : (
                     <>
@@ -739,7 +769,9 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
                   placeholder={
                     fbMode === "LIKE"
                       ? "e.g. 'great answer-first intro', 'perfect length', 'loved the tone'"
-                      : "e.g. 'intro is boring', 'too salesy', 'wrong angle', 'reads like AI'"
+                      : fbMode === "FIX"
+                        ? "e.g. 'don't invent delivery timelines', 'keep it broader, no specific shipping steps', 'add a section on green burial'"
+                        : "e.g. 'intro is boring', 'too salesy', 'wrong angle', 'reads like AI'"
                   }
                   className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-[13px]"
                 />
@@ -748,10 +780,22 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
                     onClick={submitFeedback}
                     disabled={busy !== null || !fbText.trim()}
                     className={`rounded-lg px-3.5 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-50 ${
-                      fbMode === "REJECT" ? "bg-[var(--danger)]" : "bg-[var(--success)]"
+                      fbMode === "REJECT"
+                        ? "bg-[var(--danger)]"
+                        : fbMode === "FIX"
+                          ? "bg-[var(--accent)]"
+                          : "bg-[var(--success)]"
                     } hover:brightness-110`}
                   >
-                    {busy === "feedback" ? "Saving…" : fbMode === "REJECT" ? "Reject & log reason" : "Save feedback"}
+                    {busy === "feedback"
+                      ? fbMode === "FIX"
+                        ? "Fixing…"
+                        : "Saving…"
+                      : fbMode === "REJECT"
+                        ? "Reject & log reason"
+                        : fbMode === "FIX"
+                          ? "Fix this blog & remember"
+                          : "Save feedback"}
                   </button>
                   <button
                     onClick={() => {
