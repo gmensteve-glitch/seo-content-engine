@@ -648,7 +648,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
             <div className="text-[12.5px] leading-snug text-[#4d5156]">{preview.metaDescription}</div>
           </div>
           {/* Rendered like a real blog page — white readable column + article typography */}
-          <div className="max-h-[70vh] overflow-y-auto rounded-xl border border-[var(--border)] bg-white">
+          <div className="max-h-[70vh] overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface-1)]">
             <div className="mx-auto max-w-[720px] px-6 py-8">
               <article className="article-preview" dangerouslySetInnerHTML={{ __html: preview.html }} />
             </div>

@@ -59,10 +59,10 @@ body {
   background: var(--accent-bg);
 }
 
-/* Article preview — renders a draft to look like a real published blog page
-   (light column, editorial typography). Scoped so it never leaks into the app. */
+/* Article preview — editorial typography, themed to the dashboard (dark) so the
+   review page flows as one surface. Scoped so it never leaks into the app. */
 .article-preview {
-  color: #1f2328;
+  color: var(--text);
   font-size: 16.5px;
   line-height: 1.75;
   font-family: Georgia, "Times New Roman", serif;
@@ -89,17 +89,17 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
 }
 .article-preview p { margin: 0 0 18px; }
-.article-preview a { color: #1a56db; text-decoration: underline; text-underline-offset: 2px; }
-.article-preview strong { font-weight: 700; color: #111; }
+.article-preview a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.article-preview strong { font-weight: 700; color: var(--text); }
 .article-preview em { font-style: italic; }
 .article-preview ul,
 .article-preview ol { margin: 0 0 18px; padding-left: 26px; }
 .article-preview li { margin: 6px 0; }
 .article-preview blockquote {
-  border-left: 3px solid #cbd5e1;
+  border-left: 3px solid var(--border-strong);
   margin: 0 0 18px;
   padding: 2px 0 2px 18px;
-  color: #475569;
+  color: var(--muted);
   font-style: italic;
 }
 .article-preview table {
@@ -111,15 +111,15 @@ body {
 }
 .article-preview th,
 .article-preview td {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border);
   padding: 9px 11px;
   text-align: left;
   vertical-align: top;
 }
-.article-preview th { background: #f8fafc; font-weight: 600; }
-.article-preview hr { border: none; border-top: 1px solid #e5e7eb; margin: 28px 0; }
+.article-preview th { background: var(--surface-2); font-weight: 600; }
+.article-preview hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
 .article-preview code {
-  background: #f1f5f9;
+  background: var(--surface-2);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 0.9em;
