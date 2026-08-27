@@ -3,8 +3,8 @@ import { Shell } from "@/components/shell";
 import { PageHeader } from "@/components/ui";
 import { getReadyForReview, getBusiness } from "@/lib/data/repo";
 import type { PolishDraftVM } from "@/lib/data/types";
-import { scrubReadyFabricationAction } from "@/app/actions";
-import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen, ShieldCheck } from "lucide-react";
+import { scrubReadyFabricationAction, fixPublishedPostsAction } from "@/app/actions";
+import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen, ShieldCheck, Undo2 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -91,7 +91,16 @@ export default async function ReadyPage() {
           title="Ready to publish"
           subtitle="Your morning stack — finished, quality-checked pieces. Open one to read it and push it to Shopify."
         />
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <form action={fixPublishedPostsAction}>
+            <button
+              type="submit"
+              title="Fix every already-PUBLISHED Shopify post: scrub fabricated business-operations claims, update it on Shopify, and set it Hidden for you to review and re-publish"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--warn)] px-3 py-1 text-[12px] text-[var(--warn)] hover:bg-[var(--warn-bg)]"
+            >
+              <Undo2 size={13} /> Fix &amp; hide published
+            </button>
+          </form>
           <form action={scrubReadyFabricationAction}>
             <button
               type="submit"

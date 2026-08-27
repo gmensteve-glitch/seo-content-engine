@@ -18,6 +18,7 @@ import {
   setQualityThreshold,
   requestBoostAllNearMisses,
   scrubAllReadyFabrication,
+  fixAllPublishedPosts,
 } from "@/lib/pipeline/service";
 import { getBusiness } from "@/lib/data/repo";
 
@@ -28,6 +29,17 @@ export async function scrubReadyFabricationAction(): Promise<void> {
     console.error("[scrub-all] failed:", e instanceof Error ? e.message : e),
   );
   revalidatePath("/ready");
+}
+
+// Fix every already-published post: scrub fabricated business-operations claims,
+// update the live Shopify article, and set it Hidden for review. Background —
+// touches live Shopify per post, so it's fire-and-forget.
+export async function fixPublishedPostsAction(): Promise<void> {
+  void fixAllPublishedPosts().catch((e) =>
+    console.error("[fix-published-all] failed:", e instanceof Error ? e.message : e),
+  );
+  revalidatePath("/ready");
+  revalidatePath("/performance");
 }
 
 export async function buildBriefAction(formData: FormData): Promise<void> {

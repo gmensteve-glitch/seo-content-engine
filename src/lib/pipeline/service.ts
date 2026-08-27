@@ -1183,6 +1183,92 @@ export async function scrubAllReadyFabrication(
   return { scanned: drafts.length, changed };
 }
 
+/**
+ * Fix an ALREADY-PUBLISHED post: scrub fabricated business-operations claims from
+ * its body, re-render clean HTML, and UPDATE the live Shopify article in place —
+ * set to HIDDEN so the operator reviews before re-publishing. Uses the stored CMS
+ * id, so no duplicate is created. Returns whether the Shopify article was updated.
+ */
+export async function fixPublishedPost(draftId: string): Promise<{ updated: boolean }> {
+  requireDb();
+  const draft = await prisma.draft.findUnique({
+    where: { id: draftId },
+    include: { business: true, page: true },
+  });
+  if (!draft || !draft.page?.cmsId) return { updated: false };
+
+  // 1. Scrub fabricated operations from the body (keep pricing/facts/structure).
+  const scrubbed = await trackDraftCost(draftId, () =>
+    reviseBodyWithInstruction(draft.bodyMd, draft.title, FABRICATION_NOTE),
+  );
+  if (scrubbed !== draft.bodyMd) {
+    await prisma.draft.update({ where: { id: draftId }, data: { bodyMd: scrubbed } });
+  }
+
+  // 2. Render and push the fix to the live Shopify article, set Hidden.
+  const platform = draft.business.cmsPlatform.toLowerCase() as CmsPlatform;
+  const connector = await prisma.connector.findUnique({
+    where: { businessId_type: { businessId: draft.businessId, type: cmsConnectorType(platform) } },
+  });
+  if (!connector || connector.status !== "CONNECTED" || !encryptionEnabled()) return { updated: false };
+  const config = decryptJson(connector.configEnc);
+  const adapter = getCmsAdapter(platform, config);
+
+  let html = markdownToHtml(scrubbed);
+  const siteBase = siteBaseFromConfig(platform, config as Record<string, unknown>);
+  if (siteBase) {
+    try {
+      const { html: safe } = await sanitizeLinks(html, { siteBase });
+      html = safe;
+    } catch (e) {
+      console.error("[fix-published] link sanitize failed:", e instanceof Error ? e.message : e);
+    }
+  }
+  html = html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/(\s*\n){3,}/g, "\n\n").trim();
+
+  await adapter.update(draft.page.cmsId, {
+    title: draft.title,
+    html,
+    slug: slugify(draft.title),
+    metaDescription: deriveMetaDescription(scrubbed, draft.title),
+    seoTitle: deriveSeoTitle(draft.title),
+    publishState: "draft", // hidden — operator reviews, then pushes live
+  });
+  return { updated: true };
+}
+
+/**
+ * Fix every already-published post for the business (or all businesses): scrub +
+ * update Shopify + set hidden. Records the fabrication rule once so future blogs
+ * avoid it. Best-effort per post.
+ */
+export async function fixAllPublishedPosts(
+  businessId?: string,
+): Promise<{ scanned: number; updated: number }> {
+  requireDb();
+  const drafts = await prisma.draft.findMany({
+    where: { status: "PUBLISHED", page: { isNot: null }, ...(businessId ? { businessId } : {}) },
+    select: { id: true, businessId: true },
+  });
+  const ruleStored = new Set<string>();
+  let updated = 0;
+  for (const d of drafts) {
+    try {
+      if (!ruleStored.has(d.businessId)) {
+        ruleStored.add(d.businessId);
+        await prisma.contentFeedback
+          .create({ data: { businessId: d.businessId, note: FABRICATION_NOTE.slice(0, 1000) } })
+          .catch(() => {});
+      }
+      const r = await fixPublishedPost(d.id);
+      if (r.updated) updated++;
+    } catch (e) {
+      console.error("[fix-published] failed for", d.id, e instanceof Error ? e.message : e);
+    }
+  }
+  return { scanned: drafts.length, updated };
+}
+
 /** House rules from accumulated blog feedback, for the writer's prompt. "" when none. */
 async function buildContentGuidance(businessId: string): Promise<string> {
   const fb = await prisma.contentFeedback.findMany({
