@@ -205,6 +205,38 @@ function normTitle(s: string): string {
  * are the highest-ROI new content — one strong piece pushes them to page 1.
  * Returns "" when GSC isn't connected, so ideation degrades gracefully.
  */
+/**
+ * GEO gap signal for the ideator: the target questions AI answer engines do NOT
+ * yet cite us for. These become priority topics to write/strengthen so an AI
+ * will cite us. "" when GEO isn't configured or there are no gaps.
+ */
+async function buildGeoOpportunityNote(businessId: string): Promise<string> {
+  if (!geoEnabled()) return "";
+  try {
+    const latest = await prisma.geoCitation.findFirst({
+      where: { businessId },
+      orderBy: { date: "desc" },
+      select: { date: true },
+    });
+    if (!latest) return "";
+    const notCited = await prisma.geoCitation.findMany({
+      where: { businessId, date: latest.date, cited: false },
+      select: { query: true },
+      take: 12,
+    });
+    if (!notCited.length) return "";
+    const list = notCited.map((n) => `"${n.query}"`).join("; ");
+    return (
+      `AI-ANSWER GAPS — AI answer engines (ChatGPT, Perplexity, Google AI) do NOT yet cite this site ` +
+      `when asked these real buyer questions. Prioritize content that answers them in a tight, quotable, ` +
+      `self-contained way so an AI will lift and cite us: ${list}.`
+    );
+  } catch (e) {
+    console.error("[geo] opportunity note failed:", e instanceof Error ? e.message : e);
+    return "";
+  }
+}
+
 async function buildGscOpportunityNote(existingTitles: string[] = []): Promise<string> {
   if (!gscEnabled()) return "";
   try {
@@ -250,8 +282,12 @@ async function buildPerformanceNote(
   pillars: string[],
   existingTitles: string[] = [],
 ): Promise<string> {
-  // Live search-demand signal comes first — it's the strongest steer we have.
-  const gscNote = await buildGscOpportunityNote(existingTitles);
+  // Live search-demand + AI-citation gaps come first — the strongest steers.
+  const [gscRaw, geoNote] = await Promise.all([
+    buildGscOpportunityNote(existingTitles),
+    buildGeoOpportunityNote(businessId),
+  ]);
+  const gscNote = [gscRaw, geoNote].filter(Boolean).join("\n\n");
 
   const pages = await prisma.page.findMany({
     where: { businessId, publishedAt: { not: null } },
