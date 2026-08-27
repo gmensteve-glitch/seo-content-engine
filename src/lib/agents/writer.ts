@@ -21,6 +21,13 @@ STRUCTURE:
 - Soft calls-to-action at the top and bottom (never pushy).
 - End with a fenced \`\`\`json block of valid JSON-LD for the required schema types, with complete fields (datePublished/author where applicable). The JSON-LD MUST be complete and valid — never truncate it. If you're running low on room, shorten the prose, never the schema.
 
+GEO — BUILT TO BE QUOTED BY AI ANSWER ENGINES (ChatGPT, Perplexity, Google AI Overviews, Gemini). This matters as much as ranking in Google — the goal is for an AI to lift YOUR text as its answer and cite this site:
+- Open with a "Quick answer": the FIRST thing right after the H1, before the table of contents, is a bold 2–4 sentence self-contained answer to the exact question the title asks. Lead with the number/range/verdict, then one sentence of context. An AI must be able to quote it verbatim and have a complete, accurate answer with zero other context.
+- Under EVERY H2, the first 1–2 sentences must directly and completely answer that section's implied question — no "as mentioned above", no pronouns pointing elsewhere, no setup. Every passage must stand on its own when pulled out of context.
+- State key facts as clean, standalone, attributable sentences with concrete numbers, ranges, or named standards (e.g. "A standard adult casket is about 84 inches long and 28 inches wide."). Specific, quotable facts beat vague prose.
+- Mention the brand naturally where it fits so the source is attributable (never spammy).
+- Make the FAQ answers fully self-contained — they are prime AI-answer real estate.
+
 QUALITY — this is what gets it ranked:
 - Take a clear point of view / thesis. Own the wedge from the brief; don't hedge.
 - Use concrete, verifiable specifics: real price ranges, real timeframes, named standards or regulations — but ONLY ones you are confident are real. NEVER invent a statute, statistic, citation, or source.
