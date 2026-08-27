@@ -85,6 +85,26 @@ export interface MoversVM {
   droppers: KeywordMoverVM[]; // slipping, worst first
 }
 
+/** One target question and whether an AI answer engine cited us for it. */
+export interface GeoQueryVM {
+  query: string;
+  cited: boolean;
+  mentioned: boolean;
+  position: number | null; // rank among cited sources
+}
+
+/** GEO (Generative Engine Optimization) visibility — do LLMs cite us? */
+export interface GeoVisibilityVM {
+  connected: boolean; // an answer-engine key is wired + we have data
+  tested: number; // questions checked in the latest run
+  citedCount: number;
+  mentionedCount: number;
+  citationRate: number; // 0–100, cited / tested
+  lastCheckedAt: string | null;
+  cited: GeoQueryVM[]; // where we ARE cited (wins)
+  notCited: GeoQueryVM[]; // where we're NOT cited (the opportunity list)
+}
+
 /** Live Search Console opportunities for the Overview panel. */
 export interface SeoOpportunitiesVM {
   connected: boolean; // GSC service account wired + returning data

@@ -76,8 +76,27 @@ model Business {
   keywordRanks KeywordRank[]
   imageFeedback ImageFeedback[]
   contentFeedback ContentFeedback[]
+  geo         GeoCitation[]
 
   @@index([domain])
+}
+
+// GEO (Generative Engine Optimization) visibility: did an AI answer engine cite
+// OUR site when asked a target question? One row per (business, query, engine,
+// day) — the time series that shows citation rate climbing as content improves.
+model GeoCitation {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+  query      String
+  engine     String // "perplexity"
+  date       DateTime @db.Date
+  cited      Boolean  @default(false) // our domain is among the cited sources
+  mentioned  Boolean  @default(false) // our brand/domain appears in the answer text
+  position   Int? // 1-based rank among cited sources, when cited
+
+  @@unique([businessId, query, engine, date])
+  @@index([businessId, date])
 }
 
 // House rules learned from the operator's blog feedback — business-scoped so

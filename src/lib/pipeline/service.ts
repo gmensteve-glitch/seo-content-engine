@@ -37,7 +37,8 @@ async function trackDraftCost<T>(draftId: string, fn: () => Promise<T>): Promise
 import { serpTop } from "@/lib/connectors/dataforseo";
 import { scrapeMany } from "@/lib/connectors/firecrawl";
 import { fetchGscRows, strikingDistance, decayingPages, gscQuery } from "@/lib/connectors/gsc";
-import { dataforseoEnabled, firecrawlEnabled, gscEnabled, aiEnabled } from "@/lib/env";
+import { askAnswerEngine } from "@/lib/connectors/perplexity";
+import { dataforseoEnabled, firecrawlEnabled, gscEnabled, geoEnabled, aiEnabled } from "@/lib/env";
 import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
@@ -512,6 +513,79 @@ export async function syncGscAll(): Promise<Record<string, { pages: number; keyw
     } catch (e) {
       out[b.id] = { pages: 0, keywords: 0 };
       console.error("[gsc-sync] business failed:", e instanceof Error ? e.message : e);
+    }
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+// GEO — measure whether AI answer engines cite us for our target questions.
+// This is to Generative Engine Optimization what GSC is to SEO.
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Ask an answer engine our target questions and record whether our site is
+ * cited. Builds the question set from the keywords we actually target (Ready +
+ * published pieces). One row per (query, engine, day) — the citation-rate time
+ * series. No-ops when GEO isn't configured.
+ */
+export async function syncGeoCitations(
+  businessId: string,
+  opts?: { max?: number },
+): Promise<{ tested: number; cited: number }> {
+  if (!geoEnabled()) return { tested: 0, cited: 0 };
+  const business = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { domain: true },
+  });
+  if (!business?.domain) return { tested: 0, cited: 0 };
+
+  const drafts = await prisma.draft.findMany({
+    where: { businessId, status: { in: ["PASSED", "PUBLISHED"] } },
+    select: { brief: { select: { targetKeyword: true } } },
+    orderBy: { updatedAt: "desc" },
+    take: 100,
+  });
+  const queries = [
+    ...new Set(drafts.map((d) => d.brief?.targetKeyword?.trim()).filter(Boolean) as string[]),
+  ].slice(0, opts?.max ?? 15);
+  if (!queries.length) return { tested: 0, cited: 0 };
+
+  const date = dayDate(isoDay(0));
+  let cited = 0;
+  for (const q of queries) {
+    const ans = await askAnswerEngine(q, business.domain);
+    if (!ans) continue;
+    await prisma.geoCitation.upsert({
+      where: {
+        businessId_query_engine_date: { businessId, query: q, engine: "perplexity", date },
+      },
+      create: {
+        businessId, query: q, engine: "perplexity", date,
+        cited: ans.cited, mentioned: ans.mentioned, position: ans.position,
+      },
+      update: { cited: ans.cited, mentioned: ans.mentioned, position: ans.position },
+    });
+    if (ans.cited) cited++;
+  }
+  return { tested: queries.length, cited };
+}
+
+/** Run GEO citation checks for every active business. Called on a slow cadence. */
+export async function syncGeoAll(): Promise<Record<string, { tested: number; cited: number }>> {
+  requireDb();
+  if (!geoEnabled()) return {};
+  const businesses = await prisma.business.findMany({
+    where: { status: { in: ["ACTIVE", "ONBOARDING"] } },
+    select: { id: true },
+  });
+  const out: Record<string, { tested: number; cited: number }> = {};
+  for (const b of businesses) {
+    try {
+      out[b.id] = await syncGeoCitations(b.id);
+    } catch (e) {
+      out[b.id] = { tested: 0, cited: 0 };
+      console.error("[geo-sync] business failed:", e instanceof Error ? e.message : e);
     }
   }
   return out;

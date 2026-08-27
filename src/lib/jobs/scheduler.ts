@@ -20,6 +20,7 @@ const WORKER_INTERVAL_MS = 45 * 1000; // drain the pipeline queue every 45s
 const ADVANCE_INTERVAL_MS = 20 * 60 * 1000; // auto-advance the pipeline every 20 min
 const REPLENISH_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
 const GSC_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // pull Search Console data twice a day
+const GEO_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // check AI-answer citations once a day
 const BOOT_DELAY_MS = 30 * 1000; // let the server settle before the first tick
 
 // Survive module re-evaluation / HMR: stash the singleton on globalThis.
@@ -74,6 +75,24 @@ async function gscSyncTick(): Promise<void> {
   }
 }
 
+// GEO sync: ask AI answer engines our target questions and record whether we're
+// cited. No-ops when GEO isn't configured.
+async function geoSyncTick(): Promise<void> {
+  try {
+    const { syncGeoAll } = await import("@/lib/pipeline/service");
+    const out = await syncGeoAll();
+    const totals = Object.values(out).reduce(
+      (a, b) => ({ tested: a.tested + b.tested, cited: a.cited + b.cited }),
+      { tested: 0, cited: 0 },
+    );
+    if (totals.tested) {
+      console.log(`[scheduler] GEO check: ${totals.cited}/${totals.tested} queries cited us`);
+    }
+  } catch (e) {
+    console.error("[scheduler] GEO sync tick failed:", e instanceof Error ? e.message : e);
+  }
+}
+
 // Auto-advance: idea → brief → approve, self-throttled to a Ready backlog.
 // This is what keeps the Ready list stocked without any manual gates.
 async function autoAdvanceTick(): Promise<void> {
@@ -111,6 +130,7 @@ export function startScheduler(): void {
     void replenishTick();
     void autoAdvanceTick();
     void gscSyncTick();
+    void geoSyncTick();
   }, BOOT_DELAY_MS);
 
   setInterval(() => void workerTick(), WORKER_INTERVAL_MS);
@@ -118,4 +138,5 @@ export function startScheduler(): void {
   setInterval(() => void autoAdvanceTick(), ADVANCE_INTERVAL_MS);
   setInterval(() => void replenishTick(), REPLENISH_INTERVAL_MS);
   setInterval(() => void gscSyncTick(), GSC_SYNC_INTERVAL_MS);
+  setInterval(() => void geoSyncTick(), GEO_SYNC_INTERVAL_MS);
 }

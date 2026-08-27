@@ -1,39 +1,116 @@
 import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
-import { MapPin } from "lucide-react";
+import { getGeoVisibility } from "@/lib/data/repo";
+import { MapPin, Bot, CheckCircle2, Target, Sparkles } from "lucide-react";
+
+export const dynamic = "force-dynamic";
 
 const SAMPLE_CITIES = [
-  "Austin, TX",
+  "New York, NY",
+  "Los Angeles, CA",
+  "Chicago, IL",
+  "Houston, TX",
   "Phoenix, AZ",
-  "Columbus, OH",
-  "Charlotte, NC",
-  "Nashville, TN",
-  "Denver, CO",
+  "Philadelphia, PA",
 ];
 
 export default async function GeoPage() {
+  const geo = await getGeoVisibility();
+
   return (
     <Shell>
       <PageHeader
-        title="Geo campaigns"
-        subtitle="One template → thousands of unique city pages. Pulls vetted local data (Maps, ≥4.4★ / ≥20 reviews)."
+        title="GEO — AI answer visibility"
+        subtitle="Are ChatGPT, Perplexity & Google AI citing you when buyers ask? This is ranking inside the LLMs."
       />
 
-      <Card className="mb-4">
-        <h2 className="text-[15px] font-medium">Casket resource pages</h2>
-        <p className="mt-1 text-[13px] text-[var(--muted)]">
-          “When a loved one passes in [City]: first steps, vetted local funeral homes, and what to
-          expect.” Be the helpful authority in a moment of real need — a soft CTA does the rest.
-        </p>
-        <div className="mt-3 flex items-center gap-3">
-          <Pill tone="accent">geo template ready</Pill>
-          <span className="text-[12px] text-[var(--subtle)]">target: top 300 US cities</span>
-        </div>
-      </Card>
+      {/* AI Answer Visibility scoreboard */}
+      {geo.connected ? (
+        <>
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat label="Citation rate" value={`${geo.citationRate}%`} accent="success" />
+            <Stat label="Cited" value={`${geo.citedCount} / ${geo.tested}`} />
+            <Stat label="Mentioned" value={`${geo.mentionedCount} / ${geo.tested}`} />
+            <Stat
+              label="Last checked"
+              value={geo.lastCheckedAt ? new Date(geo.lastCheckedAt).toLocaleDateString() : "—"}
+            />
+          </div>
 
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <div className="mb-2 flex items-center gap-1.5 text-[13px] font-medium text-[var(--success)]">
+                <CheckCircle2 size={14} /> Where AI cites you ({geo.cited.length})
+              </div>
+              {geo.cited.length ? (
+                <div className="space-y-1.5">
+                  {geo.cited.map((q) => (
+                    <div key={q.query} className="flex items-center justify-between gap-2 text-[12.5px]">
+                      <span className="truncate">{q.query}</span>
+                      {q.position && (
+                        <span className="shrink-0 rounded-full bg-[var(--success-bg)] px-2 py-0.5 text-[10px] text-[var(--success)]">
+                          source #{q.position}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[12px] text-[var(--muted)]">Not cited anywhere yet — the list on the right is your target.</p>
+              )}
+            </Card>
+
+            <Card>
+              <div className="mb-2 flex items-center gap-1.5 text-[13px] font-medium text-[var(--warn)]">
+                <Target size={14} /> Opportunities — not cited yet ({geo.notCited.length})
+              </div>
+              {geo.notCited.length ? (
+                <div className="space-y-1.5">
+                  {geo.notCited.map((q) => (
+                    <div key={q.query} className="flex items-center justify-between gap-2 text-[12.5px]">
+                      <span className="truncate text-[var(--muted)]">{q.query}</span>
+                      {q.mentioned && (
+                        <span className="shrink-0 text-[10px] text-[var(--subtle)]">mentioned, not cited</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[12px] text-[var(--success)]">You&apos;re cited for everything checked. 🎯</p>
+              )}
+            </Card>
+          </div>
+        </>
+      ) : (
+        <Card className="mb-4">
+          <div className="flex items-start gap-3">
+            <Bot size={20} className="mt-0.5 shrink-0 text-[var(--accent)]" />
+            <div>
+              <div className="text-[14px] font-medium">Turn on AI answer tracking</div>
+              <p className="mt-1 text-[13px] text-[var(--muted)]">
+                Add a <b>Perplexity API key</b> (<span className="text-[var(--subtle)]">PERPLEXITY_API_KEY</span>) and
+                the engine asks the AI answer engines your target questions on a schedule, then shows you exactly
+                which ones cite Trusted Caskets — and which don&apos;t (your opportunity list). It feeds the gaps
+                back to the idea engine automatically.
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <Pill tone="accent">Tier 1 quotability is already shipping on every new post</Pill>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Local city pages (geographic) */}
+      <div className="mt-6 mb-2 flex items-center gap-1.5 text-[12px] font-medium text-[var(--muted)]">
+        <Sparkles size={13} /> Local city coverage
+      </div>
       <Card>
-        <h2 className="mb-3 text-[15px] font-medium">Sample campaign cities</h2>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <p className="text-[13px] text-[var(--muted)]">
+          Local posts target the most populous US metros first — the same city questions AI answers, so winning
+          them wins both the map pack and the AI answer.
+        </p>
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {SAMPLE_CITIES.map((c) => (
             <div
               key={c}
@@ -46,5 +123,24 @@ export default async function GeoPage() {
         </div>
       </Card>
     </Shell>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: "success";
+}) {
+  return (
+    <div className="rounded-lg bg-[var(--surface-2)] px-3.5 py-3">
+      <div className="text-[12px] text-[var(--muted)]">{label}</div>
+      <div className={`mt-0.5 text-[22px] font-medium ${accent === "success" ? "text-[var(--success)]" : "text-[var(--text)]"}`}>
+        {value}
+      </div>
+    </div>
   );
 }

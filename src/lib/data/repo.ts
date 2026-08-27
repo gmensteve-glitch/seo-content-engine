@@ -26,9 +26,10 @@ import type {
   PolishDraftVM,
   SeoOpportunitiesVM,
   MoversVM,
+  GeoVisibilityVM,
 } from "@/lib/data/types";
 import { fetchGscRows, strikingDistance, decayingPages } from "@/lib/connectors/gsc";
-import { gscEnabled } from "@/lib/env";
+import { gscEnabled, geoEnabled } from "@/lib/env";
 import {
   BUSINESSES,
   KPIS,
@@ -445,6 +446,50 @@ export async function getKeywordMovers(bizId = DEFAULT_BIZ): Promise<MoversVM> {
     .slice(0, 6);
 
   return { hasHistory: true, daysSpan, climbers, droppers };
+}
+
+/**
+ * GEO visibility from the latest citation check: how often AI answer engines
+ * cite us for our target questions, plus the win list and the not-cited
+ * opportunity list. connected:false until an answer-engine key is wired and a
+ * check has run.
+ */
+export async function getGeoVisibility(bizId = DEFAULT_BIZ): Promise<GeoVisibilityVM> {
+  const empty: GeoVisibilityVM = {
+    connected: false, tested: 0, citedCount: 0, mentionedCount: 0,
+    citationRate: 0, lastCheckedAt: null, cited: [], notCited: [],
+  };
+  if (!hasDatabase || !geoEnabled()) return empty;
+
+  const latest = await prisma.geoCitation.findFirst({
+    where: { businessId: bizId },
+    orderBy: { date: "desc" },
+    select: { date: true },
+  });
+  if (!latest) return empty;
+
+  const rows = await prisma.geoCitation.findMany({
+    where: { businessId: bizId, date: latest.date },
+    orderBy: [{ cited: "desc" }, { query: "asc" }],
+  });
+  const toVM = (r: (typeof rows)[number]) => ({
+    query: r.query,
+    cited: r.cited,
+    mentioned: r.mentioned,
+    position: r.position,
+  });
+  const citedCount = rows.filter((r) => r.cited).length;
+  const mentionedCount = rows.filter((r) => r.mentioned).length;
+  return {
+    connected: true,
+    tested: rows.length,
+    citedCount,
+    mentionedCount,
+    citationRate: rows.length ? Math.round((citedCount / rows.length) * 100) : 0,
+    lastCheckedAt: latest.date.toISOString(),
+    cited: rows.filter((r) => r.cited).map(toVM),
+    notCited: rows.filter((r) => !r.cited).map(toVM),
+  };
 }
 
 export async function getKpis(bizId = DEFAULT_BIZ): Promise<Kpis> {
