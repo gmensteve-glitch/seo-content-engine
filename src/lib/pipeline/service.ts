@@ -1119,6 +1119,20 @@ ${bodyMd}`,
     let cleaned = (out || "").trim().replace(/^```(?:markdown|md)?\n?|\n?```$/g, "").trim();
     if (cleaned.length < bodyMd.length * 0.4) return bodyMd; // guard against a truncated/bad response
     if (jsonFence && !/```json/i.test(cleaned)) cleaned += `\n\n${jsonFence}`;
+    // Never let a revision break a post: if the rewritten body wouldn't render
+    // to real HTML (empty / raw text), keep the original.
+    try {
+      const html = markdownToHtml(cleaned)
+        .replace(/<script[\s\S]*?<\/script>/gi, "")
+        .trim();
+      const broke = preflightPublish(html).issues.some((i) => /did not render|raw text/i.test(i));
+      if (broke) {
+        console.error("[revise] result failed preflight — keeping original body");
+        return bodyMd;
+      }
+    } catch {
+      return bodyMd;
+    }
     return cleaned;
   } catch (e) {
     console.error("[revise] failed:", e instanceof Error ? e.message : e);

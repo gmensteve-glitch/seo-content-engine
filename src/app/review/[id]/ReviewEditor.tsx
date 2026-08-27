@@ -323,6 +323,17 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   // then point it at the admin URL once the API returns.
   const sendAsDraft = () => {
     const win = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
+    // Show a friendly loading state in the new tab — publishing (image upload +
+    // link checks) takes a few seconds, so it isn't just a blank page.
+    if (win) {
+      try {
+        win.document.write(
+          '<title>Publishing to Shopify…</title><body style="margin:0;font-family:system-ui,-apple-system,sans-serif;background:#0b0b0d;color:#cbd5e1;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="font-size:16px;font-weight:600">Publishing to Shopify…</div><div style="font-size:13px;color:#64748b;margin-top:8px">This tab opens your post automatically in a few seconds.</div></div></body>',
+        );
+      } catch {
+        /* cross-origin write can fail — ignore */
+      }
+    }
     run("draft", "/api/review/publish", { draftId: vm.id, publishState: "draft" }, (d) => {
       const target = (d.adminUrl as string) || (d.url as string) || "";
       if (win) {
@@ -449,56 +460,6 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
               <span className="font-medium">Notes: </span>
               {vm.feedback}
             </p>
-          </div>
-        )}
-      </div>
-
-      {/* Fix this blog — always-visible feedback box with a clear status bar */}
-      <div className="mb-4 rounded-xl border border-[var(--accent)] bg-[var(--surface-1)] p-4">
-        <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-[var(--accent)]">
-          <Wand2 size={13} /> Fix this blog
-        </div>
-        <p className="mb-2 text-[12px] text-[var(--muted)]">
-          Tell me what to change — I&apos;ll rewrite this post now, and remember it as a rule for every future blog.
-        </p>
-        <textarea
-          value={fixText}
-          onChange={(e) => setFixText(e.target.value)}
-          disabled={fixStatus === "working"}
-          rows={2}
-          placeholder="e.g. 'don't invent our shipping timeline', 'add a section on veteran discounts', 'make the intro warmer', 'cut the fluff'"
-          className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-[13px] disabled:opacity-60"
-        />
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <button
-            onClick={runFix}
-            disabled={busy !== null || !fixText.trim()}
-            className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
-          >
-            <Wand2 size={14} /> {fixStatus === "working" ? "Fixing…" : "Fix this blog & remember"}
-          </button>
-          {fixStatus === "working" && (
-            <span className="flex items-center gap-1.5 text-[12px] text-[var(--muted)]">
-              <Loader2 size={13} className="animate-spin text-[var(--accent)]" /> Working — rewriting the post (~15s)
-            </span>
-          )}
-          {fixStatus === "done" && (
-            <span className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--success)]">
-              <CheckCircle2 size={13} /> Complete — fixed &amp; remembered
-            </span>
-          )}
-          {fixStatus === null && (
-            <span className="text-[11px] text-[var(--subtle)]">Applies now + trains every future blog</span>
-          )}
-        </div>
-        {/* Status bar: animated while working, full green when complete */}
-        {fixStatus && (
-          <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${
-                fixStatus === "done" ? "w-full bg-[var(--success)]" : "w-2/3 animate-pulse bg-[var(--accent)]"
-              }`}
-            />
           </div>
         )}
       </div>
@@ -765,6 +726,55 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
           </div>
         </div>
       )}
+
+      {/* Fix this blog — under the article, with a clear working/complete status bar */}
+      <div className="mt-4 mb-4 rounded-xl border border-[var(--accent)] bg-[var(--surface-1)] p-4">
+        <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-[var(--accent)]">
+          <Wand2 size={13} /> Fix this blog
+        </div>
+        <p className="mb-2 text-[12px] text-[var(--muted)]">
+          Tell me what to change — I&apos;ll rewrite this post now, and remember it as a rule for every future blog.
+        </p>
+        <textarea
+          value={fixText}
+          onChange={(e) => setFixText(e.target.value)}
+          disabled={fixStatus === "working"}
+          rows={2}
+          placeholder="e.g. 'don't invent our shipping timeline', 'add a section on veteran discounts', 'make the intro warmer', 'cut the fluff'"
+          className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-[13px] disabled:opacity-60"
+        />
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <button
+            onClick={runFix}
+            disabled={busy !== null || !fixText.trim()}
+            className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+          >
+            <Wand2 size={14} /> {fixStatus === "working" ? "Fixing…" : "Fix this blog & remember"}
+          </button>
+          {fixStatus === "working" && (
+            <span className="flex items-center gap-1.5 text-[12px] text-[var(--muted)]">
+              <Loader2 size={13} className="animate-spin text-[var(--accent)]" /> Working — rewriting the post (~15s)
+            </span>
+          )}
+          {fixStatus === "done" && (
+            <span className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--success)]">
+              <CheckCircle2 size={13} /> Complete — fixed &amp; remembered
+            </span>
+          )}
+          {fixStatus === null && (
+            <span className="text-[11px] text-[var(--subtle)]">Applies now + trains every future blog</span>
+          )}
+        </div>
+        {fixStatus && (
+          <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${
+                fixStatus === "done" ? "w-full bg-[var(--success)]" : "w-2/3 animate-pulse bg-[var(--accent)]"
+              }`}
+            />
+          </div>
+        )}
+      </div>
 
       {/* Ready to publish — moved to the bottom so you review, then publish */}
       {passed && !done && (

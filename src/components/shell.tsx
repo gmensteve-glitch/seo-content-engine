@@ -19,6 +19,7 @@ import {
   ChevronDown,
   Layers,
   LogOut,
+  Search,
 } from "lucide-react";
 import { BUSINESSES } from "@/lib/mock/seed";
 
@@ -116,6 +117,15 @@ export function Shell({ children }: { children: ReactNode }) {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <a
+            href={`https://search.google.com/search-console?resource_id=sc-domain%3A${encodeURIComponent(biz.domain)}`}
+            target="_blank"
+            rel="noreferrer"
+            title="Open Google Search Console"
+            className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-2.5 py-1.5 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)]"
+          >
+            <Search size={14} /> <span className="hidden sm:inline">Search Console ↗</span>
+          </a>
           <button className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-2.5 py-1.5 text-[12px] hover:bg-[var(--surface-2)]">
             <Plus size={14} /> Add business
           </button>
