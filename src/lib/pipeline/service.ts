@@ -1070,13 +1070,15 @@ export async function updateDraftBody(draftId: string, bodyMd: string): Promise<
 
 /** The standard instruction used to scrub fabricated logistics from a blog. */
 const FABRICATION_NOTE =
-  "Remove any fabricated operational logistics stated as fact: specific delivery timelines, " +
-  "hour-by-hour or day-by-day shipping schedules, named carriers, aircraft, airports, routes, " +
-  "transfer points, courier methods, or step-by-step 'how a casket travels from order to delivery' " +
-  "processes. Replace them with broad, honest guidance — timelines and routing vary by carrier, " +
-  "destination, and season, and the reader should confirm exact timing and requirements with the " +
-  "funeral home and the shipping provider. Never assert how a specific funeral home operates as fact. " +
-  "Keep everything else intact: structure, headings, table of contents, FAQ, warm tone, and links.";
+  "Remove only the fabricated specifics about how THIS business operates: invented delivery timelines " +
+  "or turnaround, hour-by-hour or day-by-day shipping schedules ('Hour 0–48: build and crate'), named " +
+  "carriers, aircraft, airports, routes, transfer points, courier methods, delivery guarantees, or a " +
+  "step-by-step 'how a casket travels from order to delivery' process. Replace them with broad, honest " +
+  "guidance — timelines vary by destination and carrier, and the reader should confirm exact timing and " +
+  "handling with us and the shipping provider directly. Also stop asserting how a specific third-party " +
+  "funeral home operates as fact. IMPORTANT: KEEP all pricing, cost ranges, typical fees, general market " +
+  "facts, and legal/regulatory information — do NOT remove those. Keep the rest intact too: structure, " +
+  "headings, table of contents, FAQ, warm tone, and links. Only strip invented operational process details.";
 
 /** Apply a plain-language edit instruction to a blog body, preserving structure
  *  and the trailing JSON-LD. Returns the original body on any failure. */
