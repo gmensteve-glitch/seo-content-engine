@@ -242,6 +242,8 @@ export interface PolishDraftVM {
   hasHeroImage: boolean;
   /** How the current hero image was sourced: "ai" | "unsplash" | "product". */
   heroImageSource: string | null;
+  /** Set when this is a refreshed republish of a previously-published post. */
+  refreshedAt: string | null;
   updatedAt: string;
 }
 

@@ -20,8 +20,19 @@ import {
   scrubAllReadyFabrication,
   fixAllPublishedPosts,
   syncGeoCitations,
+  autoRefreshBusiness,
 } from "@/lib/pipeline/service";
 import { getBusiness } from "@/lib/data/repo";
+
+// Refresh a few decaying/stale published posts into Ready for re-review
+// (background — each is an LLM rewrite). Fire-and-forget.
+export async function refreshStalePostsAction(): Promise<void> {
+  const biz = await getBusiness();
+  void autoRefreshBusiness(biz.id, 3).catch((e) =>
+    console.error("[refresh-stale] failed:", e instanceof Error ? e.message : e),
+  );
+  revalidatePath("/ready");
+}
 
 // Run an on-demand GEO citation check (asks the answer engines our target
 // questions now, instead of waiting for the daily sync). Synchronous so the

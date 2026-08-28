@@ -3,8 +3,8 @@ import { Shell } from "@/components/shell";
 import { PageHeader } from "@/components/ui";
 import { getReadyForReview, getBusiness } from "@/lib/data/repo";
 import type { PolishDraftVM } from "@/lib/data/types";
-import { scrubReadyFabricationAction, fixPublishedPostsAction } from "@/app/actions";
-import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen, ShieldCheck, Undo2 } from "lucide-react";
+import { scrubReadyFabricationAction, fixPublishedPostsAction, refreshStalePostsAction } from "@/app/actions";
+import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen, ShieldCheck, Undo2, RefreshCw } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +21,14 @@ function Row({ d }: { d: PolishDraftVM }) {
         <span className="mt-0.5 text-[10px] text-[var(--muted)]">/ {d.threshold}</span>
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13.5px] font-medium">{d.title}</div>
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-[13.5px] font-medium">{d.title}</span>
+          {d.refreshedAt && (
+            <span className="flex shrink-0 items-center gap-1 rounded-full bg-[var(--accent-bg)] px-1.5 py-0.5 text-[9px] font-medium text-[var(--accent)]">
+              <RefreshCw size={9} /> refreshed
+            </span>
+          )}
+        </div>
         <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--muted)]">
           <span className="flex items-center gap-1 truncate">
             <Tag size={10} /> {d.targetKeyword}
@@ -92,6 +99,15 @@ export default async function ReadyPage() {
           subtitle="Your morning stack — finished, quality-checked pieces. Open one to read it and push it to Shopify."
         />
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <form action={refreshStalePostsAction}>
+            <button
+              type="submit"
+              title="Refresh a few decaying/stale published posts (update stats + freshness) back into Ready for you to review and re-publish"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--border-strong)] px-3 py-1 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            >
+              <RefreshCw size={13} /> Refresh stale posts
+            </button>
+          </form>
           <form action={fixPublishedPostsAction}>
             <button
               type="submit"

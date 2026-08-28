@@ -1420,6 +1420,117 @@ export async function fixAllPublishedPosts(
   return { scanned: drafts.length, updated };
 }
 
+// ─────────────────────────────────────────────────────────────
+// Auto-refresh — keep the published library fresh. Rewrites a decaying/stale
+// post and moves it back into READY for the operator to review + re-publish
+// (which updates the same Shopify article in place).
+// ─────────────────────────────────────────────────────────────
+
+const REFRESH_COOLDOWN_DAYS = 90;
+
+/**
+ * Refresh ONE published post: rewrite it to be current + more quotable, then
+ * move it back into Ready (status PASSED, refreshedAt stamped) for re-review.
+ * Keeps its Page/cmsId so re-publishing updates the same Shopify article.
+ */
+export async function refreshPublishedPost(draftId: string): Promise<{ refreshed: boolean }> {
+  requireDb();
+  const draft = await prisma.draft.findUnique({
+    where: { id: draftId },
+    select: { id: true, bodyMd: true, title: true },
+  });
+  if (!draft) throw new Error(`Draft ${draftId} not found`);
+
+  const year = new Date().getFullYear();
+  const note =
+    `Refresh this published article for ${year}. Update any dates, prices, statistics, and "as of" ` +
+    `references so they are current and accurate. Strengthen the opening "Quick answer" block and each ` +
+    `section's first sentence so an AI answer engine can quote it verbatim. Add depth where a competitor ` +
+    `would be more complete, and fix anything outdated. Keep it strictly accurate — do NOT fabricate ` +
+    `numbers or business-operations details. Preserve the structure, tone, links, and the JSON-LD schema.`;
+
+  const revised = await trackDraftCost(draftId, () =>
+    reviseBodyWithInstruction(draft.bodyMd, draft.title, note),
+  );
+  const changed = revised !== draft.bodyMd;
+  await prisma.draft.update({
+    where: { id: draftId },
+    data: {
+      ...(changed ? { bodyMd: revised } : {}),
+      // Back into Ready for review; keep the Page so re-publish updates in place.
+      status: "PASSED",
+      reviewedAt: null,
+      scheduledFor: null,
+      rejectedAt: null,
+      refreshedAt: new Date(),
+    },
+  });
+  return { refreshed: changed };
+}
+
+/** Pick published posts most worth refreshing: decaying (GSC) first, then the
+ *  oldest ones not refreshed within the cooldown. Returns draft ids, best-first. */
+async function refreshCandidates(businessId: string, max: number): Promise<string[]> {
+  const cutoff = new Date(Date.now() - REFRESH_COOLDOWN_DAYS * 86_400_000);
+  const published = await prisma.draft.findMany({
+    where: {
+      businessId,
+      status: "PUBLISHED",
+      page: { isNot: null },
+      OR: [{ refreshedAt: null }, { refreshedAt: { lt: cutoff } }],
+    },
+    select: { id: true, page: { select: { url: true } } },
+    orderBy: { page: { publishedAt: "asc" } }, // oldest first
+    take: 50,
+  });
+  if (!published.length) return [];
+
+  let decayUrls = new Set<string>();
+  if (gscEnabled()) {
+    const dp = await decayingPages({ window: 28, minPriorClicks: 20, minDropPct: 30 }).catch(() => null);
+    if (dp) decayUrls = new Set(dp.map((d) => normalizeUrl(d.page)));
+  }
+  const rank = (u: string | undefined) => (u && decayUrls.has(normalizeUrl(u)) ? 0 : 1);
+  return [...published]
+    .sort((a, b) => rank(a.page?.url) - rank(b.page?.url))
+    .slice(0, max)
+    .map((d) => d.id);
+}
+
+/** Refresh up to `max` decaying/stale posts for a business into Ready. */
+export async function autoRefreshBusiness(businessId: string, max = 2): Promise<number> {
+  requireDb();
+  const ids = await refreshCandidates(businessId, max);
+  let done = 0;
+  for (const id of ids) {
+    try {
+      await refreshPublishedPost(id);
+      done++;
+    } catch (e) {
+      console.error("[refresh] failed for", id, e instanceof Error ? e.message : e);
+    }
+  }
+  return done;
+}
+
+/** Auto-refresh for every active business. Called on a slow cadence. */
+export async function autoRefreshAll(max = 2): Promise<Record<string, number>> {
+  requireDb();
+  const businesses = await prisma.business.findMany({
+    where: { status: { in: ["ACTIVE", "ONBOARDING"] } },
+    select: { id: true },
+  });
+  const out: Record<string, number> = {};
+  for (const b of businesses) {
+    try {
+      out[b.id] = await autoRefreshBusiness(b.id, max);
+    } catch {
+      out[b.id] = 0;
+    }
+  }
+  return out;
+}
+
 /** House rules from accumulated blog feedback, for the writer's prompt. "" when none. */
 async function buildContentGuidance(businessId: string): Promise<string> {
   const fb = await prisma.contentFeedback.findMany({
@@ -2190,7 +2301,13 @@ export async function publishNow(
         throw new Error(`Pre-publish check failed — not published: ${issues.join("; ")}`);
       }
 
-      const res = await adapter.publish({
+      // Re-publish (e.g. a refreshed post) UPDATES the existing article in place
+      // — no duplicate; a first publish creates it.
+      const existingPage = await prisma.page.findUnique({
+        where: { draftId: draft.id },
+        select: { cmsId: true },
+      });
+      const publishInput = {
         title: draft.title,
         html,
         slug,
@@ -2200,7 +2317,10 @@ export async function publishNow(
         heroImageBase64: heroRow?.heroImageData ?? undefined,
         heroImageAlt: heroRow?.heroImageAlt ?? undefined,
         publishState,
-      });
+      };
+      const res = existingPage?.cmsId
+        ? await adapter.update(existingPage.cmsId, publishInput)
+        : await adapter.publish(publishInput);
       cmsId = res.cmsId;
       url = res.url;
       // Shopify now hosts the image — drop the base64 blob to reclaim DB space.

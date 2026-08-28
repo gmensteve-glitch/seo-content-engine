@@ -854,6 +854,7 @@ type PolishRow = {
   heroImageData?: string | null;
   heroImageUrl?: string | null;
   heroImageSource?: string | null;
+  refreshedAt?: Date | null;
 };
 
 /** Map a draft (+ its latest grade + brief) into the polish view-model. */
@@ -883,6 +884,7 @@ function toPolishVM(d: PolishRow, threshold: number): PolishDraftVM {
     costCents: d.costCents ?? 0,
     hasHeroImage: Boolean(d.heroImageData || d.heroImageUrl),
     heroImageSource: d.heroImageSource ?? null,
+    refreshedAt: d.refreshedAt ? d.refreshedAt.toISOString() : null,
     updatedAt: d.updatedAt.toISOString(),
   };
 }

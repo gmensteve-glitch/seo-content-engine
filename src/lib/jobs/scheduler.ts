@@ -21,6 +21,7 @@ const ADVANCE_INTERVAL_MS = 20 * 60 * 1000; // auto-advance the pipeline every 2
 const REPLENISH_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
 const GSC_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // pull Search Console data twice a day
 const GEO_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // check AI-answer citations once a day
+const REFRESH_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000; // refresh a couple stale posts every ~3 days
 const BOOT_DELAY_MS = 30 * 1000; // let the server settle before the first tick
 
 // Survive module re-evaluation / HMR: stash the singleton on globalThis.
@@ -93,6 +94,19 @@ async function geoSyncTick(): Promise<void> {
   }
 }
 
+// Auto-refresh: rewrite a couple of decaying/stale published posts and move
+// them back into Ready for re-review. Keeps the published library fresh.
+async function refreshTick(): Promise<void> {
+  try {
+    const { autoRefreshAll } = await import("@/lib/pipeline/service");
+    const out = await autoRefreshAll(2);
+    const total = Object.values(out).reduce((a, b) => a + b, 0);
+    if (total) console.log(`[scheduler] auto-refreshed ${total} post(s) back into Ready`);
+  } catch (e) {
+    console.error("[scheduler] refresh tick failed:", e instanceof Error ? e.message : e);
+  }
+}
+
 // Auto-advance: idea → brief → approve, self-throttled to a Ready backlog.
 // This is what keeps the Ready list stocked without any manual gates.
 async function autoAdvanceTick(): Promise<void> {
@@ -139,4 +153,5 @@ export function startScheduler(): void {
   setInterval(() => void replenishTick(), REPLENISH_INTERVAL_MS);
   setInterval(() => void gscSyncTick(), GSC_SYNC_INTERVAL_MS);
   setInterval(() => void geoSyncTick(), GEO_SYNC_INTERVAL_MS);
+  setInterval(() => void refreshTick(), REFRESH_INTERVAL_MS);
 }

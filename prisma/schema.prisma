@@ -336,6 +336,9 @@ model Draft {
   // Set when the operator rejects a piece from the Ready list; the reason is
   // stored in DraftFeedback. Rejected pieces drop out of the Ready list.
   rejectedAt   DateTime?
+  // Set when a PUBLISHED post is auto-refreshed back into Ready for re-review.
+  // Lets the Ready list badge it as a refresh vs. a brand-new piece.
+  refreshedAt  DateTime?
   // Accumulated LLM cost to produce this piece, in cents (write + grade + revise
   // + boost + improve). Powers per-blog cost + cost-vs-score analytics.
   costCents    Float       @default(0)
