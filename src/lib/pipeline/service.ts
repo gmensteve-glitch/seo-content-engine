@@ -576,14 +576,28 @@ export async function syncGeoCitations(
   });
   if (!business?.domain) return { tested: 0, cited: 0 };
 
+  // Build the test set from what actually matters: top real buyer demand from
+  // Search Console FIRST (the money queries), then our own target keywords.
+  let gscQueries: string[] = [];
+  if (gscEnabled()) {
+    const rows = await fetchGscRows({ days: 28, dimensions: ["query"], rowLimit: 1000 }).catch(() => null);
+    if (rows) {
+      gscQueries = rows
+        .filter((r) => r.impressions >= 20)
+        .sort((a, b) => b.impressions - a.impressions)
+        .slice(0, 12)
+        .map((r) => r.query);
+    }
+  }
   const drafts = await prisma.draft.findMany({
     where: { businessId, status: { in: ["PASSED", "PUBLISHED"] } },
     select: { brief: { select: { targetKeyword: true } } },
     orderBy: { updatedAt: "desc" },
     take: 100,
   });
+  const draftKw = drafts.map((d) => d.brief?.targetKeyword?.trim()).filter(Boolean) as string[];
   const queries = [
-    ...new Set(drafts.map((d) => d.brief?.targetKeyword?.trim()).filter(Boolean) as string[]),
+    ...new Set([...gscQueries, ...draftKw].map((q) => q.toLowerCase())),
   ].slice(0, opts?.max ?? 15);
   if (!queries.length) return { tested: 0, cited: 0 };
 

@@ -462,17 +462,24 @@ export async function getGeoVisibility(bizId = DEFAULT_BIZ): Promise<GeoVisibili
   };
   if (!hasDatabase || !keyConfigured) return empty;
 
-  const latest = await prisma.geoCitation.findFirst({
-    where: { businessId: bizId },
-    orderBy: { date: "desc" },
-    select: { date: true },
-  });
-  if (!latest) return empty;
-
-  const rows = await prisma.geoCitation.findMany({
-    where: { businessId: bizId, date: latest.date },
-    orderBy: [{ cited: "desc" }, { query: "asc" }],
-  });
+  let rows: Awaited<ReturnType<typeof prisma.geoCitation.findMany>> = [];
+  let latestDate: Date | null = null;
+  try {
+    const latest = await prisma.geoCitation.findFirst({
+      where: { businessId: bizId },
+      orderBy: { date: "desc" },
+      select: { date: true },
+    });
+    if (!latest) return empty;
+    latestDate = latest.date;
+    rows = await prisma.geoCitation.findMany({
+      where: { businessId: bizId, date: latest.date },
+      orderBy: [{ cited: "desc" }, { query: "asc" }],
+    });
+  } catch (e) {
+    console.error("[geo] getGeoVisibility failed:", e instanceof Error ? e.message : e);
+    return empty;
+  }
   const toVM = (r: (typeof rows)[number]) => ({
     query: r.query,
     cited: r.cited,
@@ -488,7 +495,7 @@ export async function getGeoVisibility(bizId = DEFAULT_BIZ): Promise<GeoVisibili
     citedCount,
     mentionedCount,
     citationRate: rows.length ? Math.round((citedCount / rows.length) * 100) : 0,
-    lastCheckedAt: latest.date.toISOString(),
+    lastCheckedAt: latestDate ? latestDate.toISOString() : null,
     cited: rows.filter((r) => r.cited).map(toVM),
     notCited: rows.filter((r) => !r.cited).map(toVM),
   };
