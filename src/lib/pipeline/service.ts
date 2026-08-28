@@ -1218,6 +1218,16 @@ const FABRICATION_NOTE =
   "facts, and legal/regulatory information — do NOT remove those. Keep the rest intact too: structure, " +
   "headings, table of contents, FAQ, warm tone, and links. Only strip invented operational process details.";
 
+/** Close an unterminated trailing ```json fence so its schema never leaks into
+ *  the visible body as text. No-op when the fence is absent or already closed. */
+function ensureJsonLdClosed(md: string): string {
+  const idx = md.lastIndexOf("```json");
+  if (idx === -1) return md;
+  const after = md.slice(idx + "```json".length);
+  if (after.includes("```")) return md; // already closed
+  return `${md.replace(/\s+$/, "")}\n\`\`\`\n`;
+}
+
 /** Apply a plain-language edit instruction to a blog body, preserving structure
  *  and the trailing JSON-LD. Returns the original body on any failure. */
 async function reviseBodyWithInstruction(
@@ -1241,9 +1251,16 @@ ARTICLE TITLE: ${title}
 ARTICLE (Markdown):
 ${bodyMd}`,
     });
-    let cleaned = (out || "").trim().replace(/^```(?:markdown|md)?\n?|\n?```$/g, "").trim();
+    // Unwrap a ```markdown … ``` envelope ONLY if the model wrapped its whole
+    // reply in one. The old blanket strip of a trailing ``` also ate the closing
+    // fence of our legitimate trailing ```json JSON-LD block, leaving it
+    // unterminated so the raw schema leaked into the visible body on publish.
+    let cleaned = (out || "").trim();
+    const envelope = cleaned.match(/^```(?:markdown|md)?\s*\n([\s\S]*)\n```$/);
+    if (envelope) cleaned = envelope[1].trim();
     if (cleaned.length < bodyMd.length * 0.4) return bodyMd; // guard against a truncated/bad response
     if (jsonFence && !/```json/i.test(cleaned)) cleaned += `\n\n${jsonFence}`;
+    cleaned = ensureJsonLdClosed(cleaned); // belt-and-suspenders: never emit an open fence
     // Never let a revision break a post: if the rewritten body wouldn't render
     // to real HTML (empty / raw text), keep the original.
     try {
@@ -1454,18 +1471,28 @@ export async function refreshPublishedPost(draftId: string): Promise<{ refreshed
     reviseBodyWithInstruction(draft.bodyMd, draft.title, note),
   );
   const changed = revised !== draft.bodyMd;
-  await prisma.draft.update({
-    where: { id: draftId },
-    data: {
-      ...(changed ? { bodyMd: revised } : {}),
-      // Back into Ready for review; keep the Page so re-publish updates in place.
-      status: "PASSED",
-      reviewedAt: null,
-      scheduledFor: null,
-      rejectedAt: null,
-      refreshedAt: new Date(),
-    },
-  });
+  if (changed) {
+    // Real rewrite — move it back into Ready for review; keep the Page so
+    // re-publishing updates the same Shopify article in place.
+    await prisma.draft.update({
+      where: { id: draftId },
+      data: {
+        bodyMd: revised,
+        status: "PASSED",
+        reviewedAt: null,
+        scheduledFor: null,
+        rejectedAt: null,
+        refreshedAt: new Date(),
+      },
+    });
+  } else {
+    // No-op (nothing to update, or the rewrite failed our guards): don't push an
+    // identical article into the review queue. Still stamp refreshedAt — a
+    // freshness pass ran and found nothing to change — so it rotates out of the
+    // age-based candidate pool. Posts GSC still flags as decaying keep showing
+    // up regardless (getStalePosts includes them independent of refreshedAt).
+    await prisma.draft.update({ where: { id: draftId }, data: { refreshedAt: new Date() } });
+  }
   return { refreshed: changed };
 }
 
@@ -1505,8 +1532,8 @@ export async function autoRefreshBusiness(businessId: string, max = 2): Promise<
   let done = 0;
   for (const id of ids) {
     try {
-      await refreshPublishedPost(id);
-      done++;
+      const { refreshed } = await refreshPublishedPost(id);
+      if (refreshed) done++;
     } catch (e) {
       console.error("[refresh] failed for", id, e instanceof Error ? e.message : e);
     }
@@ -1956,7 +1983,13 @@ export async function renderPublishPreview(draftId: string): Promise<{
     select: { bodyMd: true, title: true },
   });
   if (!draft) throw new Error(`Draft ${draftId} not found`);
-  const html = markdownToHtml(draft.bodyMd)
+  // Self-heal a stored body left with an unterminated ```json fence by an older
+  // revise pass, so its markdown source is clean too (not just the render).
+  const healed = ensureJsonLdClosed(draft.bodyMd);
+  if (healed !== draft.bodyMd) {
+    await prisma.draft.update({ where: { id: draftId }, data: { bodyMd: healed } }).catch(() => {});
+  }
+  const html = markdownToHtml(healed)
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/(\s*\n){3,}/g, "\n\n")
     .trim();

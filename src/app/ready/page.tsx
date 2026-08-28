@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/ui";
 import { getReadyForReview, getBusiness } from "@/lib/data/repo";
 import type { PolishDraftVM } from "@/lib/data/types";
 import { scrubReadyFabricationAction, fixPublishedPostsAction, refreshStalePostsAction } from "@/app/actions";
+import { SubmitButton } from "@/components/submit-button";
 import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen, ShieldCheck, Undo2, RefreshCw } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -100,31 +101,34 @@ export default async function ReadyPage() {
         />
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <form action={refreshStalePostsAction}>
-            <button
-              type="submit"
+            <SubmitButton
+              icon={<RefreshCw size={13} />}
+              pendingLabel="Starting…"
               title="Refresh a few decaying/stale published posts (update stats + freshness) back into Ready for you to review and re-publish"
               className="flex items-center gap-1.5 rounded-full border border-[var(--border-strong)] px-3 py-1 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)]"
             >
-              <RefreshCw size={13} /> Refresh stale posts
-            </button>
+              Refresh stale posts
+            </SubmitButton>
           </form>
           <form action={fixPublishedPostsAction}>
-            <button
-              type="submit"
+            <SubmitButton
+              icon={<Undo2 size={13} />}
+              pendingLabel="Starting…"
               title="Fix every already-PUBLISHED Shopify post: scrub fabricated business-operations claims, update it on Shopify, and set it Hidden for you to review and re-publish"
               className="flex items-center gap-1.5 rounded-full border border-[var(--warn)] px-3 py-1 text-[12px] text-[var(--warn)] hover:bg-[var(--warn-bg)]"
             >
-              <Undo2 size={13} /> Fix &amp; hide published
-            </button>
+              Fix &amp; hide published
+            </SubmitButton>
           </form>
           <form action={scrubReadyFabricationAction}>
-            <button
-              type="submit"
+            <SubmitButton
+              icon={<ShieldCheck size={13} />}
+              pendingLabel="Starting…"
               title="Rewrite every Ready post to remove fabricated delivery timelines / shipping steps, and remember the rule for future posts"
               className="flex items-center gap-1.5 rounded-full border border-[var(--border-strong)] px-3 py-1 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)]"
             >
-              <ShieldCheck size={13} /> Scrub fabricated claims
-            </button>
+              Scrub fabricated claims
+            </SubmitButton>
           </form>
           <span
             className={`rounded-full px-3 py-1 text-[12px] font-medium ${

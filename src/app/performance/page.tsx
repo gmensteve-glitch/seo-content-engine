@@ -4,6 +4,7 @@ import { PageHeader, Card, Pill } from "@/components/ui";
 import { getLivePages, getBusiness, getCostSummary } from "@/lib/data/repo";
 import { listPublishedBlogs, getStalePosts } from "@/lib/pipeline/service";
 import { refreshOnePostAction } from "@/app/actions";
+import { SubmitButton } from "@/components/submit-button";
 import { BarChart3, TrendingUp, PenLine, FileText, ExternalLink, DollarSign, RefreshCw, TrendingDown, Clock } from "lucide-react";
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
@@ -105,13 +106,14 @@ export default async function PerformancePage() {
                   </div>
                   <form action={refreshOnePostAction} className="shrink-0">
                     <input type="hidden" name="draftId" value={s.draftId} />
-                    <button
-                      type="submit"
+                    <SubmitButton
+                      icon={<RefreshCw size={13} />}
+                      pendingLabel="Refreshing…"
                       title="Rewrite this post for the current year and move it into Ready for review"
                       className="flex items-center gap-1.5 rounded-full border border-[var(--border-strong)] px-3 py-1 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)]"
                     >
-                      <RefreshCw size={13} /> Refresh
-                    </button>
+                      Refresh
+                    </SubmitButton>
                   </form>
                 </div>
               ))}
