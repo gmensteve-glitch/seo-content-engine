@@ -106,6 +106,20 @@ export interface GeoVisibilityVM {
   notCited: GeoQueryVM[]; // where we're NOT cited (the opportunity list)
 }
 
+/** A published post the engine judges worth refreshing, with the reason why. */
+export interface StalePostVM {
+  draftId: string;
+  title: string;
+  url: string | null;
+  publishedAt: string | null; // ISO
+  refreshedAt: string | null; // ISO — last time we refreshed it, if ever
+  ageMonths: number; // months since last touched (refresh or publish)
+  dropPct: number | null; // GSC traffic drop vs prior window, when known
+  priorClicks: number | null; // clicks in the prior window, for weighting
+  decaying: boolean; // GSC flagged it as losing traffic
+  reason: string; // human one-liner, e.g. "↓55% traffic (28d)"
+}
+
 /** Live Search Console opportunities for the Overview panel. */
 export interface SeoOpportunitiesVM {
   connected: boolean; // GSC service account wired + returning data

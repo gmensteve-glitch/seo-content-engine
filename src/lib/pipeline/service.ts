@@ -42,6 +42,7 @@ import { dataforseoEnabled, firecrawlEnabled, gscEnabled, geoEnabled, aiEnabled 
 import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
+import type { StalePostVM } from "@/lib/data/types";
 import { markdownToHtml } from "@/lib/cms/markdown";
 import { sanitizeLinks } from "@/lib/cms/links";
 import { preflightPublish, metaIssues } from "@/lib/cms/preflight";
@@ -1529,6 +1530,82 @@ export async function autoRefreshAll(max = 2): Promise<Record<string, number>> {
     }
   }
   return out;
+}
+
+/**
+ * Surface published posts worth refreshing, worst-first, each with the reason.
+ * A post is "stale" if Search Console shows it decaying, OR it hasn't been
+ * touched (published or refreshed) within the refresh cooldown. This powers the
+ * "Needs refresh" panel — the operator sees WHY before spending a rewrite on it.
+ */
+export async function getStalePosts(businessId: string, max = 12): Promise<StalePostVM[]> {
+  requireDb();
+  const now = Date.now();
+  const cooldownMs = REFRESH_COOLDOWN_DAYS * 86_400_000;
+
+  const published = await prisma.draft.findMany({
+    where: { businessId, status: "PUBLISHED", page: { isNot: null } },
+    select: {
+      id: true,
+      title: true,
+      refreshedAt: true,
+      page: { select: { url: true, publishedAt: true } },
+    },
+    orderBy: { page: { publishedAt: "asc" } }, // oldest first
+    take: 200,
+  });
+  if (!published.length) return [];
+
+  // GSC decay map (url → drop), best-effort — absent when GSC isn't wired.
+  const decayByUrl = new Map<string, { dropPct: number; priorClicks: number }>();
+  if (gscEnabled()) {
+    const dp = await decayingPages({ window: 28, minPriorClicks: 20, minDropPct: 25 }).catch(() => null);
+    if (dp) for (const d of dp) decayByUrl.set(normalizeUrl(d.page), { dropPct: d.dropPct, priorClicks: d.priorClicks });
+  }
+
+  const monthsSince = (d: Date | null | undefined) =>
+    d ? Math.max(0, Math.round((now - d.getTime()) / (30 * 86_400_000))) : 0;
+
+  const rows: StalePostVM[] = [];
+  for (const p of published) {
+    const url = p.page?.url ?? null;
+    const touched = p.refreshedAt ?? p.page?.publishedAt ?? null;
+    const ageMs = touched ? now - touched.getTime() : Infinity;
+    const decay = url ? decayByUrl.get(normalizeUrl(url)) : undefined;
+    const overCooldown = ageMs >= cooldownMs;
+    if (!decay && !overCooldown) continue; // fresh enough, not decaying — skip
+
+    const ageMonths = monthsSince(touched);
+    let reason: string;
+    if (decay) {
+      reason = `↓${decay.dropPct}% traffic (28d)`;
+    } else if (p.refreshedAt) {
+      reason = `refreshed ${ageMonths} mo ago`;
+    } else {
+      reason = touched ? `published ${ageMonths} mo ago` : "no publish date on record";
+    }
+
+    rows.push({
+      draftId: p.id,
+      title: p.title,
+      url,
+      publishedAt: p.page?.publishedAt ? p.page.publishedAt.toISOString() : null,
+      refreshedAt: p.refreshedAt ? p.refreshedAt.toISOString() : null,
+      ageMonths,
+      dropPct: decay ? decay.dropPct : null,
+      priorClicks: decay ? decay.priorClicks : null,
+      decaying: Boolean(decay),
+      reason,
+    });
+  }
+
+  // Decaying first (highest ROI — already ranks, just slipping), then oldest.
+  rows.sort((a, b) => {
+    if (a.decaying !== b.decaying) return a.decaying ? -1 : 1;
+    if (a.decaying && b.decaying) return (b.dropPct ?? 0) - (a.dropPct ?? 0);
+    return b.ageMonths - a.ageMonths;
+  });
+  return rows.slice(0, max);
 }
 
 /** House rules from accumulated blog feedback, for the writer's prompt. "" when none. */

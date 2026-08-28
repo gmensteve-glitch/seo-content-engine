@@ -21,6 +21,7 @@ import {
   fixAllPublishedPosts,
   syncGeoCitations,
   autoRefreshBusiness,
+  refreshPublishedPost,
 } from "@/lib/pipeline/service";
 import { getBusiness } from "@/lib/data/repo";
 
@@ -31,6 +32,19 @@ export async function refreshStalePostsAction(): Promise<void> {
   void autoRefreshBusiness(biz.id, 3).catch((e) =>
     console.error("[refresh-stale] failed:", e instanceof Error ? e.message : e),
   );
+  revalidatePath("/ready");
+}
+
+// Refresh ONE specific published post (from the "Needs refresh" panel) back
+// into Ready for review. Awaited so the panel reflects it on reload; the rewrite
+// is one LLM pass, quick enough to hold the request.
+export async function refreshOnePostAction(formData: FormData): Promise<void> {
+  const draftId = String(formData.get("draftId"));
+  if (!draftId) return;
+  await refreshPublishedPost(draftId).catch((e) =>
+    console.error("[refresh-one] failed:", e instanceof Error ? e.message : e),
+  );
+  revalidatePath("/performance");
   revalidatePath("/ready");
 }
 
