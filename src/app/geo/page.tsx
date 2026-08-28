@@ -1,7 +1,21 @@
 import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
 import { getGeoVisibility } from "@/lib/data/repo";
-import { MapPin, Bot, CheckCircle2, Target, Sparkles } from "lucide-react";
+import { runGeoCheckAction } from "@/app/actions";
+import { MapPin, Bot, CheckCircle2, Target, Sparkles, RefreshCw } from "lucide-react";
+
+function CheckNowButton({ label }: { label: string }) {
+  return (
+    <form action={runGeoCheckAction}>
+      <button
+        type="submit"
+        className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110"
+      >
+        <RefreshCw size={14} /> {label}
+      </button>
+    </form>
+  );
+}
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +41,12 @@ export default async function GeoPage() {
       {/* AI Answer Visibility scoreboard */}
       {geo.connected ? (
         <>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <span className="text-[12px] text-[var(--muted)]">
+              Checks the answer engines with your target questions. Runs daily — or on demand.
+            </span>
+            <CheckNowButton label="Re-check now" />
+          </div>
           <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Stat label="Citation rate" value={`${geo.citationRate}%`} accent="success" />
             <Stat label="Cited" value={`${geo.citedCount} / ${geo.tested}`} />
@@ -81,6 +101,20 @@ export default async function GeoPage() {
             </Card>
           </div>
         </>
+      ) : geo.keyConfigured ? (
+        <Card className="mb-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Bot size={20} className="shrink-0 text-[var(--accent)]" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[14px] font-medium">Connected — run your first check</div>
+              <p className="mt-1 text-[13px] text-[var(--muted)]">
+                Your answer-engine key is wired up. The daily check hasn&apos;t populated yet — click below to ask
+                the AI engines your target questions now and see who cites you.
+              </p>
+            </div>
+            <CheckNowButton label="Check now" />
+          </div>
+        </Card>
       ) : (
         <Card className="mb-4">
           <div className="flex items-start gap-3">

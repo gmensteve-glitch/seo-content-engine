@@ -455,11 +455,12 @@ export async function getKeywordMovers(bizId = DEFAULT_BIZ): Promise<MoversVM> {
  * check has run.
  */
 export async function getGeoVisibility(bizId = DEFAULT_BIZ): Promise<GeoVisibilityVM> {
+  const keyConfigured = geoEnabled();
   const empty: GeoVisibilityVM = {
-    connected: false, tested: 0, citedCount: 0, mentionedCount: 0,
+    keyConfigured, connected: false, tested: 0, citedCount: 0, mentionedCount: 0,
     citationRate: 0, lastCheckedAt: null, cited: [], notCited: [],
   };
-  if (!hasDatabase || !geoEnabled()) return empty;
+  if (!hasDatabase || !keyConfigured) return empty;
 
   const latest = await prisma.geoCitation.findFirst({
     where: { businessId: bizId },
@@ -481,6 +482,7 @@ export async function getGeoVisibility(bizId = DEFAULT_BIZ): Promise<GeoVisibili
   const citedCount = rows.filter((r) => r.cited).length;
   const mentionedCount = rows.filter((r) => r.mentioned).length;
   return {
+    keyConfigured,
     connected: true,
     tested: rows.length,
     citedCount,

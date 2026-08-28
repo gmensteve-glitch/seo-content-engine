@@ -19,8 +19,21 @@ import {
   requestBoostAllNearMisses,
   scrubAllReadyFabrication,
   fixAllPublishedPosts,
+  syncGeoCitations,
 } from "@/lib/pipeline/service";
 import { getBusiness } from "@/lib/data/repo";
+
+// Run an on-demand GEO citation check (asks the answer engines our target
+// questions now, instead of waiting for the daily sync). Synchronous so the
+// page shows fresh results on reload; capped to keep it snappy.
+export async function runGeoCheckAction(): Promise<void> {
+  const biz = await getBusiness();
+  await syncGeoCitations(biz.id, { max: 10 }).catch((e) =>
+    console.error("[geo-check] failed:", e instanceof Error ? e.message : e),
+  );
+  revalidatePath("/geo");
+  revalidatePath("/");
+}
 
 // Scrub fabricated logistics/timelines from every Ready blog (background — it
 // runs an LLM pass per piece). Fire-and-forget so the request returns fast.

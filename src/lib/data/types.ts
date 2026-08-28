@@ -95,7 +95,8 @@ export interface GeoQueryVM {
 
 /** GEO (Generative Engine Optimization) visibility — do LLMs cite us? */
 export interface GeoVisibilityVM {
-  connected: boolean; // an answer-engine key is wired + we have data
+  keyConfigured: boolean; // a Perplexity key is set in the environment
+  connected: boolean; // key wired AND at least one check has run (we have data)
   tested: number; // questions checked in the latest run
   citedCount: number;
   mentionedCount: number;
