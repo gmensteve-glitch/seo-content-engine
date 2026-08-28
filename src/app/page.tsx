@@ -15,6 +15,7 @@ import {
   getCostSummary,
   getSeoOpportunities,
   getKeywordMovers,
+  getGeoVisibility,
 } from "@/lib/data/repo";
 import { setQualityThresholdAction, boostAllNearMissesAction } from "@/app/actions";
 import {
@@ -37,12 +38,13 @@ import {
   DollarSign,
   TrendingUp,
   TrendingDown,
+  Bot,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
-  const [biz, kpis, briefs, needsPolish, ready, pipeline, connectors, health, goal, cost, seo, movers] =
+  const [biz, kpis, briefs, needsPolish, ready, pipeline, connectors, health, goal, cost, seo, movers, geo] =
     await Promise.all([
       getBusiness(),
       getKpis(),
@@ -56,6 +58,7 @@ export default async function OverviewPage() {
       getCostSummary(),
       getSeoOpportunities(),
       getKeywordMovers(),
+      getGeoVisibility(),
     ]);
 
   const readyTotal = goal.readyLocal + goal.readyEver;
@@ -459,6 +462,43 @@ export default async function OverviewPage() {
               </div>
             )}
           </Card>
+        </>
+      )}
+
+      {/* 2e) GEO — are AI answer engines citing us? */}
+      {geo.connected && (
+        <>
+          <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium text-[var(--muted)]">
+            <Bot size={13} /> AI answer visibility
+            <span className="ml-1 flex items-center gap-1 rounded-full bg-[var(--success-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--success)]">
+              GEO
+            </span>
+            <span className="ml-auto text-[11px] text-[var(--subtle)]">are ChatGPT / Perplexity citing you?</span>
+          </div>
+          <Link href="/geo" className="mb-5 block">
+            <Card className="hover:bg-[var(--surface-2)]">
+              <div className="flex items-center gap-4">
+                <div className="flex flex-col items-center">
+                  <span className="text-[28px] font-bold leading-none text-[var(--success)]">
+                    {geo.citationRate}%
+                  </span>
+                  <span className="mt-0.5 text-[10px] text-[var(--muted)]">cited</span>
+                </div>
+                <div className="min-w-0 flex-1 text-[12.5px] text-[var(--muted)]">
+                  AI answers cite you for <b className="text-[var(--text)]">{geo.citedCount}</b> of{" "}
+                  <b className="text-[var(--text)]">{geo.tested}</b> checked buyer questions.
+                  {geo.notCited.length > 0 && (
+                    <>
+                      {" "}
+                      {geo.notCited.length} not captured yet —{" "}
+                      <span className="text-[var(--accent)]">the engine is targeting them.</span>
+                    </>
+                  )}
+                </div>
+                <ArrowRight size={15} className="shrink-0 text-[var(--accent)]" />
+              </div>
+            </Card>
+          </Link>
         </>
       )}
 
