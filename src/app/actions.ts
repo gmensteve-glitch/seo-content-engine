@@ -24,6 +24,8 @@ import {
   refreshPublishedPost,
   saveConnector,
   removeConnector,
+  runAndSaveIntake,
+  cloneBusinessSetup,
   relocalizeAllPosts,
   submitRecommendation,
   setRecommendationStatus,
@@ -126,6 +128,43 @@ export async function disconnectConnectorAction(formData: FormData): Promise<voi
   await removeConnector(bizId, type as ConnectorType);
   revalidatePath("/connectors");
   revalidatePath("/");
+}
+
+// ── Store onboarding ─────────────────────────────────────────
+
+/** Run brand intake for the active store: crawl its site → generate + save its
+ *  profile, brand voice, and starter pillars. Awaited so the setup page shows the
+ *  result the moment it finishes (the crawl + LLM take ~30–60s). */
+export async function runIntakeAction(): Promise<void> {
+  const biz = await getBusiness();
+  await runAndSaveIntake(biz.id).catch((e) =>
+    console.error("[intake] failed:", e instanceof Error ? e.message : e),
+  );
+  revalidatePath("/setup");
+  revalidatePath("/strategy");
+  revalidatePath("/");
+}
+
+/** Copy an existing store's brand setup (profile, voice, pillars, settings) onto
+ *  the active store — for near-identical stores. Source id comes from the form. */
+export async function cloneSetupAction(formData: FormData): Promise<void> {
+  const sourceId = String(formData.get("sourceId") ?? "");
+  if (!sourceId) throw new Error("Choose a store to copy from.");
+  const biz = await getBusiness();
+  await cloneBusinessSetup(sourceId, biz.id);
+  revalidatePath("/setup");
+  revalidatePath("/strategy");
+  revalidatePath("/");
+}
+
+/** Kick off a first batch of ideas for the active store (onboarding jump-start). */
+export async function seedIdeasAction(): Promise<void> {
+  const biz = await getBusiness();
+  await generateIdeas(biz.id, 8).catch((e) =>
+    console.error("[seed-ideas] failed:", e instanceof Error ? e.message : e),
+  );
+  revalidatePath("/setup");
+  revalidatePath("/ideas");
 }
 
 // ── SEO recommendations inbox ────────────────────────────────

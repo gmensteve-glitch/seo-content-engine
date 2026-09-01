@@ -911,6 +911,47 @@ export async function createBusiness(input: { name: string; domain: string }): P
   return biz.id;
 }
 
+/**
+ * Copy a store's brand setup onto another store — for near-identical stores, so
+ * you don't re-crawl or re-tune. Copies the profile, brand voice, content mix,
+ * quality bar, cadence, and any pillars the target doesn't already have.
+ * Connectors and content are NOT copied (each store has its own credentials).
+ */
+export async function cloneBusinessSetup(sourceId: string, targetId: string): Promise<void> {
+  requireDb();
+  if (sourceId === targetId) throw new Error("Pick a different source store.");
+  const source = await prisma.business.findUnique({
+    where: { id: sourceId },
+    include: { pillars: { orderBy: { createdAt: "asc" } } },
+  });
+  if (!source) throw new Error("Source store not found.");
+  const target = await prisma.business.findUnique({
+    where: { id: targetId },
+    include: { pillars: { select: { name: true } } },
+  });
+  if (!target) throw new Error("Target store not found.");
+
+  await prisma.business.update({
+    where: { id: targetId },
+    data: {
+      profileMd: source.profileMd,
+      brandVoice: source.brandVoice,
+      localRatio: source.localRatio,
+      qualityThreshold: source.qualityThreshold,
+      cadencePerWeek: source.cadencePerWeek,
+      linksPerPage: source.linksPerPage,
+    },
+  });
+
+  const have = new Set(target.pillars.map((p) => p.name.toLowerCase()));
+  const toAdd = source.pillars.filter((p) => !have.has(p.name.toLowerCase()));
+  if (toAdd.length) {
+    await prisma.pillar.createMany({
+      data: toAdd.map((p) => ({ businessId: targetId, name: p.name, description: p.description })),
+    });
+  }
+}
+
 // ── SEO recommendations inbox ────────────────────────────────
 
 /** Submit an SEO recommendation (a note + optional screenshot) for review. */

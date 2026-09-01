@@ -2,7 +2,7 @@
 // The client then sends the operator to Connectors to wire up Shopify + GSC.
 import { NextResponse } from "next/server";
 import { hasDatabase } from "@/lib/db";
-import { createBusiness } from "@/lib/pipeline/service";
+import { createBusiness, runAndSaveIntake } from "@/lib/pipeline/service";
 import { ACTIVE_BIZ_COOKIE } from "@/lib/active-business";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +24,12 @@ export async function POST(req: Request): Promise<Response> {
       { status: 400 },
     );
   }
+
+  // Kick off brand intake in the background — crawl the site to build the store's
+  // profile, voice, and pillars so its content isn't generic. Best-effort.
+  void runAndSaveIntake(id).catch((e) =>
+    console.error("[add-store] intake failed:", e instanceof Error ? e.message : e),
+  );
   const res = NextResponse.json({ ok: true, id });
   res.cookies.set(ACTIVE_BIZ_COOKIE, id, { path: "/", httpOnly: true, sameSite: "lax", maxAge: YEAR });
   return res;

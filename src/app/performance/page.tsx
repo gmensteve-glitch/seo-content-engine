@@ -2,16 +2,15 @@ import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
 import { getLivePages, getBusiness, getCostSummary } from "@/lib/data/repo";
-import { listPublishedBlogs, getStalePosts } from "@/lib/pipeline/service";
+import { listPublishedBlogs } from "@/lib/pipeline/service";
 import {
-  refreshOnePostAction,
   relocalizePostsAction,
   refreshStalePostsAction,
   fixPublishedPostsAction,
   scrubReadyFabricationAction,
 } from "@/app/actions";
 import { SubmitButton } from "@/components/submit-button";
-import { TrendingUp, PenLine, FileText, ExternalLink, DollarSign, RefreshCw, TrendingDown, Clock, MapPin, Undo2, ShieldCheck, Wrench } from "lucide-react";
+import { TrendingUp, PenLine, FileText, ExternalLink, DollarSign, RefreshCw, MapPin, Undo2, ShieldCheck, Wrench } from "lucide-react";
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
@@ -26,11 +25,10 @@ export const dynamic = "force-dynamic";
 
 export default async function PerformancePage() {
   const biz = await getBusiness();
-  const [pages, published, cost, stale] = await Promise.all([
+  const [pages, published, cost] = await Promise.all([
     getLivePages(),
     listPublishedBlogs(biz.id).catch(() => []),
     getCostSummary(biz.id),
-    getStalePosts(biz.id, 12).catch(() => []),
   ]);
 
   return (
@@ -39,94 +37,6 @@ export default async function PerformancePage() {
         title="Performance"
         subtitle="Results from Google Search Console + GA4. The engine turns these signals into improvement tasks."
       />
-
-      {/* Needs refresh — decaying/aging published posts, worst-first, one-click rewrite */}
-      <Card className="mb-4">
-        <div className="mb-3 flex items-center gap-2">
-          <RefreshCw size={16} className="text-[var(--accent)]" />
-          <h2 className="text-[15px] font-medium">Needs refresh</h2>
-          {stale.length > 0 && (
-            <span className="ml-auto rounded-full bg-[var(--warn-bg)] px-2 py-0.5 text-[11px] font-medium text-[var(--warn)]">
-              {stale.length} to review
-            </span>
-          )}
-        </div>
-        {stale.length === 0 ? (
-          <p className="text-[12px] text-[var(--subtle)]">
-            Nothing stale right now — every published post is recent and holding its traffic. Posts
-            surface here when Search Console shows them decaying or they age past the refresh window.
-          </p>
-        ) : (
-          <>
-            <p className="mb-3 text-[11px] text-[var(--subtle)]">
-              These live posts are decaying or aging. Refresh rewrites one for the current year —
-              updated stats, stronger quotable openings — and drops it back in{" "}
-              <Link href="/ready" className="text-[var(--accent)] hover:underline">
-                Ready
-              </Link>{" "}
-              for you to review and re-publish (it updates the same Shopify article in place).
-            </p>
-            <div className="space-y-2">
-              {stale.map((s) => (
-                <div
-                  key={s.draftId}
-                  className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3"
-                >
-                  <span
-                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
-                      s.decaying
-                        ? "bg-[var(--danger-bg)] text-[var(--danger)]"
-                        : "bg-[var(--surface-2)] text-[var(--muted)]"
-                    }`}
-                  >
-                    {s.decaying ? <TrendingDown size={14} /> : <Clock size={14} />}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13.5px] font-medium">
-                      {s.url ? (
-                        <Link
-                          href={s.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 hover:underline"
-                        >
-                          {s.title}
-                          <ExternalLink size={11} className="shrink-0 text-[var(--subtle)]" />
-                        </Link>
-                      ) : (
-                        s.title
-                      )}
-                    </div>
-                    <div className="mt-0.5 flex items-center gap-2 text-[11px]">
-                      <span
-                        className={`font-medium ${
-                          s.decaying ? "text-[var(--danger)]" : "text-[var(--muted)]"
-                        }`}
-                      >
-                        {s.reason}
-                      </span>
-                      {s.refreshedAt && (
-                        <span className="text-[var(--subtle)]">· last refreshed {s.ageMonths} mo ago</span>
-                      )}
-                    </div>
-                  </div>
-                  <form action={refreshOnePostAction} className="shrink-0">
-                    <input type="hidden" name="draftId" value={s.draftId} />
-                    <SubmitButton
-                      icon={<RefreshCw size={13} />}
-                      pendingLabel="Refreshing…"
-                      title="Rewrite this post for the current year and move it into Ready for review"
-                      className="flex items-center gap-1.5 rounded-full border border-[var(--border-strong)] px-3 py-1 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)]"
-                    >
-                      Refresh
-                    </SubmitButton>
-                  </form>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </Card>
 
       {/* Cost per blog — the real $/quality curve from recorded token usage */}
       <Card className="mb-4">

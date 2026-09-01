@@ -4,6 +4,7 @@ import { Shell } from "@/components/shell";
 import { PageHeader, Card, StatTile } from "@/components/ui";
 import {
   getBusiness,
+  getOnboardingStatus,
   getKpis,
   getPipeline,
   getConnectors,
@@ -39,9 +40,10 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
-  const [biz, kpis, pipeline, connectors, health, goal, cost, seo, movers, geo] =
+  const [biz, onboarding, kpis, pipeline, connectors, health, goal, cost, seo, movers, geo] =
     await Promise.all([
       getBusiness(),
+      getOnboardingStatus(),
       getKpis(),
       getPipeline(),
       getConnectors(),
@@ -52,6 +54,7 @@ export default async function OverviewPage() {
       getKeywordMovers(),
       getGeoVisibility(),
     ]);
+  const needsSetup = !onboarding.hasProfile || !onboarding.shopifyConnected;
 
   const readyTotal = goal.readyLocal + goal.readyEver;
   const atGoal = goal.limiting === "none";
@@ -88,6 +91,25 @@ export default async function OverviewPage() {
   return (
     <Shell>
       <PageHeader title="Overview" subtitle={biz.name} />
+
+      {needsSetup && (
+        <Link
+          href="/setup"
+          className="mb-4 flex items-center gap-3 rounded-xl border border-[var(--accent)] bg-[var(--accent-bg)] px-4 py-3 hover:brightness-105"
+        >
+          <Wand2 size={18} className="shrink-0 text-[var(--accent)]" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium text-[var(--accent)]">Finish setting up {biz.name}</div>
+            <div className="text-[11.5px] text-[var(--muted)]">
+              {!onboarding.hasProfile && "Add its brand identity"}
+              {!onboarding.hasProfile && !onboarding.shopifyConnected && " · "}
+              {!onboarding.shopifyConnected && "connect Shopify to publish"}
+              {" "}— a few quick steps.
+            </div>
+          </div>
+          <ArrowRight size={15} className="shrink-0 text-[var(--accent)]" />
+        </Link>
+      )}
 
       {/* ── THE BRAIN: goal status + one-click optimize ────────────────── */}
       <div className="mb-5 rounded-2xl border border-[var(--accent)] bg-[var(--surface-1)] p-5">

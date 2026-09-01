@@ -282,6 +282,24 @@ export interface RecommendationVM {
   createdAt: string; // ISO
 }
 
+/** Live onboarding state for a store — drives the guided setup checklist. */
+export interface OnboardingStatusVM {
+  businessId: string;
+  name: string;
+  domain: string;
+  status: "onboarding" | "active" | "paused";
+  hasProfile: boolean; // brand intake has run (profile + voice generated)
+  profileExcerpt: string | null; // first lines of the generated profile
+  brandVoice: string | null;
+  pillarCount: number;
+  shopifyConnected: boolean; // publish target wired
+  gscConnected: boolean; // Search Console wired
+  ideas: number; // ideas in the box
+  writing: number; // pieces being written/graded
+  ready: number; // finished pieces in Ready
+  published: number; // live posts
+}
+
 export interface ConnectorVM {
   type:
     | "GSC"

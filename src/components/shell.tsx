@@ -13,6 +13,8 @@ import {
   MapPin,
   Plug,
   Inbox,
+  RefreshCw,
+  Wand2,
   LogOut,
   Search,
 } from "lucide-react";
@@ -40,6 +42,7 @@ const NAV_GROUPS: {
     items: [
       { href: "/ideas", label: "Ideas", icon: Lightbulb },
       { href: "/ready", label: "Ready to publish", icon: CheckCircle2 },
+      { href: "/refresh", label: "Needs refresh", icon: RefreshCw },
     ],
   },
   {
@@ -53,6 +56,7 @@ const NAV_GROUPS: {
   {
     header: "Setup",
     items: [
+      { href: "/setup", label: "Set up store", icon: Wand2 },
       { href: "/strategy", label: "Strategy", icon: Target },
       { href: "/connectors", label: "Connectors", icon: Plug },
     ],

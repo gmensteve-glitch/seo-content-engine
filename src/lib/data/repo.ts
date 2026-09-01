@@ -28,6 +28,7 @@ import type {
   MoversVM,
   GeoVisibilityVM,
   RecommendationVM,
+  OnboardingStatusVM,
 } from "@/lib/data/types";
 import { fetchGscRows, strikingDistance, decayingPages } from "@/lib/connectors/gsc";
 import { isConnectable } from "@/lib/connectors/connect-fields";
@@ -91,6 +92,64 @@ const FALLBACK_PILLARS = [
   { name: "Local resources", desc: "City/state funeral homes, benefits, regulations." },
   { name: "Eco options", desc: "Green burial, biodegradable caskets." },
 ];
+
+/** Live onboarding state for a store — powers the guided setup checklist. */
+export async function getOnboardingStatus(bizId?: string): Promise<OnboardingStatusVM> {
+  bizId = bizId ?? (await activeBizId());
+  const empty = (name: string, domain: string): OnboardingStatusVM => ({
+    businessId: bizId!,
+    name,
+    domain,
+    status: "onboarding",
+    hasProfile: false,
+    profileExcerpt: null,
+    brandVoice: null,
+    pillarCount: 0,
+    shopifyConnected: false,
+    gscConnected: gscEnabled(),
+    ideas: 0,
+    writing: 0,
+    ready: 0,
+    published: 0,
+  });
+  if (!hasDatabase) return empty("Store", "example.com");
+
+  const biz = await prisma.business.findUnique({ where: { id: bizId } });
+  if (!biz) return empty("Store", "example.com");
+
+  const inflight = ["RESEARCHING", "DRAFTED", "GRADING", "REVISING"] as const;
+  const [connectors, pillarCount, ideas, writing, ready, published] = await Promise.all([
+    prisma.connector.findMany({ where: { businessId: bizId }, select: { type: true, status: true } }),
+    prisma.pillar.count({ where: { businessId: bizId } }),
+    prisma.idea.count({ where: { businessId: bizId, status: "PROPOSED" } }),
+    prisma.draft.count({ where: { businessId: bizId, status: { in: [...inflight] } } }),
+    prisma.draft.count({ where: { businessId: bizId, status: "PASSED", scheduledFor: null, rejectedAt: null } }),
+    prisma.draft.count({ where: { businessId: bizId, status: "PUBLISHED" } }),
+  ]);
+  const byType = new Map(connectors.map((c) => [c.type, c.status]));
+
+  const profileMd = biz.profileMd?.trim() || null;
+  const excerpt = profileMd
+    ? profileMd.replace(/[#*_`>]/g, "").replace(/\s+/g, " ").trim().slice(0, 320)
+    : null;
+
+  return {
+    businessId: bizId,
+    name: biz.name,
+    domain: biz.domain,
+    status: biz.status.toLowerCase() as OnboardingStatusVM["status"],
+    hasProfile: Boolean(profileMd),
+    profileExcerpt: excerpt,
+    brandVoice: biz.brandVoice?.trim() || null,
+    pillarCount,
+    shopifyConnected: byType.get("SHOPIFY") === "CONNECTED",
+    gscConnected: byType.get("GSC") === "CONNECTED" || gscEnabled(),
+    ideas,
+    writing,
+    ready,
+    published,
+  };
+}
 
 /** The content pillars configured for a store (falls back to the defaults). */
 export async function getPillars(bizId?: string): Promise<{ name: string; desc: string }[]> {
