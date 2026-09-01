@@ -10,7 +10,6 @@ import {
   ClipboardCheck,
   Columns3,
   CheckCircle2,
-  Sparkles,
   LineChart,
   MapPin,
   Plug,
@@ -45,7 +44,6 @@ const NAV_GROUPS: {
     items: [
       { href: "/ideas", label: "Ideas", icon: Lightbulb },
       { href: "/briefs", label: "Briefs", icon: ClipboardCheck },
-      { href: "/review", label: "Review", icon: Sparkles },
       { href: "/ready", label: "Ready to publish", icon: CheckCircle2 },
     ],
   },

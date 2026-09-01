@@ -6,7 +6,6 @@ import {
   getBusiness,
   getKpis,
   getPendingBriefs,
-  getNeedsPolish,
   getReadyToSchedule,
   getPipeline,
   getConnectors,
@@ -44,12 +43,11 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
-  const [biz, kpis, briefs, needsPolish, ready, pipeline, connectors, health, goal, cost, seo, movers, geo] =
+  const [biz, kpis, briefs, ready, pipeline, connectors, health, goal, cost, seo, movers, geo] =
     await Promise.all([
       getBusiness(),
       getKpis(),
       getPendingBriefs(),
-      getNeedsPolish(),
       getReadyToSchedule(),
       getPipeline(),
       getConnectors(),
@@ -90,14 +88,6 @@ export default async function OverviewPage() {
       hint: "Your one gate — approve to start the engine",
       href: "/briefs",
       tone: "warn" as const,
-    },
-    {
-      show: needsPolish.length > 0,
-      icon: <Sparkles size={16} />,
-      label: `${needsPolish.length} draft${needsPolish.length === 1 ? "" : "s"} need your experience`,
-      hint: "Add a real detail, then re-grade to pass",
-      href: "/review",
-      tone: "accent" as const,
     },
     {
       show: ready.length > 0,
@@ -347,10 +337,10 @@ export default async function OverviewPage() {
 
         {health.failed > 0 && (
           <Link
-            href="/review"
+            href="/pipeline"
             className="mt-3 flex items-center gap-1.5 text-[11px] text-[var(--warn)] hover:underline"
           >
-            <AlertTriangle size={12} /> {health.failed} piece{health.failed === 1 ? "" : "s"} couldn&apos;t reach the quality bar — review or boost
+            <AlertTriangle size={12} /> {health.failed} piece{health.failed === 1 ? "" : "s"} couldn&apos;t reach the quality bar — the engine keeps auto-boosting them
           </Link>
         )}
       </Card>

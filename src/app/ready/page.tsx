@@ -3,9 +3,7 @@ import { Shell } from "@/components/shell";
 import { PageHeader } from "@/components/ui";
 import { getReadyForReview, getBusiness } from "@/lib/data/repo";
 import type { PolishDraftVM } from "@/lib/data/types";
-import { scrubReadyFabricationAction, fixPublishedPostsAction, refreshStalePostsAction, relocalizePostsAction } from "@/app/actions";
-import { SubmitButton } from "@/components/submit-button";
-import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen, ShieldCheck, Undo2, RefreshCw } from "lucide-react";
+import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen, RefreshCw } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -100,46 +98,6 @@ export default async function ReadyPage() {
           subtitle="Your morning stack — finished, quality-checked pieces. Open one to read it and push it to Shopify."
         />
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <form action={relocalizePostsAction}>
-            <SubmitButton
-              icon={<MapPin size={13} />}
-              pendingLabel="Starting…"
-              title="Rebuild every existing LOCAL post to the new local + AEO template (place-named FTC-anchored answer, law/delivery/funeral-home sections) — lands in Ready for review"
-              className="flex items-center gap-1.5 rounded-full border border-[var(--accent)] px-3 py-1 text-[12px] text-[var(--accent)] hover:bg-[var(--accent-bg)]"
-            >
-              Rebuild local (new template)
-            </SubmitButton>
-          </form>
-          <form action={refreshStalePostsAction}>
-            <SubmitButton
-              icon={<RefreshCw size={13} />}
-              pendingLabel="Starting…"
-              title="Refresh a few decaying/stale published posts (update stats + freshness) back into Ready for you to review and re-publish"
-              className="flex items-center gap-1.5 rounded-full border border-[var(--border-strong)] px-3 py-1 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)]"
-            >
-              Refresh stale posts
-            </SubmitButton>
-          </form>
-          <form action={fixPublishedPostsAction}>
-            <SubmitButton
-              icon={<Undo2 size={13} />}
-              pendingLabel="Starting…"
-              title="Fix every already-PUBLISHED Shopify post: scrub fabricated business-operations claims, update it on Shopify, and set it Hidden for you to review and re-publish"
-              className="flex items-center gap-1.5 rounded-full border border-[var(--warn)] px-3 py-1 text-[12px] text-[var(--warn)] hover:bg-[var(--warn-bg)]"
-            >
-              Fix &amp; hide published
-            </SubmitButton>
-          </form>
-          <form action={scrubReadyFabricationAction}>
-            <SubmitButton
-              icon={<ShieldCheck size={13} />}
-              pendingLabel="Starting…"
-              title="Rewrite every Ready post to remove fabricated delivery timelines / shipping steps, and remember the rule for future posts"
-              className="flex items-center gap-1.5 rounded-full border border-[var(--border-strong)] px-3 py-1 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)]"
-            >
-              Scrub fabricated claims
-            </SubmitButton>
-          </form>
           <span
             className={`rounded-full px-3 py-1 text-[12px] font-medium ${
               drafts.length >= TOTAL_TARGET

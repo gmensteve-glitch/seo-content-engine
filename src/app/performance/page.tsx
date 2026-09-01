@@ -3,9 +3,15 @@ import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
 import { getLivePages, getBusiness, getCostSummary } from "@/lib/data/repo";
 import { listPublishedBlogs, getStalePosts } from "@/lib/pipeline/service";
-import { refreshOnePostAction } from "@/app/actions";
+import {
+  refreshOnePostAction,
+  relocalizePostsAction,
+  refreshStalePostsAction,
+  fixPublishedPostsAction,
+  scrubReadyFabricationAction,
+} from "@/app/actions";
 import { SubmitButton } from "@/components/submit-button";
-import { BarChart3, TrendingUp, PenLine, FileText, ExternalLink, DollarSign, RefreshCw, TrendingDown, Clock } from "lucide-react";
+import { BarChart3, TrendingUp, PenLine, FileText, ExternalLink, DollarSign, RefreshCw, TrendingDown, Clock, MapPin, Undo2, ShieldCheck, Wrench } from "lucide-react";
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
@@ -275,6 +281,62 @@ export default async function PerformancePage() {
               )}
             </tbody>
           </table>
+        </div>
+      </Card>
+
+      {/* Content maintenance — occasional, run-when-needed tools (not part of the
+          daily review/publish flow, so they live here rather than on Ready). */}
+      <Card className="mt-4">
+        <div className="mb-1 flex items-center gap-2">
+          <Wrench size={16} className="text-[var(--accent)]" />
+          <h2 className="text-[15px] font-medium">Content maintenance</h2>
+        </div>
+        <p className="mb-3 text-[11px] text-[var(--subtle)]">
+          One-off library tools. The engine already bakes these standards into every new post — use
+          these to bring the existing back catalog up to date. Rebuilt/refreshed pieces land in
+          Ready for your review.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <form action={relocalizePostsAction}>
+            <SubmitButton
+              icon={<MapPin size={13} />}
+              pendingLabel="Starting…"
+              title="Rebuild every existing LOCAL post to the local + AEO template (place-named FTC-anchored answer, law/delivery/funeral-home sections) — lands in Ready for review"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--accent)] px-3 py-1 text-[12px] text-[var(--accent)] hover:bg-[var(--accent-bg)]"
+            >
+              Rebuild local (new template)
+            </SubmitButton>
+          </form>
+          <form action={refreshStalePostsAction}>
+            <SubmitButton
+              icon={<RefreshCw size={13} />}
+              pendingLabel="Starting…"
+              title="Refresh a few decaying/stale published posts (update stats + freshness) into Ready for review — also runs automatically on a schedule"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--border-strong)] px-3 py-1 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            >
+              Refresh stale posts
+            </SubmitButton>
+          </form>
+          <form action={fixPublishedPostsAction}>
+            <SubmitButton
+              icon={<Undo2 size={13} />}
+              pendingLabel="Starting…"
+              title="Fix every already-PUBLISHED Shopify post: scrub fabricated business-operations claims, update it on Shopify, and set it Hidden for review"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--warn)] px-3 py-1 text-[12px] text-[var(--warn)] hover:bg-[var(--warn-bg)]"
+            >
+              Fix &amp; hide published
+            </SubmitButton>
+          </form>
+          <form action={scrubReadyFabricationAction}>
+            <SubmitButton
+              icon={<ShieldCheck size={13} />}
+              pendingLabel="Starting…"
+              title="Rewrite every Ready post to remove fabricated delivery timelines / shipping steps, and remember the rule for future posts"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--border-strong)] px-3 py-1 text-[12px] text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            >
+              Scrub fabricated claims
+            </SubmitButton>
+          </form>
         </div>
       </Card>
     </Shell>
