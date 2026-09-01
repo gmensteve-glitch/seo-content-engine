@@ -173,8 +173,14 @@ export async function deleteRecommendationAction(formData: FormData): Promise<vo
   revalidatePath("/recommendations");
 }
 
+// Build a brief from an idea AND kick off the blog — full-auto: one click takes
+// the idea all the way (brief → approve → the writer/grader pipeline runs out of
+// band and the finished piece lands in Ready). No manual approval gate.
 export async function buildBriefAction(formData: FormData): Promise<void> {
-  await buildBriefFromIdea(String(formData.get("ideaId")));
+  const ideaId = String(formData.get("ideaId"));
+  if (!ideaId) return;
+  const briefId = await buildBriefFromIdea(ideaId);
+  await approveBrief(briefId);
   revalidatePath("/ideas");
   revalidatePath("/briefs");
   revalidatePath("/pipeline");

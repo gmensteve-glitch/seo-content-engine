@@ -10,6 +10,7 @@ import {
 } from "@/app/actions";
 import { Sparkles, FileText, X, Tag, MapPin, BookOpen, Gauge } from "lucide-react";
 import { SliderForm } from "./SliderForm";
+import { SubmitButton } from "@/components/submit-button";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +44,7 @@ export default async function IdeasPage() {
       <div className="mb-5 flex items-start justify-between gap-4">
         <PageHeader
           title="Idea box"
-          subtitle="Scored for opportunity, best first. Pick a strong one and Build a brief. Generating adds a fresh batch — it never replaces what's here."
+          subtitle="Scored for opportunity, best first. Click Build blog on any idea and the engine writes it and drops it in Ready. Generating adds a fresh batch — it never replaces what's here."
         />
         <form action={generateIdeasAction}>
           <button className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110">
@@ -199,9 +200,14 @@ export default async function IdeasPage() {
                 <div className="flex shrink-0 items-center gap-2">
                   <form action={buildBriefAction}>
                     <input type="hidden" name="ideaId" value={i.id} />
-                    <button className="flex items-center gap-1.5 rounded-lg bg-[var(--accent-bg)] px-3 py-2 text-[13px] font-medium text-[var(--accent)] hover:brightness-110">
-                      <FileText size={14} /> Build brief
-                    </button>
+                    <SubmitButton
+                      icon={<FileText size={14} />}
+                      pendingLabel="Writing the blog…"
+                      title="Build a brief and write the blog — it runs automatically and lands in Ready to publish"
+                      className="flex items-center gap-1.5 rounded-lg bg-[var(--accent-bg)] px-3 py-2 text-[13px] font-medium text-[var(--accent)] hover:brightness-110"
+                    >
+                      Build blog
+                    </SubmitButton>
                   </form>
                   <form action={dismissIdeaAction}>
                     <input type="hidden" name="ideaId" value={i.id} />
