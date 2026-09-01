@@ -225,6 +225,7 @@ enum ConnectorType {
   SHOPIFY
   WORDPRESS
   WEBFLOW
+  SLACK // incoming webhook for notifications (e.g. SEO recommendations)
 }
 
 enum ConnStatus {

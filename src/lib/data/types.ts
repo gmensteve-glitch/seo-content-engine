@@ -289,7 +289,8 @@ export interface ConnectorVM {
     | "DATAFORSEO"
     | "GOOGLE_MAPS"
     | "FIRECRAWL"
-    | "SHOPIFY";
+    | "SHOPIFY"
+    | "SLACK";
   label: string;
   status: "connected" | "disconnected" | "error";
   detail: string;

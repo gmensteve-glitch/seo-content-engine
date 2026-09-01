@@ -38,6 +38,7 @@ import { serpTop } from "@/lib/connectors/dataforseo";
 import { scrapeMany } from "@/lib/connectors/firecrawl";
 import { fetchGscRows, strikingDistance, decayingPages, gscQuery } from "@/lib/connectors/gsc";
 import { askAnswerEngine } from "@/lib/connectors/perplexity";
+import { postRecommendationToSlack } from "@/lib/connectors/slack";
 import { dataforseoEnabled, firecrawlEnabled, gscEnabled, geoEnabled, aiEnabled } from "@/lib/env";
 import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
@@ -862,6 +863,24 @@ export async function submitRecommendation(
       imageMime: input.imageMime ?? null,
     },
   });
+
+  // Forward to Slack in the background (best-effort — never block the submit).
+  void (async () => {
+    try {
+      const biz = await prisma.business.findUnique({
+        where: { id: businessId },
+        select: { name: true },
+      });
+      await postRecommendationToSlack(businessId, {
+        note,
+        author: input.author,
+        businessName: biz?.name,
+        hasImage: Boolean(input.imageData),
+      });
+    } catch (e) {
+      console.error("[recommendation] slack notify failed:", e instanceof Error ? e.message : e);
+    }
+  })();
 }
 
 /** Flip a recommendation between OPEN and DONE. */

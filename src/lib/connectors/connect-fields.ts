@@ -3,7 +3,7 @@
 // the server action can both import it. Only connector types that map to the
 // Prisma ConnectorType enum are storable; Firecrawl is env-only and omitted.
 
-export type ConnectableType = "SHOPIFY" | "GSC" | "GA4" | "DATAFORSEO" | "GOOGLE_MAPS";
+export type ConnectableType = "SHOPIFY" | "GSC" | "GA4" | "DATAFORSEO" | "GOOGLE_MAPS" | "SLACK";
 
 export interface ConnectorField {
   name: string;
@@ -55,6 +55,19 @@ export const CONNECTOR_SPECS: Record<ConnectableType, ConnectorSpec> = {
     wired: false,
     note: "Used for local/geo pages.",
     fields: [{ name: "apiKey", label: "API key", type: "password", placeholder: "AIza…", required: true }],
+  },
+  SLACK: {
+    wired: true,
+    note: "Paste an incoming-webhook URL for your #recommendations channel (Slack → your workspace app → Incoming Webhooks). New SEO recommendations post there instantly.",
+    fields: [
+      {
+        name: "webhookUrl",
+        label: "Incoming webhook URL",
+        type: "password",
+        placeholder: "https://hooks.slack.com/services/…",
+        required: true,
+      },
+    ],
   },
 };
 

@@ -1000,6 +1000,7 @@ const CONNECTOR_ROSTER: {
   { type: "FIRECRAWL", label: "Firecrawl", detail: "competitor page extraction", fromEnv: "FIRECRAWL_API_KEY" },
   { type: "GOOGLE_MAPS", label: "Google Maps", detail: "needed for geo pages" },
   { type: "SHOPIFY", label: "Shopify (publish)", detail: "publishing target" },
+  { type: "SLACK", label: "Slack", detail: "SEO recommendations → your channel" },
 ];
 
 export async function getConnectors(bizId = DEFAULT_BIZ): Promise<ConnectorVM[]> {
