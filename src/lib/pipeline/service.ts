@@ -568,6 +568,28 @@ export async function syncGscAll(): Promise<Record<string, { pages: number; keyw
  * published pieces). One row per (query, engine, day) — the citation-rate time
  * series. No-ops when GEO isn't configured.
  */
+// Queries we won't chase in GEO: pure dictionary/definition lookups — we can't
+// out-cite Wikipedia for them and searchers aren't buyers.
+const GEO_JUNK_RE = /\b(meaning|meanings|definition|define|defined|synonym|synonyms|pronunciation|wikipedia)\b/i;
+const GEO_GLOSSARY = new Set([
+  "coffin", "coffins", "gravestone", "gravestones", "headstone", "headstones",
+  "morgue", "morgues", "mortuary", "mortuaries", "repass", "repast",
+  "mausoleum", "mausoleums", "hearse", "pallbearer", "eulogy",
+]);
+function isInformationalJunk(q: string): boolean {
+  const t = q.trim().toLowerCase();
+  if (!t) return true;
+  if (GEO_JUNK_RE.test(t)) return true;
+  const words = t.split(/\s+/);
+  return words.length <= 2 && words.every((w) => GEO_GLOSSARY.has(w));
+}
+// Commercial-buyer or local-law intent — the queries actually worth being cited for.
+const GEO_COMMERCIAL_RE =
+  /\b(buy|buying|price|prices|pricing|cost|costs|cheap|cheapest|affordable|discount|for sale|sale|online|delivery|deliver|delivered|shipping|ship|accepts?|law|laws|legal|rules|regulation|near me|how much|where to)\b/i;
+function isCommercialIntent(q: string): boolean {
+  return GEO_COMMERCIAL_RE.test(q.toLowerCase());
+}
+
 export async function syncGeoCitations(
   businessId: string,
   opts?: { max?: number },
@@ -594,13 +616,28 @@ export async function syncGeoCitations(
   }
   const drafts = await prisma.draft.findMany({
     where: { businessId, status: { in: ["PASSED", "PUBLISHED"] } },
-    select: { brief: { select: { targetKeyword: true } } },
+    select: { brief: { select: { targetKeyword: true, idea: { select: { kind: true } } } } },
     orderBy: { updatedAt: "desc" },
     take: 100,
   });
-  const draftKw = drafts.map((d) => d.brief?.targetKeyword?.trim()).filter(Boolean) as string[];
+  // Split our own targets by kind so LOCAL money queries lead the test set.
+  const localKw: string[] = [];
+  const evergreenKw: string[] = [];
+  for (const d of drafts) {
+    const kw = d.brief?.targetKeyword?.trim().toLowerCase();
+    if (!kw) continue;
+    (d.brief?.idea?.kind === "LOCAL" ? localKw : evergreenKw).push(kw);
+  }
+
+  // Drop pure dictionary/definition lookups (we can't out-cite Wikipedia and
+  // nobody searching them is buying), then order money-first: our LOCAL targets,
+  // commercial buyer demand from GSC, our evergreen targets, then the remainder.
+  const clean = (qs: string[]) => qs.map((q) => q.toLowerCase()).filter((q) => !isInformationalJunk(q));
+  const gscClean = clean(gscQueries);
+  const gscCommercial = gscClean.filter(isCommercialIntent);
+  const gscRest = gscClean.filter((q) => !isCommercialIntent(q));
   const queries = [
-    ...new Set([...gscQueries, ...draftKw].map((q) => q.toLowerCase())),
+    ...new Set([...clean(localKw), ...gscCommercial, ...clean(evergreenKw), ...gscRest]),
   ].slice(0, opts?.max ?? 15);
   if (!queries.length) return { tested: 0, cited: 0 };
 

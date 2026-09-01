@@ -366,6 +366,15 @@ export default async function OverviewPage() {
             <span className="ml-auto text-[11px] text-[var(--subtle)]">
               {seo.totalClicks28d.toLocaleString()} clicks · {seo.totalImpressions28d.toLocaleString()} impressions / 28d
             </span>
+            <a
+              href={`https://search.google.com/search-console/performance/search-analytics?resource_id=sc-domain%3A${encodeURIComponent(biz.domain)}`}
+              target="_blank"
+              rel="noreferrer"
+              title="Open the full rankings report in Google Search Console"
+              className="flex items-center gap-1 rounded-full border border-[var(--border-strong)] px-2 py-0.5 text-[10px] font-medium text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            >
+              <Search size={11} /> All rankings ↗
+            </a>
           </div>
           <Card className="mb-5">
             {seo.striking.length > 0 ? (
