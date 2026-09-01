@@ -73,12 +73,22 @@ export async function buildBrief(input: ResearchInput): Promise<BriefSpec> {
     )
     .join("\n\n---\n\n");
 
-  const raw = await structured<Omit<BriefSpec, "targetKeyword">>({
-    model: MODELS.research,
-    system: RESEARCH_SYSTEM,
-    schema: BRIEF_SCHEMA,
-    prompt: `TARGET KEYWORD: ${input.targetKeyword}\n\nBUSINESS CONTEXT:\n${input.businessContext}\n\nTOP-RANKING COMPETITOR PAGES:\n${competitorSummary || "(none scraped — infer from the keyword and business context)"}\n\nProduce a content brief: the winning title, the angle/wedge, the specific gap competitors leave open, a target word count, a section outline, the questions the page must answer, and which schema.org types to include.`,
-  });
+  // The brief LLM call is the last step — but a transient API error, rate limit,
+  // or a schema/parse hiccup must NOT strand the idea (the "Build blog" button
+  // would silently do nothing). Fall back to a solid offline brief so a piece is
+  // always produced; the writer then does the heavy lifting anyway.
+  let raw: Omit<BriefSpec, "targetKeyword">;
+  try {
+    raw = await structured<Omit<BriefSpec, "targetKeyword">>({
+      model: MODELS.research,
+      system: RESEARCH_SYSTEM,
+      schema: BRIEF_SCHEMA,
+      prompt: `TARGET KEYWORD: ${input.targetKeyword}\n\nBUSINESS CONTEXT:\n${input.businessContext}\n\nTOP-RANKING COMPETITOR PAGES:\n${competitorSummary || "(none scraped — infer from the keyword and business context)"}\n\nProduce a content brief: the winning title, the angle/wedge, the specific gap competitors leave open, a target word count, a section outline, the questions the page must answer, and which schema.org types to include.`,
+    });
+  } catch (e) {
+    console.error("[research] brief LLM call failed, using offline brief:", e instanceof Error ? e.message : e);
+    return offlineBrief(input.targetKeyword);
+  }
 
   // Clamp the target to a reader-friendly band — most blog posts win at
   // 1,000–2,200 words; anything longer tends to bury the answer.
