@@ -24,6 +24,7 @@ import {
   refreshPublishedPost,
   saveConnector,
   removeConnector,
+  relocalizeAllPosts,
   submitRecommendation,
   setRecommendationStatus,
   deleteRecommendation,
@@ -52,6 +53,16 @@ export async function refreshOnePostAction(formData: FormData): Promise<void> {
     console.error("[refresh-one] failed:", e instanceof Error ? e.message : e),
   );
   revalidatePath("/performance");
+  revalidatePath("/ready");
+}
+
+// Rebuild every existing LOCAL post to the strong local + AEO template, landing
+// them in Ready for review. Background (LLM rewrite per post), fire-and-forget.
+export async function relocalizePostsAction(): Promise<void> {
+  const biz = await getBusiness();
+  void relocalizeAllPosts(biz.id).catch((e) =>
+    console.error("[relocalize-all] failed:", e instanceof Error ? e.message : e),
+  );
   revalidatePath("/ready");
 }
 

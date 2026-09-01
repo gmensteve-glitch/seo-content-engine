@@ -1742,6 +1742,85 @@ export async function autoRefreshAll(max = 2): Promise<Record<string, number>> {
   return out;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Relocalize — bring EXISTING local posts up to the strong local + AEO template
+// (place-named FTC-anchored Quick answer, law / delivery / funeral-homes H2s,
+// place-named FAQ). Lands the rewrite in Ready for review; keeps the Page so a
+// re-publish updates the same article in place.
+// ─────────────────────────────────────────────────────────────
+
+const RELOCALIZE_NOTE =
+  "Rewrite this LOCAL, geo-targeted article to our strongest local + AEO standard. Identify the specific " +
+  "city/metro and state this page targets and make the page unmistakably about THAT place:\n" +
+  "- Open with a bold, self-contained \"Quick answer\" that NAMES the place and states the rule an AI can quote " +
+  "verbatim. Anchor the legal point in the FTC Funeral Rule (federal, real): families may buy a casket from any " +
+  "retailer, and a funeral home cannot refuse it or charge a handling fee. Do NOT invent state statutes — include " +
+  "state specifics only if accurate, otherwise tell the reader to verify with the state funeral board.\n" +
+  "- Ensure dedicated H2 sections, each answered in a standalone quotable passage: (1) the law — can you buy your " +
+  "own casket in that state?; (2) delivery to that city in GENERAL terms only (never fabricate our exact process or " +
+  "timeline — keep it broad and say to confirm with us); (3) which local funeral homes accept a casket you bought " +
+  "online (the Funeral Rule requires them to) — never assert a specific named home's fees/steps/hours as fact; " +
+  "(4) local considerations (major cemeteries / metro norms, at a general, accurate level).\n" +
+  "- Add or strengthen a place-named FAQ (\"Can I buy my own casket in {City}?\").\n" +
+  "- Keep it strictly accurate, keep existing valid links, and preserve the trailing JSON-LD schema (keep it valid " +
+  "and complete). Do NOT imply we are a physical funeral home or storefront in that city — we ship nationwide.";
+
+/** Rebuild ONE local post to the strong local+AEO template, into Ready for review. */
+export async function relocalizePost(draftId: string): Promise<{ rebuilt: boolean }> {
+  requireDb();
+  const draft = await prisma.draft.findUnique({
+    where: { id: draftId },
+    select: { id: true, bodyMd: true, title: true, brief: { select: { idea: { select: { kind: true } } } } },
+  });
+  if (!draft) throw new Error(`Draft ${draftId} not found`);
+  if (draft.brief?.idea?.kind !== "LOCAL") return { rebuilt: false };
+
+  const revised = await trackDraftCost(draftId, () =>
+    reviseBodyWithInstruction(draft.bodyMd, draft.title, RELOCALIZE_NOTE),
+  );
+  const changed = revised !== draft.bodyMd;
+  if (changed) {
+    await prisma.draft.update({
+      where: { id: draftId },
+      data: {
+        bodyMd: revised,
+        status: "PASSED",
+        reviewedAt: null,
+        scheduledFor: null,
+        rejectedAt: null,
+        refreshedAt: new Date(),
+      },
+    });
+  }
+  return { rebuilt: changed };
+}
+
+/** Rebuild every LOCAL post (PASSED + PUBLISHED) for a business to the new
+ *  template. Operator-initiated one-time upgrade — capped to bound cost. */
+export async function relocalizeAllPosts(businessId: string, max = 30): Promise<number> {
+  requireDb();
+  const locals = await prisma.draft.findMany({
+    where: {
+      businessId,
+      status: { in: ["PASSED", "PUBLISHED"] },
+      brief: { idea: { kind: "LOCAL" } },
+    },
+    select: { id: true },
+    orderBy: { updatedAt: "desc" },
+    take: max,
+  });
+  let done = 0;
+  for (const d of locals) {
+    try {
+      const { rebuilt } = await relocalizePost(d.id);
+      if (rebuilt) done++;
+    } catch (e) {
+      console.error("[relocalize] failed for", d.id, e instanceof Error ? e.message : e);
+    }
+  }
+  return done;
+}
+
 /**
  * Surface published posts worth refreshing, worst-first, each with the reason.
  * A post is "stale" if Search Console shows it decaying, OR it hasn't been

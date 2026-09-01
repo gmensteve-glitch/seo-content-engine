@@ -3,7 +3,7 @@ import { Shell } from "@/components/shell";
 import { PageHeader } from "@/components/ui";
 import { getReadyForReview, getBusiness } from "@/lib/data/repo";
 import type { PolishDraftVM } from "@/lib/data/types";
-import { scrubReadyFabricationAction, fixPublishedPostsAction, refreshStalePostsAction } from "@/app/actions";
+import { scrubReadyFabricationAction, fixPublishedPostsAction, refreshStalePostsAction, relocalizePostsAction } from "@/app/actions";
 import { SubmitButton } from "@/components/submit-button";
 import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen, ShieldCheck, Undo2, RefreshCw } from "lucide-react";
 
@@ -100,6 +100,16 @@ export default async function ReadyPage() {
           subtitle="Your morning stack — finished, quality-checked pieces. Open one to read it and push it to Shopify."
         />
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <form action={relocalizePostsAction}>
+            <SubmitButton
+              icon={<MapPin size={13} />}
+              pendingLabel="Starting…"
+              title="Rebuild every existing LOCAL post to the new local + AEO template (place-named FTC-anchored answer, law/delivery/funeral-home sections) — lands in Ready for review"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--accent)] px-3 py-1 text-[12px] text-[var(--accent)] hover:bg-[var(--accent-bg)]"
+            >
+              Rebuild local (new template)
+            </SubmitButton>
+          </form>
           <form action={refreshStalePostsAction}>
             <SubmitButton
               icon={<RefreshCw size={13} />}
