@@ -27,6 +27,7 @@ import type {
   SeoOpportunitiesVM,
   MoversVM,
   GeoVisibilityVM,
+  RecommendationVM,
 } from "@/lib/data/types";
 import { fetchGscRows, strikingDistance, decayingPages } from "@/lib/connectors/gsc";
 import { isConnectable } from "@/lib/connectors/connect-fields";
@@ -1029,6 +1030,25 @@ export async function getConnectors(bizId = DEFAULT_BIZ): Promise<ConnectorVM[]>
       connectable: isConnectable(c.type),
     };
   });
+}
+
+/** SEO recommendations for a business — open first, then newest. */
+export async function getRecommendations(bizId = DEFAULT_BIZ): Promise<RecommendationVM[]> {
+  if (!hasDatabase) return [];
+  const rows = await prisma.recommendation.findMany({
+    where: { businessId: bizId },
+    orderBy: [{ status: "asc" }, { createdAt: "desc" }], // OPEN sorts before DONE
+    take: 100,
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    note: r.note,
+    author: r.author,
+    imageData: r.imageData,
+    imageMime: r.imageMime,
+    status: r.status === "DONE" ? "done" : "open",
+    createdAt: r.createdAt.toISOString(),
+  }));
 }
 
 /** Column definitions for the pipeline board. `tone` drives the color language:

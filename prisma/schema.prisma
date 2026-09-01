@@ -77,8 +77,31 @@ model Business {
   imageFeedback ImageFeedback[]
   contentFeedback ContentFeedback[]
   geo         GeoCitation[]
+  recommendations Recommendation[]
 
   @@index([domain])
+}
+
+// An SEO recommendation submitted from the dashboard — a screenshot (base64)
+// plus notes on what to improve, forwarded to the operator for review. Lets an
+// outside SEO consultant drop annotated suggestions straight into the app.
+model Recommendation {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+  note       String   @db.Text
+  author     String? // who submitted it (free text)
+  imageData  String?  @db.Text // base64 data URL of the screenshot, if attached
+  imageMime  String? // e.g. image/png
+  status     RecStatus @default(OPEN)
+  createdAt  DateTime @default(now())
+
+  @@index([businessId, status, createdAt])
+}
+
+enum RecStatus {
+  OPEN
+  DONE
 }
 
 // GEO (Generative Engine Optimization) visibility: did an AI answer engine cite

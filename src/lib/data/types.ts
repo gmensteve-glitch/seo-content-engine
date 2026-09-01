@@ -271,6 +271,17 @@ export interface CalendarEntryVM {
   url?: string; // live URL, when published
 }
 
+/** An SEO recommendation submitted from the dashboard for the operator to review. */
+export interface RecommendationVM {
+  id: string;
+  note: string;
+  author: string | null;
+  imageData: string | null; // base64 data URL of the screenshot
+  imageMime: string | null;
+  status: "open" | "done";
+  createdAt: string; // ISO
+}
+
 export interface ConnectorVM {
   type:
     | "GSC"

@@ -24,6 +24,9 @@ import {
   refreshPublishedPost,
   saveConnector,
   removeConnector,
+  submitRecommendation,
+  setRecommendationStatus,
+  deleteRecommendation,
 } from "@/lib/pipeline/service";
 import { getBusiness } from "@/lib/data/repo";
 import { CONNECTOR_SPECS, isConnectable } from "@/lib/connectors/connect-fields";
@@ -112,6 +115,51 @@ export async function disconnectConnectorAction(formData: FormData): Promise<voi
   await removeConnector(bizId, type as ConnectorType);
   revalidatePath("/connectors");
   revalidatePath("/");
+}
+
+// ── SEO recommendations inbox ────────────────────────────────
+
+const MAX_REC_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB screenshot cap
+
+/** Submit an SEO recommendation (note + optional screenshot) from the dashboard. */
+export async function submitRecommendationAction(formData: FormData): Promise<void> {
+  const note = String(formData.get("note") ?? "").trim();
+  if (!note) throw new Error("A note is required.");
+  const author = String(formData.get("author") ?? "").trim();
+
+  let imageData: string | undefined;
+  let imageMime: string | undefined;
+  const file = formData.get("image");
+  if (file && typeof file === "object" && "arrayBuffer" in file && file.size > 0) {
+    if (file.size > MAX_REC_IMAGE_BYTES) throw new Error("Screenshot too large (max 5 MB).");
+    const mime = file.type || "image/png";
+    if (!mime.startsWith("image/")) throw new Error("Attachment must be an image.");
+    const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+    imageData = `data:${mime};base64,${b64}`;
+    imageMime = mime;
+  }
+
+  const bizId = (await getBusiness()).id;
+  await submitRecommendation(bizId, { note, author: author || undefined, imageData, imageMime });
+  revalidatePath("/recommendations");
+  revalidatePath("/");
+}
+
+/** Toggle a recommendation between open and done. */
+export async function recommendationStatusAction(formData: FormData): Promise<void> {
+  const id = String(formData.get("id") ?? "");
+  const status = String(formData.get("status") ?? "") === "DONE" ? "DONE" : "OPEN";
+  if (!id) return;
+  await setRecommendationStatus(id, status);
+  revalidatePath("/recommendations");
+}
+
+/** Delete a recommendation. */
+export async function deleteRecommendationAction(formData: FormData): Promise<void> {
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  await deleteRecommendation(id);
+  revalidatePath("/recommendations");
 }
 
 export async function buildBriefAction(formData: FormData): Promise<void> {

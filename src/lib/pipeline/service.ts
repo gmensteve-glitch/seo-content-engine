@@ -843,6 +843,39 @@ export async function removeConnector(businessId: string, type: ConnectorType): 
   await prisma.connector.deleteMany({ where: { businessId, type } });
 }
 
+// ── SEO recommendations inbox ────────────────────────────────
+
+/** Submit an SEO recommendation (a note + optional screenshot) for review. */
+export async function submitRecommendation(
+  businessId: string,
+  input: { note: string; author?: string; imageData?: string; imageMime?: string },
+): Promise<void> {
+  requireDb();
+  const note = input.note.trim();
+  if (!note) throw new Error("A note is required.");
+  await prisma.recommendation.create({
+    data: {
+      businessId,
+      note: note.slice(0, 8000),
+      author: input.author?.trim().slice(0, 120) || null,
+      imageData: input.imageData ?? null,
+      imageMime: input.imageMime ?? null,
+    },
+  });
+}
+
+/** Flip a recommendation between OPEN and DONE. */
+export async function setRecommendationStatus(id: string, status: "OPEN" | "DONE"): Promise<void> {
+  requireDb();
+  await prisma.recommendation.update({ where: { id }, data: { status } });
+}
+
+/** Permanently remove a recommendation. */
+export async function deleteRecommendation(id: string): Promise<void> {
+  requireDb();
+  await prisma.recommendation.deleteMany({ where: { id } });
+}
+
 /** List every post on the business's live blog (straight from the CMS). */
 export async function listPublishedBlogs(businessId: string): Promise<PublishedBlog[]> {
   requireDb();

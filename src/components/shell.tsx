@@ -14,6 +14,7 @@ import {
   LineChart,
   MapPin,
   Plug,
+  Inbox,
   Plus,
   ChevronDown,
   Layers,
@@ -52,6 +53,7 @@ const NAV_GROUPS: {
     items: [
       { href: "/performance", label: "Performance", icon: LineChart },
       { href: "/geo", label: "Geo", icon: MapPin },
+      { href: "/recommendations", label: "SEO inbox", icon: Inbox },
     ],
   },
   {
