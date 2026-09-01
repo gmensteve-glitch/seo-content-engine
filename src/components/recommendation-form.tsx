@@ -8,7 +8,7 @@ import { submitRecommendationAction } from "@/app/actions";
  * The submit box for the SEO inbox: notes on what to improve plus an optional
  * screenshot. Shows a thumbnail preview before sending and resets on success.
  */
-export function RecommendationForm() {
+export function RecommendationForm({ onSuccess }: { onSuccess?: () => void } = {}) {
   const formRef = useRef<HTMLFormElement>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +42,7 @@ export function RecommendationForm() {
         await submitRecommendationAction(formData);
         formRef.current?.reset();
         setPreview(null);
+        onSuccess?.();
       } catch {
         setError("Couldn't submit — please try again.");
       }

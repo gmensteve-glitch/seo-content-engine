@@ -22,6 +22,7 @@ import {
   Search,
 } from "lucide-react";
 import { BUSINESSES } from "@/lib/mock/seed";
+import { RecommendButton } from "@/components/recommend-button";
 
 // Grouped nav — chunked into a few labelled sections so the sidebar reads as
 // "what do I do / what do I make / what do I check / setup" instead of a flat
@@ -117,6 +118,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <RecommendButton />
           <a
             href={`https://search.google.com/search-console?resource_id=sc-domain%3A${encodeURIComponent(biz.domain)}`}
             target="_blank"
