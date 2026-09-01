@@ -1,22 +1,18 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   Target,
   Lightbulb,
-  ClipboardCheck,
   Columns3,
   CheckCircle2,
   LineChart,
   MapPin,
   Plug,
   Inbox,
-  Plus,
-  ChevronDown,
-  Layers,
   LogOut,
   Search,
 } from "lucide-react";
@@ -38,12 +34,11 @@ const NAV_GROUPS: {
     ],
   },
   {
-    // Same left-to-right order as the pipeline board: idea → brief → review →
-    // schedule. The sidebar reads top-to-bottom exactly how work flows.
+    // The engine runs idea → brief → write → grade automatically; you pick ideas
+    // to build and review what lands in Ready. The sidebar reads how work flows.
     header: "Workflow",
     items: [
       { href: "/ideas", label: "Ideas", icon: Lightbulb },
-      { href: "/briefs", label: "Briefs", icon: ClipboardCheck },
       { href: "/ready", label: "Ready to publish", icon: CheckCircle2 },
     ],
   },
@@ -66,54 +61,24 @@ const NAV_GROUPS: {
 
 export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const [bizId, setBizId] = useState(BUSINESSES[0].id);
-  const [open, setOpen] = useState(false);
-  const biz = BUSINESSES.find((b) => b.id === bizId) ?? BUSINESSES[0];
+  const biz = BUSINESSES[0];
 
   return (
     <div className="flex h-screen flex-col">
       {/* Top bar */}
       <header className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface-1)] px-4 py-2.5">
         <div className="flex items-center gap-3">
-          <div className="relative">
-            <button
-              onClick={() => setOpen((v) => !v)}
-              className="flex items-center gap-2.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-2)] px-2.5 py-1.5 text-left hover:bg-[var(--surface-1)]"
-            >
-              <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--accent-bg)] text-xs font-medium text-[var(--accent)]">
-                {biz.short}
+          <div className="flex items-center gap-2.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-2)] px-2.5 py-1.5">
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--accent-bg)] text-xs font-medium text-[var(--accent)]">
+              {biz.short}
+            </span>
+            <span>
+              <span className="block text-[13px] font-medium leading-tight">{biz.name}</span>
+              <span className="block text-[10px] capitalize text-[var(--subtle)]">
+                {biz.cms} · {biz.status}
               </span>
-              <span>
-                <span className="block text-[13px] font-medium leading-tight">{biz.name}</span>
-                <span className="block text-[10px] capitalize text-[var(--subtle)]">
-                  {biz.cms} · {biz.status}
-                </span>
-              </span>
-              <ChevronDown size={15} className="text-[var(--subtle)]" />
-            </button>
-            {open && (
-              <div className="absolute z-20 mt-1 w-64 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-1 shadow-lg">
-                {BUSINESSES.map((b) => (
-                  <button
-                    key={b.id}
-                    onClick={() => {
-                      setBizId(b.id);
-                      setOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-[var(--surface-2)]"
-                  >
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--accent-bg)] text-xs font-medium text-[var(--accent)]">
-                      {b.short}
-                    </span>
-                    <span className="text-[13px]">{b.name}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+            </span>
           </div>
-          <span className="hidden items-center gap-1.5 text-[11px] text-[var(--subtle)] sm:flex">
-            <Layers size={13} /> {BUSINESSES.length} businesses
-          </span>
         </div>
         <div className="flex items-center gap-2">
           <RecommendButton />
@@ -126,9 +91,6 @@ export function Shell({ children }: { children: ReactNode }) {
           >
             <Search size={14} /> <span className="hidden sm:inline">Search Console ↗</span>
           </a>
-          <button className="flex items-center gap-1.5 rounded-lg border border-[var(--border-strong)] px-2.5 py-1.5 text-[12px] hover:bg-[var(--surface-2)]">
-            <Plus size={14} /> Add business
-          </button>
           <form action="/api/auth/logout" method="POST">
             <button
               type="submit"

@@ -135,14 +135,15 @@ export default async function GeoPage() {
         </Card>
       )}
 
-      {/* Local city pages (geographic) */}
+      {/* Local priority metros — the population-ranked targets the engine works down */}
       <div className="mt-6 mb-2 flex items-center gap-1.5 text-[12px] font-medium text-[var(--muted)]">
-        <Sparkles size={13} /> Local city coverage
+        <Sparkles size={13} /> Local priority metros
       </div>
       <Card>
         <p className="text-[13px] text-[var(--muted)]">
-          Local posts target the most populous US metros first — the same city questions AI answers, so winning
-          them wins both the map pack and the AI answer.
+          The engine builds local posts for the most populous US metros first (these are the top of that
+          list) — the same city questions AI answers, so winning them wins both the map pack and the AI
+          answer.
         </p>
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {SAMPLE_CITIES.map((c) => (

@@ -11,7 +11,7 @@ import {
   scrubReadyFabricationAction,
 } from "@/app/actions";
 import { SubmitButton } from "@/components/submit-button";
-import { BarChart3, TrendingUp, PenLine, FileText, ExternalLink, DollarSign, RefreshCw, TrendingDown, Clock, MapPin, Undo2, ShieldCheck, Wrench } from "lucide-react";
+import { TrendingUp, PenLine, FileText, ExternalLink, DollarSign, RefreshCw, TrendingDown, Clock, MapPin, Undo2, ShieldCheck, Wrench } from "lucide-react";
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
@@ -187,8 +187,7 @@ export default async function PerformancePage() {
               <thead className="sticky top-0 bg-[var(--surface-1)] text-[11px] uppercase tracking-wide text-[var(--subtle)]">
                 <tr className="border-b border-[var(--border)]">
                   <th className="pb-2 pr-4 font-medium">Post</th>
-                  <th className="pb-2 pr-4 font-medium">Updated</th>
-                  <th className="pb-2 font-medium">Clicks 28d</th>
+                  <th className="pb-2 font-medium">Updated</th>
                 </tr>
               </thead>
               <tbody>
@@ -205,14 +204,13 @@ export default async function PerformancePage() {
                         <ExternalLink size={11} className="text-[var(--subtle)]" />
                       </Link>
                     </td>
-                    <td className="py-2 pr-4 text-[12px] text-[var(--muted)]">
+                    <td className="py-2 text-[12px] text-[var(--muted)]">
                       {new Date(p.updatedAt).toLocaleDateString(undefined, {
                         month: "short",
                         day: "numeric",
                         year: "numeric",
                       })}
                     </td>
-                    <td className="py-2 text-[12px] text-[var(--subtle)]">— (connect GSC)</td>
                   </tr>
                 ))}
               </tbody>
@@ -220,22 +218,9 @@ export default async function PerformancePage() {
           </div>
         )}
         <p className="mt-2 text-[11px] text-[var(--subtle)]">
-          Click totals, impressions, and rankings light up here once Google Search Console is
-          connected.
+          Live query rankings, clicks and impressions are in the “Pages &amp; signals” table below and
+          on the Overview — pulled from Search Console.
         </p>
-      </Card>
-
-      <Card className="mb-4">
-        <div className="flex items-center gap-2 text-[13px] text-[var(--muted)]">
-          <BarChart3 size={16} className="text-[var(--accent)]" />
-          <span>
-            Embedded Looker Studio report goes here (GSC + GA4) — we plug in the free report rather
-            than rebuilding analytics.
-          </span>
-        </div>
-        <div className="mt-3 flex h-40 items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-[12px] text-[var(--subtle)]">
-          Looker Studio embed placeholder
-        </div>
       </Card>
 
       <Card>

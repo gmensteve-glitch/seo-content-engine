@@ -19,8 +19,8 @@ export default async function ReviewDraftPage({
         <div className="rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] px-4 py-8 text-center">
           <p className="text-[13px] text-[var(--muted)]">
             That draft isn&apos;t here.{" "}
-            <Link href="/review" className="font-medium text-[var(--accent)]">
-              Back to Review
+            <Link href="/ready" className="font-medium text-[var(--accent)]">
+              Back to Ready
             </Link>
           </p>
         </div>

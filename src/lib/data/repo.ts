@@ -605,7 +605,7 @@ export async function getPipeline(bizId = DEFAULT_BIZ): Promise<PipelineCard[]> 
     });
   }
 
-  // Review — near-miss drafts (FAILED) that need a human experience pass.
+  // Review — near-miss drafts (FAILED) the engine keeps auto-boosting.
   const failed = await prisma.draft.findMany({
     where: { businessId: bizId, status: "FAILED" },
     include: { grades: { orderBy: { createdAt: "desc" }, take: 1 } },
@@ -617,7 +617,7 @@ export async function getPipeline(bizId = DEFAULT_BIZ): Promise<PipelineCard[]> 
       title: d.title,
       stage: "review",
       score: d.grades[0]?.overall,
-      meta: "add experience",
+      meta: "auto-boosting",
     });
   }
 
@@ -1063,7 +1063,7 @@ export const PIPELINE_COLUMNS: {
   href?: string;
 }[] = [
   { key: "ideas", label: "Ideas", tone: "neutral", href: "/ideas" },
-  { key: "briefs", label: "Briefs · needs you", tone: "warn", href: "/briefs" },
+  { key: "briefs", label: "Briefs", tone: "accent" },
   { key: "in_progress", label: "Writing & grading", tone: "accent" },
   { key: "review", label: "Auto-review & boost", tone: "accent" },
   { key: "scheduled", label: "Ready to publish", tone: "success", href: "/ready" },

@@ -34,14 +34,11 @@ export default async function PipelinePage() {
     <Shell>
       <PageHeader
         title="Content pipeline"
-        subtitle="Every piece, left to right, in one screen. You act where it says “needs you.”"
+        subtitle="Every piece, left to right, in one screen. The engine moves them automatically — idea to Ready — with no manual gates."
       />
 
       {/* Color legend — what the colors mean, once. */}
       <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[var(--muted)]">
-        <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full bg-[var(--warn)]" /> needs you
-        </span>
         <span className="flex items-center gap-1.5">
           <span className="h-2.5 w-2.5 rounded-full bg-[var(--accent)]" /> engine working / queued
         </span>

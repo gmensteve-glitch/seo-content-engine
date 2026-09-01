@@ -5,8 +5,6 @@ import { PageHeader, Card, StatTile } from "@/components/ui";
 import {
   getBusiness,
   getKpis,
-  getPendingBriefs,
-  getReadyToSchedule,
   getPipeline,
   getConnectors,
   getPipelineHealth,
@@ -18,9 +16,7 @@ import {
 } from "@/lib/data/repo";
 import { setQualityThresholdAction, boostAllNearMissesAction } from "@/app/actions";
 import {
-  ClipboardCheck,
   Sparkles,
-  CalendarPlus,
   ArrowRight,
   CheckCircle2,
   FileText,
@@ -43,12 +39,10 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
-  const [biz, kpis, briefs, ready, pipeline, connectors, health, goal, cost, seo, movers, geo] =
+  const [biz, kpis, pipeline, connectors, health, goal, cost, seo, movers, geo] =
     await Promise.all([
       getBusiness(),
       getKpis(),
-      getPendingBriefs(),
-      getReadyToSchedule(),
       getPipeline(),
       getConnectors(),
       getPipelineHealth(),
@@ -73,28 +67,20 @@ export default async function OverviewPage() {
 
   const funnel = [
     { label: "Ideas", value: health.ideas, href: "/ideas" },
-    { label: "Briefs", value: health.briefs, href: "/briefs" },
     { label: "Writing", value: health.writing, href: "/pipeline" },
     { label: "Ready", value: health.ready, href: "/ready" },
     { label: "Live", value: health.published, href: "/performance" },
   ];
 
-  // The real daily to-dos, in priority order.
+  // The daily to-do under full-auto: review what the engine finished and publish
+  // the good ones. Everything upstream (idea → brief → write → grade) is automatic.
   const todos = [
     {
-      show: briefs.length > 0,
-      icon: <ClipboardCheck size={16} />,
-      label: `${briefs.length} brief${briefs.length === 1 ? "" : "s"} to approve`,
-      hint: "Your one gate — approve to start the engine",
-      href: "/briefs",
-      tone: "warn" as const,
-    },
-    {
-      show: ready.length > 0,
-      icon: <CalendarPlus size={16} />,
-      label: `${ready.length} piece${ready.length === 1 ? "" : "s"} ready to schedule`,
-      hint: "Drop them on the calendar to auto-publish",
-      href: "/calendar",
+      show: health.ready > 0,
+      icon: <CheckCircle2 size={16} />,
+      label: `${health.ready} piece${health.ready === 1 ? "" : "s"} ready to publish`,
+      hint: "Open Ready, skim each, and push the good ones to Shopify",
+      href: "/ready",
       tone: "accent" as const,
     },
   ].filter((t) => t.show);
@@ -257,13 +243,7 @@ export default async function OverviewPage() {
                     className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-2.5 hover:bg-[var(--surface-2)]"
                   >
                     <span className="flex items-center gap-2.5 text-[13px]">
-                      <span
-                        className={
-                          t.tone === "warn" ? "text-[var(--warn)]" : "text-[var(--accent)]"
-                        }
-                      >
-                        {t.icon}
-                      </span>
+                      <span className="text-[var(--accent)]">{t.icon}</span>
                       {t.label}
                     </span>
                     <ArrowRight size={14} className="text-[var(--subtle)]" />
@@ -292,7 +272,7 @@ export default async function OverviewPage() {
           value={inProgress}
           icon={inProgress > 0 ? <Loader2 size={13} /> : undefined}
         />
-        <StatTile label="Ready to publish" value={ready.length} />
+        <StatTile label="Ready to publish" value={health.ready} />
       </div>
 
       {/* 2b) Pipeline health — watch the background engine move */}

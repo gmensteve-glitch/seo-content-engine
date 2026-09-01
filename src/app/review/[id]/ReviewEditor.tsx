@@ -405,10 +405,10 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   return (
     <div>
       <Link
-        href={passed ? "/ready" : "/review"}
+        href="/ready"
         className="mb-3 inline-flex items-center gap-1 text-[12px] text-[var(--muted)] hover:text-[var(--text)]"
       >
-        <ArrowLeft size={13} /> {passed ? "All ready pieces" : "All near-misses"}
+        <ArrowLeft size={13} /> All ready pieces
       </Link>
 
       {/* Score header (Quality-style) */}
