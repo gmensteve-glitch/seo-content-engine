@@ -683,6 +683,36 @@ async function readyTargets(businessId: string): Promise<{ LOCAL: number; EVERGR
   return { LOCAL: localTarget, EVERGREEN: TOTAL_READY_TARGET - localTarget };
 }
 
+/** Pieces already heading to Ready (PASSED + unscheduled + in-flight), by kind. */
+async function activeReadyByKind(businessId: string): Promise<{ LOCAL: number; EVERGREEN: number }> {
+  const active = await prisma.draft.findMany({
+    where: {
+      businessId,
+      OR: [
+        { status: "PASSED", scheduledFor: null, rejectedAt: null },
+        { status: { in: [...INFLIGHT_STATUSES] } },
+      ],
+    },
+    select: { brief: { select: { idea: { select: { kind: true } } } } },
+  });
+  const LOCAL = active.filter((d) => d.brief?.idea?.kind === "LOCAL").length;
+  return { LOCAL, EVERGREEN: active.length - LOCAL };
+}
+
+/** Free per-kind slots in the Ready stack (target − active), clamped at 0. Both
+ *  auto-advance and auto-refresh feed Ready, so they share this cap — that's what
+ *  stops the stack overfilling past 5+5 or skewing the local/evergreen balance. */
+async function readyCapacity(businessId: string): Promise<{ LOCAL: number; EVERGREEN: number }> {
+  const [targets, active] = await Promise.all([
+    readyTargets(businessId),
+    activeReadyByKind(businessId),
+  ]);
+  return {
+    LOCAL: Math.max(0, targets.LOCAL - active.LOCAL),
+    EVERGREEN: Math.max(0, targets.EVERGREEN - active.EVERGREEN),
+  };
+}
+
 /**
  * Auto-advance one business so each category (LOCAL/EVERGREEN) fills to its
  * target in Ready. Counts already-ready + in-flight per kind, and only builds
@@ -1497,8 +1527,14 @@ export async function refreshPublishedPost(draftId: string): Promise<{ refreshed
 }
 
 /** Pick published posts most worth refreshing: decaying (GSC) first, then the
- *  oldest ones not refreshed within the cooldown. Returns draft ids, best-first. */
-async function refreshCandidates(businessId: string, max: number): Promise<string[]> {
+ *  oldest ones not refreshed within the cooldown. Only picks within the free
+ *  per-kind Ready slots in `room`, so a refresh never overfills or unbalances the
+ *  stack. Returns draft ids, best-first. */
+async function refreshCandidates(
+  businessId: string,
+  room: { LOCAL: number; EVERGREEN: number },
+): Promise<string[]> {
+  if (room.LOCAL <= 0 && room.EVERGREEN <= 0) return [];
   const cutoff = new Date(Date.now() - REFRESH_COOLDOWN_DAYS * 86_400_000);
   const published = await prisma.draft.findMany({
     where: {
@@ -1507,7 +1543,11 @@ async function refreshCandidates(businessId: string, max: number): Promise<strin
       page: { isNot: null },
       OR: [{ refreshedAt: null }, { refreshedAt: { lt: cutoff } }],
     },
-    select: { id: true, page: { select: { url: true } } },
+    select: {
+      id: true,
+      page: { select: { url: true } },
+      brief: { select: { idea: { select: { kind: true } } } },
+    },
     orderBy: { page: { publishedAt: "asc" } }, // oldest first
     take: 50,
   });
@@ -1519,21 +1559,42 @@ async function refreshCandidates(businessId: string, max: number): Promise<strin
     if (dp) decayUrls = new Set(dp.map((d) => normalizeUrl(d.page)));
   }
   const rank = (u: string | undefined) => (u && decayUrls.has(normalizeUrl(u)) ? 0 : 1);
-  return [...published]
-    .sort((a, b) => rank(a.page?.url) - rank(b.page?.url))
-    .slice(0, max)
-    .map((d) => d.id);
+  const sorted = [...published].sort((a, b) => rank(a.page?.url) - rank(b.page?.url));
+
+  const left = { ...room };
+  const picked: string[] = [];
+  for (const d of sorted) {
+    const k = d.brief?.idea?.kind === "LOCAL" ? "LOCAL" : "EVERGREEN";
+    if (left[k] <= 0) continue; // no room for this kind — keeps the balance right
+    picked.push(d.id);
+    left[k]--;
+    if (left.LOCAL <= 0 && left.EVERGREEN <= 0) break;
+  }
+  return picked;
 }
 
-/** Refresh up to `max` decaying/stale posts for a business into Ready. */
+/** Refresh up to `max` decaying/stale posts into Ready — but never more than the
+ *  free per-kind Ready slots, so refreshed posts don't push the stack past its
+ *  5+5 target or skew the local/evergreen balance. */
 export async function autoRefreshBusiness(businessId: string, max = 2): Promise<number> {
   requireDb();
-  const ids = await refreshCandidates(businessId, max);
+  const capacity = await readyCapacity(businessId);
+  const room = {
+    LOCAL: Math.min(capacity.LOCAL, max),
+    EVERGREEN: Math.min(capacity.EVERGREEN, max),
+  };
+  let budget = Math.min(max, room.LOCAL + room.EVERGREEN);
+  if (budget <= 0) return 0; // Ready already full — don't overfill it
+  const ids = await refreshCandidates(businessId, room);
   let done = 0;
   for (const id of ids) {
+    if (budget <= 0) break;
     try {
       const { refreshed } = await refreshPublishedPost(id);
-      if (refreshed) done++;
+      if (refreshed) {
+        done++;
+        budget--;
+      }
     } catch (e) {
       console.error("[refresh] failed for", id, e instanceof Error ? e.message : e);
     }
