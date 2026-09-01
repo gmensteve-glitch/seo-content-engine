@@ -16,8 +16,8 @@ import {
   LogOut,
   Search,
 } from "lucide-react";
-import { BUSINESSES } from "@/lib/mock/seed";
 import { RecommendButton } from "@/components/recommend-button";
+import { BusinessSwitcher } from "@/components/business-switcher";
 
 // Grouped nav — chunked into a few labelled sections so the sidebar reads as
 // "what do I do / what do I make / what do I check / setup" instead of a flat
@@ -61,29 +61,18 @@ const NAV_GROUPS: {
 
 export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const biz = BUSINESSES[0];
 
   return (
     <div className="flex h-screen flex-col">
       {/* Top bar */}
       <header className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface-1)] px-4 py-2.5">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2.5 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-2)] px-2.5 py-1.5">
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--accent-bg)] text-xs font-medium text-[var(--accent)]">
-              {biz.short}
-            </span>
-            <span>
-              <span className="block text-[13px] font-medium leading-tight">{biz.name}</span>
-              <span className="block text-[10px] capitalize text-[var(--subtle)]">
-                {biz.cms} · {biz.status}
-              </span>
-            </span>
-          </div>
+          <BusinessSwitcher />
         </div>
         <div className="flex items-center gap-2">
           <RecommendButton />
           <a
-            href={`https://search.google.com/search-console?resource_id=sc-domain%3A${encodeURIComponent(biz.domain)}`}
+            href="https://search.google.com/search-console"
             target="_blank"
             rel="noreferrer"
             title="Open Google Search Console"

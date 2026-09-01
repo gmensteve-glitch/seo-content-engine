@@ -881,6 +881,36 @@ export async function removeConnector(businessId: string, type: ConnectorType): 
   await prisma.connector.deleteMany({ where: { businessId, type } });
 }
 
+// ── Businesses (multi-store) ─────────────────────────────────
+
+const DEFAULT_PILLARS: { name: string; description: string }[] = [
+  { name: "Immediate steps", description: "What to do in the first hours/days after a death." },
+  { name: "Costs", description: "Casket, funeral, cremation and burial pricing." },
+  { name: "Buying guide", description: "How to choose caskets — size, material, value." },
+  { name: "Local resources", description: "City/state funeral homes, benefits, regulations." },
+  { name: "Eco options", description: "Green burial, biodegradable caskets." },
+];
+
+/** Create a new store/business (Shopify) with default pillars. Returns its id. */
+export async function createBusiness(input: { name: string; domain: string }): Promise<string> {
+  requireDb();
+  const name = input.name.trim();
+  const domain = input.domain.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  if (!name) throw new Error("A store name is required.");
+  if (!domain) throw new Error("A domain is required.");
+  const biz = await prisma.business.create({
+    data: {
+      name,
+      domain,
+      cmsPlatform: "SHOPIFY",
+      status: "ACTIVE",
+      pillars: { create: DEFAULT_PILLARS },
+    },
+    select: { id: true },
+  });
+  return biz.id;
+}
+
 // ── SEO recommendations inbox ────────────────────────────────
 
 /** Submit an SEO recommendation (a note + optional screenshot) for review. */

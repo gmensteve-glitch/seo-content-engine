@@ -1,22 +1,18 @@
 import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
-import { getBusiness, getScoreCalibration } from "@/lib/data/repo";
+import { getBusiness, getScoreCalibration, getPillars } from "@/lib/data/repo";
 import { setLocalRatioAction, setQualityThresholdAction } from "@/app/actions";
 import { SliderForm } from "@/app/ideas/SliderForm";
 import { Gauge, SlidersHorizontal } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
-const PILLARS = [
-  { name: "Immediate steps", desc: "What to do in the first hours/days after a death." },
-  { name: "Costs", desc: "Casket, funeral, cremation and burial pricing." },
-  { name: "Buying guide", desc: "How to choose caskets — size, material, value." },
-  { name: "Local resources", desc: "City/state funeral homes, benefits, regulations." },
-  { name: "Eco options", desc: "Green burial, biodegradable caskets." },
-];
-
 export default async function StrategyPage() {
-  const [business, calibration] = await Promise.all([getBusiness(), getScoreCalibration()]);
+  const [business, calibration, pillars] = await Promise.all([
+    getBusiness(),
+    getScoreCalibration(),
+    getPillars(),
+  ]);
   const localRatio = business.localRatio;
   const qualityThreshold = business.qualityThreshold;
 
@@ -112,7 +108,7 @@ export default async function StrategyPage() {
         Content pillars
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        {PILLARS.map((p) => (
+        {pillars.map((p) => (
           <Card key={p.name}>
             <div className="flex items-center gap-2">
               <span className="text-[14px] font-medium">{p.name}</span>

@@ -31,6 +31,7 @@ import type {
 } from "@/lib/data/types";
 import { fetchGscRows, strikingDistance, decayingPages } from "@/lib/connectors/gsc";
 import { isConnectable } from "@/lib/connectors/connect-fields";
+import { activeBizId } from "@/lib/active-business";
 import { gscEnabled, geoEnabled } from "@/lib/env";
 import {
   BUSINESSES,
@@ -83,13 +84,30 @@ export async function getBusinesses(): Promise<BusinessSummary[]> {
   return rows.map(toBusinessSummary);
 }
 
+const FALLBACK_PILLARS = [
+  { name: "Immediate steps", desc: "What to do in the first hours/days after a death." },
+  { name: "Costs", desc: "Casket, funeral, cremation and burial pricing." },
+  { name: "Buying guide", desc: "How to choose caskets — size, material, value." },
+  { name: "Local resources", desc: "City/state funeral homes, benefits, regulations." },
+  { name: "Eco options", desc: "Green burial, biodegradable caskets." },
+];
+
+/** The content pillars configured for a store (falls back to the defaults). */
+export async function getPillars(bizId?: string): Promise<{ name: string; desc: string }[]> {
+  bizId = bizId ?? (await activeBizId());
+  if (!hasDatabase) return FALLBACK_PILLARS;
+  const rows = await prisma.pillar
+    .findMany({ where: { businessId: bizId }, orderBy: { createdAt: "asc" } })
+    .catch(() => []);
+  return rows.length ? rows.map((p) => ({ name: p.name, desc: p.description ?? "" })) : FALLBACK_PILLARS;
+}
+
 export async function getBusiness(id?: string): Promise<BusinessSummary> {
   if (!hasDatabase) return BUSINESSES.find((b) => b.id === id) ?? BUSINESSES[0];
-  const row = id
-    ? await prisma.business.findUnique({ where: { id } })
-    : await prisma.business.findFirst({ orderBy: { createdAt: "asc" } });
-  const chosen =
-    row ?? (await prisma.business.findFirst({ orderBy: { createdAt: "asc" } }));
+  // No explicit id → the operator's active store (cookie), else the oldest.
+  const wanted = id ?? (await activeBizId());
+  const row = await prisma.business.findUnique({ where: { id: wanted } });
+  const chosen = row ?? (await prisma.business.findFirst({ orderBy: { createdAt: "asc" } }));
   // Fall back to mock if the DB has no businesses at all.
   return chosen ? toBusinessSummary(chosen) : BUSINESSES[0];
 }
@@ -99,7 +117,8 @@ export async function getBusiness(id?: string): Promise<BusinessSummary> {
 // ─────────────────────────────────────────────────────────────
 
 /** Live pipeline health: stage counts + whether the background engine is moving. */
-export async function getPipelineHealth(bizId = DEFAULT_BIZ): Promise<PipelineHealthVM> {
+export async function getPipelineHealth(bizId?: string): Promise<PipelineHealthVM> {
+  bizId = bizId ?? (await activeBizId());
   const empty: PipelineHealthVM = {
     ideas: 0, briefs: 0, writing: 0, ready: 0, failed: 0, published: 0, stuck: 0,
     lastActivityAt: null, engineHealthy: false, lastActivityLabel: "no activity yet",
@@ -161,7 +180,8 @@ export async function getPipelineHealth(bizId = DEFAULT_BIZ): Promise<PipelineHe
  * a threshold — so the bar reflects what actually works for this industry, not a
  * guessed number. (Sharpens further once GSC performance is wired in.)
  */
-export async function getScoreCalibration(bizId = DEFAULT_BIZ): Promise<ScoreCalibrationVM> {
+export async function getScoreCalibration(bizId?: string): Promise<ScoreCalibrationVM> {
+  bizId = bizId ?? (await activeBizId());
   const bestScore = (d: { grades: { overall: number }[] }) => d.grades[0]?.overall ?? 0;
   if (!hasDatabase) {
     return {
@@ -212,7 +232,8 @@ export async function getScoreCalibration(bizId = DEFAULT_BIZ): Promise<ScoreCal
  * and what single change gets you to 10 — lower the bar (and to what), or produce
  * more (supply-limited). Drives the Overview status + one-click Optimize.
  */
-export async function getGoalDiagnostics(bizId = DEFAULT_BIZ): Promise<GoalDiagnosticsVM> {
+export async function getGoalDiagnostics(bizId?: string): Promise<GoalDiagnosticsVM> {
+  bizId = bizId ?? (await activeBizId());
   const total = 10;
   const base = (bar: number, ratio: number): GoalDiagnosticsVM => {
     const localTarget = Math.round((total * ratio) / 100);
@@ -291,7 +312,8 @@ export async function getGoalDiagnostics(bizId = DEFAULT_BIZ): Promise<GoalDiagn
 
 /** Real per-blog cost, and cost broken down by score band — the actual $/quality
  *  curve from recorded token usage (replaces estimates). */
-export async function getCostSummary(bizId = DEFAULT_BIZ): Promise<CostSummaryVM> {
+export async function getCostSummary(bizId?: string): Promise<CostSummaryVM> {
+  bizId = bizId ?? (await activeBizId());
   const empty: CostSummaryVM = {
     count: 0, totalCents: 0, avgCents: null, todayCents: 0, todayCount: 0, byBand: [],
   };
@@ -393,7 +415,8 @@ export async function getSeoOpportunities(): Promise<SeoOpportunitiesVM> {
  * hasHistory:false until at least two snapshot days exist, so the UI can show a
  * "collecting data" state rather than an empty one.
  */
-export async function getKeywordMovers(bizId = DEFAULT_BIZ): Promise<MoversVM> {
+export async function getKeywordMovers(bizId?: string): Promise<MoversVM> {
+  bizId = bizId ?? (await activeBizId());
   const empty: MoversVM = { hasHistory: false, daysSpan: 0, climbers: [], droppers: [] };
   if (!hasDatabase) return empty;
 
@@ -456,7 +479,8 @@ export async function getKeywordMovers(bizId = DEFAULT_BIZ): Promise<MoversVM> {
  * opportunity list. connected:false until an answer-engine key is wired and a
  * check has run.
  */
-export async function getGeoVisibility(bizId = DEFAULT_BIZ): Promise<GeoVisibilityVM> {
+export async function getGeoVisibility(bizId?: string): Promise<GeoVisibilityVM> {
+  bizId = bizId ?? (await activeBizId());
   const keyConfigured = geoEnabled();
   const empty: GeoVisibilityVM = {
     keyConfigured, connected: false, tested: 0, citedCount: 0, mentionedCount: 0,
@@ -503,7 +527,8 @@ export async function getGeoVisibility(bizId = DEFAULT_BIZ): Promise<GeoVisibili
   };
 }
 
-export async function getKpis(bizId = DEFAULT_BIZ): Promise<Kpis> {
+export async function getKpis(bizId?: string): Promise<Kpis> {
+  bizId = bizId ?? (await activeBizId());
   if (!hasDatabase) return KPIS[bizId] ?? KPIS[DEFAULT_BIZ];
 
   const business = await prisma.business.findUnique({ where: { id: bizId } });
@@ -557,7 +582,8 @@ function pageFlag(
 
 const IN_PROGRESS_STATUSES = ["RESEARCHING", "DRAFTED", "GRADING", "REVISING"] as const;
 
-export async function getPipeline(bizId = DEFAULT_BIZ): Promise<PipelineCard[]> {
+export async function getPipeline(bizId?: string): Promise<PipelineCard[]> {
+  bizId = bizId ?? (await activeBizId());
   if (!hasDatabase) return PIPELINE[bizId] ?? [];
 
   const cards: PipelineCard[] = [];
@@ -660,7 +686,8 @@ export async function getPipeline(bizId = DEFAULT_BIZ): Promise<PipelineCard[]> 
 // Ideas box
 // ─────────────────────────────────────────────────────────────
 
-export async function getIdeas(bizId = DEFAULT_BIZ): Promise<IdeaVM[]> {
+export async function getIdeas(bizId?: string): Promise<IdeaVM[]> {
+  bizId = bizId ?? (await activeBizId());
   if (!hasDatabase) return IDEAS[bizId] ?? [];
   const ideas = await prisma.idea.findMany({
     where: { businessId: bizId, status: "PROPOSED" },
@@ -681,7 +708,8 @@ export async function getIdeas(bizId = DEFAULT_BIZ): Promise<IdeaVM[]> {
 // Briefs awaiting approval
 // ─────────────────────────────────────────────────────────────
 
-export async function getPendingBriefs(bizId = DEFAULT_BIZ): Promise<BriefVM[]> {
+export async function getPendingBriefs(bizId?: string): Promise<BriefVM[]> {
+  bizId = bizId ?? (await activeBizId());
   if (!hasDatabase) return BRIEFS[bizId] ?? [];
   const briefs = await prisma.brief.findMany({
     where: { businessId: bizId, status: "PENDING_APPROVAL" },
@@ -706,7 +734,8 @@ export async function getPendingBriefs(bizId = DEFAULT_BIZ): Promise<BriefVM[]> 
 
 type StoredDimension = { score: number; max?: number; note?: string };
 
-export async function getLatestScorecard(bizId = DEFAULT_BIZ): Promise<ScorecardVM> {
+export async function getLatestScorecard(bizId?: string): Promise<ScorecardVM> {
+  bizId = bizId ?? (await activeBizId());
   if (!hasDatabase) return SCORECARDS[bizId] ?? SCORECARDS[DEFAULT_BIZ];
 
   const business = await prisma.business.findUnique({ where: { id: bizId } });
@@ -761,7 +790,8 @@ export async function getLatestScorecard(bizId = DEFAULT_BIZ): Promise<Scorecard
 // Live pages (performance)
 // ─────────────────────────────────────────────────────────────
 
-export async function getLivePages(bizId = DEFAULT_BIZ): Promise<LivePageVM[]> {
+export async function getLivePages(bizId?: string): Promise<LivePageVM[]> {
+  bizId = bizId ?? (await activeBizId());
   if (!hasDatabase) return LIVE_PAGES[bizId] ?? [];
   const pages = await prisma.page.findMany({
     where: { businessId: bizId, publishedAt: { not: null } },
@@ -793,7 +823,8 @@ function latestGrade(grades: { overall: number }[]): number {
 
 /** The calendar's "ready to schedule" queue: reviewed pieces the operator moved
  *  out of Ready, now awaiting a date. (PASSED, no date yet, reviewed.) */
-export async function getReadyToSchedule(bizId = DEFAULT_BIZ): Promise<ReadyDraftVM[]> {
+export async function getReadyToSchedule(bizId?: string): Promise<ReadyDraftVM[]> {
+  bizId = bizId ?? (await activeBizId());
   if (!hasDatabase) return [];
   const drafts = await prisma.draft.findMany({
     where: { businessId: bizId, status: "PASSED", scheduledFor: null, reviewedAt: { not: null } },
@@ -814,7 +845,8 @@ export async function getReadyToSchedule(bizId = DEFAULT_BIZ): Promise<ReadyDraf
 }
 
 /** PASSED drafts that have a scheduledFor date — items placed on the calendar. */
-export async function getScheduledDrafts(bizId = DEFAULT_BIZ): Promise<ScheduledItemVM[]> {
+export async function getScheduledDrafts(bizId?: string): Promise<ScheduledItemVM[]> {
+  bizId = bizId ?? (await activeBizId());
   if (!hasDatabase) return [];
   const now = new Date();
   const drafts = await prisma.draft.findMany({
@@ -894,7 +926,8 @@ function toPolishVM(d: PolishRow, threshold: number): PolishDraftVM {
 /** Ready-to-review: PASSED pieces that have cleared the bar but haven't been
  *  reviewed+moved yet. They sit here with full scorecard + post for a final look
  *  before you move them to the calendar's ready-to-schedule queue. */
-export async function getReadyForReview(bizId = DEFAULT_BIZ): Promise<PolishDraftVM[]> {
+export async function getReadyForReview(bizId?: string): Promise<PolishDraftVM[]> {
+  bizId = bizId ?? (await activeBizId());
   if (!hasDatabase) return [];
   const business = await prisma.business.findUnique({ where: { id: bizId } });
   const threshold = business?.qualityThreshold ?? 85;
@@ -910,7 +943,8 @@ export async function getReadyForReview(bizId = DEFAULT_BIZ): Promise<PolishDraf
 }
 
 /** Near-miss drafts (FAILED) that need a human E-E-A-T pass before they can pass. */
-export async function getNeedsPolish(bizId = DEFAULT_BIZ): Promise<PolishDraftVM[]> {
+export async function getNeedsPolish(bizId?: string): Promise<PolishDraftVM[]> {
+  bizId = bizId ?? (await activeBizId());
   if (!hasDatabase) return [];
   const business = await prisma.business.findUnique({ where: { id: bizId } });
   const threshold = business?.qualityThreshold ?? 85;
@@ -940,7 +974,8 @@ export async function getPolishDraft(draftId: string): Promise<PolishDraftVM | n
 }
 
 /** Merged month-grid feed: scheduled (future) + published (past) entries. */
-export async function getCalendarEntries(bizId = DEFAULT_BIZ): Promise<CalendarEntryVM[]> {
+export async function getCalendarEntries(bizId?: string): Promise<CalendarEntryVM[]> {
+  bizId = bizId ?? (await activeBizId());
   if (!hasDatabase) return [];
   const now = new Date();
   const hhmm = (d: Date) =>
@@ -1003,7 +1038,8 @@ const CONNECTOR_ROSTER: {
   { type: "SLACK", label: "Slack", detail: "SEO recommendations → your channel" },
 ];
 
-export async function getConnectors(bizId = DEFAULT_BIZ): Promise<ConnectorVM[]> {
+export async function getConnectors(bizId?: string): Promise<ConnectorVM[]> {
+  bizId = bizId ?? (await activeBizId());
   if (!hasDatabase) {
     return (CONNECTORS[bizId] ?? []).map((c) => ({
       ...c,
@@ -1034,7 +1070,8 @@ export async function getConnectors(bizId = DEFAULT_BIZ): Promise<ConnectorVM[]>
 }
 
 /** SEO recommendations for a business — open first, then newest. */
-export async function getRecommendations(bizId = DEFAULT_BIZ): Promise<RecommendationVM[]> {
+export async function getRecommendations(bizId?: string): Promise<RecommendationVM[]> {
+  bizId = bizId ?? (await activeBizId());
   if (!hasDatabase) return [];
   const rows = await prisma.recommendation.findMany({
     where: { businessId: bizId },
