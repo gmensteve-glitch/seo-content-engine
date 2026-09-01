@@ -282,4 +282,9 @@ export interface ConnectorVM {
   label: string;
   status: "connected" | "disconnected" | "error";
   detail: string;
+  /** Credentials are stored in the DB (entered via the app), so they can be
+   *  edited/disconnected here. False = env-managed or not yet connected. */
+  managed: boolean;
+  /** True when this connector type can be connected from the app UI. */
+  connectable: boolean;
 }

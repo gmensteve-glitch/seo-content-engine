@@ -22,8 +22,12 @@ import {
   syncGeoCitations,
   autoRefreshBusiness,
   refreshPublishedPost,
+  saveConnector,
+  removeConnector,
 } from "@/lib/pipeline/service";
 import { getBusiness } from "@/lib/data/repo";
+import { CONNECTOR_SPECS, isConnectable } from "@/lib/connectors/connect-fields";
+import type { ConnectorType } from "@prisma/client";
 
 // Refresh a few decaying/stale published posts into Ready for re-review
 // (background — each is an LLM rewrite). Fire-and-forget.
@@ -78,6 +82,36 @@ export async function fixPublishedPostsAction(): Promise<void> {
   );
   revalidatePath("/ready");
   revalidatePath("/performance");
+}
+
+// ── Connectors (in-app plug-and-play) ────────────────────────
+
+/** Save a connector's credentials from the Connect modal, scoped to the current
+ *  business. Reads only the fields defined for that connector type. */
+export async function connectConnectorAction(formData: FormData): Promise<void> {
+  const type = String(formData.get("type"));
+  if (!isConnectable(type)) throw new Error(`Unknown or non-storable connector: ${type}`);
+  const spec = CONNECTOR_SPECS[type];
+  const config: Record<string, string> = {};
+  for (const f of spec.fields) {
+    const v = String(formData.get(f.name) ?? "").trim();
+    if (f.required && !v) throw new Error(`${f.label} is required`);
+    if (v) config[f.name] = v;
+  }
+  const bizId = (await getBusiness()).id;
+  await saveConnector(bizId, type as ConnectorType, config);
+  revalidatePath("/connectors");
+  revalidatePath("/");
+}
+
+/** Disconnect a connector (remove its stored credentials). */
+export async function disconnectConnectorAction(formData: FormData): Promise<void> {
+  const type = String(formData.get("type"));
+  if (!isConnectable(type)) return;
+  const bizId = (await getBusiness()).id;
+  await removeConnector(bizId, type as ConnectorType);
+  revalidatePath("/connectors");
+  revalidatePath("/");
 }
 
 export async function buildBriefAction(formData: FormData): Promise<void> {
@@ -137,7 +171,6 @@ export async function approveBriefAction(formData: FormData): Promise<void> {
   await approveBrief(String(formData.get("briefId")));
   revalidatePath("/briefs");
   revalidatePath("/pipeline");
-  revalidatePath("/quality");
   revalidatePath("/performance");
   revalidatePath("/");
 }
@@ -185,7 +218,6 @@ export async function publishNowAction(formData: FormData): Promise<void> {
   await publishNow(String(formData.get("draftId")), "published");
   revalidateCalendar();
   revalidatePath("/performance");
-  revalidatePath("/quality");
 }
 
 // The Review lane (auto-boost + highlight-edit) runs through /api/review/* so

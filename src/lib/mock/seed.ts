@@ -190,7 +190,7 @@ export const LIVE_PAGES: Record<string, LivePageVM[]> = {
   demo: [],
 };
 
-export const CONNECTORS: Record<string, ConnectorVM[]> = {
+export const CONNECTORS: Record<string, Omit<ConnectorVM, "managed" | "connectable">[]> = {
   trustedcaskets: [
     { type: "GSC", label: "Google Search Console", status: "connected", detail: "trustedcaskets.com · synced 2h ago" },
     { type: "DATAFORSEO", label: "DataForSEO", status: "connected", detail: "pay-as-you-go · keyword + SERP" },

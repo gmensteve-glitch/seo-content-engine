@@ -1,6 +1,7 @@
 import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
 import { getConnectors } from "@/lib/data/repo";
+import { ConnectorControls } from "@/components/connect-modal";
 import { CheckCircle2, Circle, AlertTriangle } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -38,11 +39,7 @@ export default async function ConnectorsPage() {
               >
                 {c.status}
               </Pill>
-              {c.status !== "connected" && (
-                <button className="rounded-md border border-[var(--border-strong)] px-2.5 py-1 text-[12px] hover:bg-[var(--surface-2)]">
-                  Connect
-                </button>
-              )}
+              <ConnectorControls connector={c} />
             </div>
           </Card>
         ))}

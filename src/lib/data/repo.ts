@@ -29,6 +29,7 @@ import type {
   GeoVisibilityVM,
 } from "@/lib/data/types";
 import { fetchGscRows, strikingDistance, decayingPages } from "@/lib/connectors/gsc";
+import { isConnectable } from "@/lib/connectors/connect-fields";
 import { gscEnabled, geoEnabled } from "@/lib/env";
 import {
   BUSINESSES,
@@ -1001,20 +1002,32 @@ const CONNECTOR_ROSTER: {
 ];
 
 export async function getConnectors(bizId = DEFAULT_BIZ): Promise<ConnectorVM[]> {
-  if (!hasDatabase) return CONNECTORS[bizId] ?? [];
+  if (!hasDatabase) {
+    return (CONNECTORS[bizId] ?? []).map((c) => ({
+      ...c,
+      managed: false,
+      connectable: isConnectable(c.type),
+    }));
+  }
 
   const rows = await prisma.connector.findMany({ where: { businessId: bizId } });
   const byType = new Map(rows.map((r) => [r.type, r.status]));
 
   return CONNECTOR_ROSTER.map((c) => {
+    // A stored DB row (entered via the in-app Connect flow) wins — that's the
+    // per-site credential. Otherwise fall back to an env-provided key.
+    const dbStatus = byType.get(c.type as never) as string | undefined;
     let status: ConnectorVM["status"] = "disconnected";
-    if (c.fromEnv) {
-      status = process.env[c.fromEnv] ? "connected" : "disconnected";
-    } else {
-      const dbStatus = byType.get(c.type as never);
-      if (dbStatus) status = dbStatus.toLowerCase() as ConnectorVM["status"];
-    }
-    return { type: c.type, label: c.label, status, detail: c.detail };
+    if (dbStatus) status = dbStatus.toLowerCase() as ConnectorVM["status"];
+    else if (c.fromEnv && process.env[c.fromEnv]) status = "connected";
+    return {
+      type: c.type,
+      label: c.label,
+      status,
+      detail: c.detail,
+      managed: Boolean(dbStatus),
+      connectable: isConnectable(c.type),
+    };
   });
 }
 

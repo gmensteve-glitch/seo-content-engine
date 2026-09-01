@@ -10,7 +10,6 @@ import {
   ClipboardCheck,
   Columns3,
   CheckCircle2,
-  Gauge,
   Sparkles,
   LineChart,
   MapPin,
@@ -51,7 +50,6 @@ const NAV_GROUPS: {
   {
     header: "Measure",
     items: [
-      { href: "/quality", label: "Quality", icon: Gauge },
       { href: "/performance", label: "Performance", icon: LineChart },
       { href: "/geo", label: "Geo", icon: MapPin },
     ],

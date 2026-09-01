@@ -46,7 +46,8 @@ import type { StalePostVM } from "@/lib/data/types";
 import { markdownToHtml } from "@/lib/cms/markdown";
 import { sanitizeLinks } from "@/lib/cms/links";
 import { preflightPublish, metaIssues } from "@/lib/cms/preflight";
-import { decryptJson } from "@/lib/crypto/secrets";
+import { decryptJson, encryptJson } from "@/lib/crypto/secrets";
+import type { ConnectorType } from "@prisma/client";
 
 function requireDb() {
   if (!hasDatabase) {
@@ -810,6 +811,36 @@ export interface PublishedBlog {
   title: string;
   url: string;
   updatedAt: string;
+}
+
+/**
+ * Save a connector's credentials for a business from the in-app Connect flow:
+ * encrypt the config and upsert the Connector row as CONNECTED. Enables true
+ * plug-and-play — e.g. point the engine at a new Shopify store from the UI, no
+ * env var or redeploy. Requires CONNECTOR_ENCRYPTION_KEY (encryptionEnabled).
+ */
+export async function saveConnector(
+  businessId: string,
+  type: ConnectorType,
+  config: Record<string, unknown>,
+): Promise<void> {
+  requireDb();
+  if (!encryptionEnabled()) {
+    throw new Error("Encryption key not configured — set CONNECTOR_ENCRYPTION_KEY to store credentials.");
+  }
+  const configEnc = encryptJson(config);
+  await prisma.connector.upsert({
+    where: { businessId_type: { businessId, type } },
+    create: { businessId, type, configEnc, status: "CONNECTED", lastSyncAt: new Date() },
+    update: { configEnc, status: "CONNECTED", lastSyncAt: new Date() },
+  });
+}
+
+/** Remove a connector's stored credentials (Disconnect). Deletes the row so any
+ *  env-based fallback resumes. No-op if there's no stored connector. */
+export async function removeConnector(businessId: string, type: ConnectorType): Promise<void> {
+  requireDb();
+  await prisma.connector.deleteMany({ where: { businessId, type } });
 }
 
 /** List every post on the business's live blog (straight from the CMS). */
