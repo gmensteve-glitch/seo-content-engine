@@ -1,16 +1,10 @@
+import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { PageHeader, Pill } from "@/components/ui";
-import { getIdeas, getBusiness, getScoreCalibration } from "@/lib/data/repo";
+import { getIdeas, getBusiness } from "@/lib/data/repo";
 import type { IdeaVM } from "@/lib/data/types";
-import {
-  buildBriefAction,
-  dismissIdeaAction,
-  generateIdeasAction,
-  setLocalRatioAction,
-  setQualityThresholdAction,
-} from "@/app/actions";
-import { Sparkles, FileText, X, Tag, MapPin, BookOpen, Gauge } from "lucide-react";
-import { SliderForm } from "./SliderForm";
+import { buildBriefAction, dismissIdeaAction, generateIdeasAction } from "@/app/actions";
+import { Sparkles, FileText, X, Tag, MapPin, BookOpen, SlidersHorizontal } from "lucide-react";
 import { SubmitButton } from "@/components/submit-button";
 
 export const dynamic = "force-dynamic";
@@ -115,14 +109,8 @@ function IdeaColumn({
 }
 
 export default async function IdeasPage() {
-  const [ideas, business, calibration] = await Promise.all([
-    getIdeas(),
-    getBusiness(),
-    getScoreCalibration(),
-  ]);
+  const [ideas, business] = await Promise.all([getIdeas(), getBusiness()]);
   const localRatio = business.localRatio;
-  const qualityThreshold = business.qualityThreshold;
-  const localCount = ideas.filter((i) => i.kind === "LOCAL").length;
 
   return (
     <Shell>
@@ -138,84 +126,17 @@ export default async function IdeasPage() {
         </form>
       </div>
 
-      {/* Content mix — local vs evergreen ratio that steers the whole pipeline */}
-      <div className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4">
-        <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--subtle)]">
-          Content mix
-          <span className="ml-auto font-normal normal-case tracking-normal text-[11px] text-[var(--muted)]">
-            steers idea generation + auto-advance
-          </span>
-        </div>
-        <SliderForm
-          action={setLocalRatioAction}
-          name="localRatio"
-          min={0}
-          max={100}
-          step={5}
-          initial={localRatio}
-          variant="mix"
-          saveLabel="Save mix"
-        />
-        <p className="mt-2 text-[11px] text-[var(--muted)]">
-          New ideas are generated to this split, and the pipeline advances whichever kind is behind
-          target. In the box now: {localCount} local · {ideas.length - localCount} evergreen.
-        </p>
-      </div>
-
-      {/* Quality bar — the score a piece must hit to reach Ready */}
-      <div className="mb-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4">
-        <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--subtle)]">
-          <Gauge size={13} /> Quality bar
-          <span className="ml-auto font-normal normal-case tracking-normal text-[11px] text-[var(--muted)]">
-            min score to reach Ready
-          </span>
-        </div>
-        <SliderForm
-          action={setQualityThresholdAction}
-          name="threshold"
-          min={50}
-          max={95}
-          step={1}
-          initial={qualityThreshold}
-          variant="threshold"
-          saveLabel="Save bar"
-        />
-        <p className="mt-2 text-[11px] text-[var(--muted)]">
-          Lower = more pieces reach Ready (you catch weaker ones), higher = only near-perfect
-          pieces get through. You picked volume-first — try 70.
-        </p>
-
-        {/* Calibration — learns the "good enough" bar from your own decisions */}
-        <div className="mt-3 rounded-lg bg-[var(--surface-2)] px-3 py-2.5">
-          <div className="text-[11px] font-medium text-[var(--muted)]">
-            📈 Calibration — what&apos;s actually working
-          </div>
-          {calibration.acceptedCount > 0 || calibration.rejectedCount > 0 ? (
-            <div className="mt-1 text-[11.5px] text-[var(--text)]">
-              You&apos;ve accepted <b>{calibration.acceptedCount}</b>
-              {calibration.acceptedAvg !== null && ` (avg ${calibration.acceptedAvg}, low ${calibration.acceptedMin})`} and
-              rejected <b>{calibration.rejectedCount}</b>
-              {calibration.rejectedAvg !== null && ` (avg ${calibration.rejectedAvg})`}.
-              {calibration.recommended !== null && (
-                <>
-                  {" "}
-                  Suggested bar: <b className="text-[var(--success)]">{calibration.recommended}</b>.
-                  {calibration.recommended !== qualityThreshold && (
-                    <form action={setQualityThresholdAction} className="mt-1.5 inline-block">
-                      <input type="hidden" name="threshold" value={calibration.recommended} />
-                      <button className="rounded-md bg-[var(--success-bg)] px-2 py-1 text-[11px] font-medium text-[var(--success)]">
-                        Apply {calibration.recommended}
-                      </button>
-                    </form>
-                  )}
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="mt-1 text-[11.5px] text-[var(--muted)]">{calibration.note}</div>
-          )}
-        </div>
-      </div>
+      {/* Content mix — read-only summary; adjust it (and the quality bar) on Strategy */}
+      <Link
+        href="/strategy"
+        className="mb-4 flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-4 py-2.5 text-[12px] hover:bg-[var(--surface-2)]"
+      >
+        <SlidersHorizontal size={13} className="text-[var(--accent)]" />
+        <span className="text-[var(--muted)]">
+          Target mix: <b className="text-[var(--text)]">{localRatio}% local · {100 - localRatio}% evergreen</b>
+        </span>
+        <span className="ml-auto text-[11px] text-[var(--accent)]">Adjust in Strategy →</span>
+      </Link>
 
       {/* Color legend */}
       <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[var(--muted)]">

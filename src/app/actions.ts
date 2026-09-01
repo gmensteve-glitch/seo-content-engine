@@ -193,6 +193,7 @@ export async function setLocalRatioAction(formData: FormData): Promise<void> {
   const bizFromForm = formData.get("businessId");
   const bizId = bizFromForm ? String(bizFromForm) : (await getBusiness()).id;
   if (Number.isFinite(ratio)) await setLocalRatio(bizId, ratio);
+  revalidatePath("/strategy");
   revalidatePath("/ideas");
   revalidatePath("/");
 }
@@ -203,6 +204,7 @@ export async function setQualityThresholdAction(formData: FormData): Promise<voi
   const bizFromForm = formData.get("businessId");
   const bizId = bizFromForm ? String(bizFromForm) : (await getBusiness()).id;
   if (Number.isFinite(threshold)) await setQualityThreshold(bizId, threshold);
+  revalidatePath("/strategy");
   revalidatePath("/ideas");
   revalidatePath("/");
 }
