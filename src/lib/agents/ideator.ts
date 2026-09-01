@@ -77,8 +77,11 @@ Rules for every idea:
 - Ground every idea in the business profile. Never invent facts about the business.
 
 Each idea is either LOCAL or EVERGREEN — set "kind" accordingly:
-- LOCAL = geo-targeted, high commercial intent, tied to a specific US city, metro, or state (e.g. "Caskets in San Diego: delivery times & which funeral homes accept them", "Texas casket delivery & burial laws"). Great local ideas answer a buyer's real question about THAT place — delivery speed to the area, which local funeral homes accept online caskets, state/city rules, local cemeteries. Never a thin "we ship to [City]" template; each must have genuine local substance.
-  PRIORITIZE THE MOST POPULOUS US CITIES/METROS FIRST — more people means more search demand. Work down the population list (New York, Los Angeles, Chicago, Houston, Phoenix, Philadelphia, San Antonio, San Diego, Dallas, Austin, San Jose, Fort Worth, Jacksonville, Columbus, Charlotte, Indianapolis, San Francisco, Seattle, Denver, Nashville, Oklahoma City, Boston, Las Vegas, Detroit, Memphis, Atlanta, Miami, and other large metros), always skipping any city/state already in the existing-content list. Only drop to smaller cities once the big ones are covered.
+- LOCAL = geo-targeted, high commercial intent, tied to a specific US city, metro, or state. FAVOR THE TWO PROVEN-WINNING ANGLES (they rank AND get cited by AI answer engines):
+    1. STATE LAW / DELIVERY: "Casket Delivery & Burial Laws in {State}: What Families Need to Know" — answers "can I buy my own casket in {State}, and will a funeral home accept it?" Anchored in the FTC Funeral Rule (federal, real) plus any state specifics. High trust, very quotable.
+    2. CITY FUNERAL HOMES: "Funeral Homes in {City} That Accept Caskets You Buy Online" — answers the buyer's exact commercial question for that metro.
+  Also fine: "Can you buy your own casket in {City/State}?", delivery speed to a metro, local cemeteries — always with genuine local substance. Never a thin "we ship to [City]" template. AVOID pure dictionary/definition topics (e.g. "what is a mortuary") — we can't out-cite Wikipedia and no buyer searches them.
+  PRIORITIZE THE MOST POPULOUS US CITIES/METROS AND STATES FIRST — more people means more search demand. Work down the population list (New York, Los Angeles, Chicago, Houston, Phoenix, Philadelphia, San Antonio, San Diego, Dallas, Austin, San Jose, Fort Worth, Jacksonville, Columbus, Charlotte, Indianapolis, San Francisco, Seattle, Denver, Nashville, Oklahoma City, Boston, Las Vegas, Detroit, Memphis, Atlanta, Miami, and other large metros), always skipping any city/state already in the existing-content list. Only drop to smaller cities once the big ones are covered.
 - EVERGREEN = informational/authority content not tied to a place ("How to choose a casket", "What is a green burial?").`;
 
 /** Deterministic offline ideas, derived from pillars. Clearly labeled. */
@@ -98,20 +101,44 @@ function offlineIdeas(ctx: IdeationContext): IdeaProposal[] {
     "Philadelphia", "San Antonio", "San Diego", "Dallas", "Austin",
     "San Jose", "Jacksonville", "Fort Worth", "Columbus", "Charlotte",
   ];
+  // Most-populous states — for the state-law delivery angle.
+  const STATES = [
+    "California", "Texas", "Florida", "New York", "Pennsylvania",
+    "Illinois", "Ohio", "Georgia", "North Carolina", "Michigan",
+    "New Jersey", "Virginia", "Washington", "Arizona", "Tennessee",
+  ];
+  // The two winning local angles — commercial + AEO-quotable. Interleaved so the
+  // local mix covers both the state-law question and the city buyer question.
+  const localIdeas: { title: string; kw: string }[] = [];
+  const n = Math.max(CITIES.length, STATES.length);
+  for (let k = 0; k < n; k++) {
+    if (STATES[k]) {
+      localIdeas.push({
+        title: `Casket Delivery & Burial Laws in ${STATES[k]}: What Families Need to Know`,
+        kw: `${STATES[k].toLowerCase()} casket delivery burial laws`,
+      });
+    }
+    if (CITIES[k]) {
+      localIdeas.push({
+        title: `Funeral Homes in ${CITIES[k]} That Accept Caskets You Buy Online`,
+        kw: `funeral homes in ${CITIES[k].toLowerCase()} that accept caskets you buy online`,
+      });
+    }
+  }
+
   const have = new Set(ctx.existingTitles.map((t) => t.toLowerCase()));
   const out: IdeaProposal[] = [];
   const wantLocal = ctx.targetLocal ?? 0;
 
   // Local ideas first (up to the target), then evergreen from pillars.
-  for (const city of CITIES) {
+  for (const idea of localIdeas) {
     if (out.filter((o) => o.kind === "LOCAL").length >= wantLocal) break;
-    const title = `Caskets in ${city}: delivery times & which funeral homes accept them`;
-    if (have.has(title.toLowerCase())) continue;
+    if (have.has(idea.title.toLowerCase())) continue;
     out.push({
-      title,
+      title: idea.title,
       pillar: pillars[0],
-      targetKeyword: `caskets in ${city.toLowerCase()}`,
-      score: 62,
+      targetKeyword: idea.kw,
+      score: 64,
       rationale: NOTE,
       kind: "LOCAL",
     });

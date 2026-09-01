@@ -41,15 +41,34 @@ TONE — warm and personal: you're talking to a grieving family, not writing a s
 
 Write in the brand voice provided.`;
 
+// Extra guidance for LOCAL (geo-targeted) pages. Nationwide shipping means the
+// win is being the CITED local authority — so lead with the place-named, legally
+// specific answer an AI will lift, and make the page unmistakably about that
+// place. This is our local-SEO + AEO edge.
+const LOCAL_GUIDANCE = `
+THIS IS A LOCAL (geo-targeted) PAGE — optimize hard for local SEO + AEO:
+- Name the specific city/metro AND its state in the H1, the Quick answer, the first sentence of the intro, and the meta-worthy opening. The reader (and the AI) must instantly know this page is about THAT place.
+- The Quick answer must be a self-contained, place-named, legally specific sentence an AI can quote whole. Template: "In {State}, families can buy a casket from any retailer and have it delivered to the funeral home — under the FTC Funeral Rule, the home cannot refuse it or charge a handling/'casket handling' fee." Adapt to the exact question, but always: name the place, state the rule, name the standard.
+- Cover the buyer's real local questions with a dedicated H2 each, each answered in a standalone quotable passage:
+  • The law: can you buy your own casket in {State}? What does the FTC Funeral Rule guarantee nationwide, and any {State}-specific rules? (Never invent a statute — cite the FTC Funeral Rule, which is federal and real; for state specifics, stay accurate or say to verify with the state funeral board.)
+  • Delivery to {City}: how caskets ship to that metro in general terms (never fabricate our exact process/timeline — keep it broad and say to confirm with us).
+  • Which local funeral homes accept a casket you bought online (explain the Funeral Rule requires them to, describe how to arrange it — do NOT assert a specific named home's fees/steps as fact).
+  • Local considerations: major cemeteries/metro-area norms, at a general, accurate level.
+- Link to authoritative sources for the legal points (the FTC Funeral Rule page on ftc.gov is ideal and real).
+- Include an FAQ with place-named questions ("Can I buy my own casket in {City}?", "Do {City} funeral homes have to accept a casket I bought online?") — these are prime local AI-answer real estate.
+- Use LocalBusiness/Article + FAQPage JSON-LD where the required schema allows, and reflect the served area accurately (we ship nationwide; we are not a physical funeral home in that city — never imply a local storefront).`;
+
 export async function writeDraft(
   brief: BriefSpec,
   brandVoice: string,
   houseRules = "",
+  opts: { local?: boolean } = {},
 ): Promise<string> {
   if (!aiEnabled()) return offlineDraft(brief, brandVoice);
 
   const rules = houseRules.trim() ? `\n\n${houseRules.trim()}\n` : "";
-  const prompt = `BRAND VOICE:\n${brandVoice}\n\nBRIEF:\nTitle: ${brief.title}\nTarget keyword: ${brief.targetKeyword}\nAngle / wedge: ${brief.angle}\nTarget length: ~${brief.wordTarget} words\nRequired schema: ${brief.requiredSchema.join(", ")}\nOutline:\n${brief.outline.map((s) => `- ${s}`).join("\n")}\nQuestions to answer:\n${brief.questions.map((q) => `- ${q}`).join("\n")}\nGap to fill (what competitors miss): ${brief.gap}\n\n${TEMPLATE_GUIDANCE}${rules}`;
+  const local = opts.local ? `\n${LOCAL_GUIDANCE}\n` : "";
+  const prompt = `BRAND VOICE:\n${brandVoice}\n\nBRIEF:\nTitle: ${brief.title}\nTarget keyword: ${brief.targetKeyword}\nAngle / wedge: ${brief.angle}\nTarget length: ~${brief.wordTarget} words\nRequired schema: ${brief.requiredSchema.join(", ")}\nOutline:\n${brief.outline.map((s) => `- ${s}`).join("\n")}\nQuestions to answer:\n${brief.questions.map((q) => `- ${q}`).join("\n")}\nGap to fill (what competitors miss): ${brief.gap}\n\n${TEMPLATE_GUIDANCE}${local}${rules}`;
 
   return completeText({ model: MODELS.writer, prompt, maxTokens: 20000 });
 }

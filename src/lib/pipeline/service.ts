@@ -1270,7 +1270,9 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
   // blog feedback are injected so past corrections shape every new blog.
   await prisma.draft.update({ where: { id: draft.id }, data: { status: "DRAFTED" } });
   const houseRules = await buildContentGuidance(brief.businessId);
-  const rawBody = await writeDraft(spec, brandVoice, houseRules);
+  const rawBody = await writeDraft(spec, brandVoice, houseRules, {
+    local: brief.idea.kind === "LOCAL",
+  });
   finalizeCtx.metaDescription = deriveMetaDescription(rawBody, draft.title);
   const body = finalizeDraftBody(rawBody, finalizeCtx);
   draft = await prisma.draft.update({
