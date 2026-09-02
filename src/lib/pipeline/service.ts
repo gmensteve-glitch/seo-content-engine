@@ -925,6 +925,9 @@ export async function cloneBusinessSetup(sourceId: string, targetId: string): Pr
     include: { pillars: { orderBy: { createdAt: "asc" } } },
   });
   if (!source) throw new Error("Source store not found.");
+  if (!source.profileMd?.trim()) {
+    throw new Error(`${source.name} has no brand profile to copy yet — generate one first.`);
+  }
   const target = await prisma.business.findUnique({
     where: { id: targetId },
     include: { pillars: { select: { name: true } } },

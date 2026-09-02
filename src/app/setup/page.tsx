@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
-import { getOnboardingStatus, getBusinesses } from "@/lib/data/repo";
+import { getOnboardingStatus, getCloneSources } from "@/lib/data/repo";
 import { runIntakeAction, cloneSetupAction, seedIdeasAction } from "@/app/actions";
 import { SubmitButton } from "@/components/submit-button";
 import {
@@ -59,8 +59,8 @@ function StepShell({
 }
 
 export default async function SetupPage() {
-  const [s, businesses] = await Promise.all([getOnboardingStatus(), getBusinesses()]);
-  const others = businesses.filter((b) => b.id !== s.businessId);
+  const [s, sources] = await Promise.all([getOnboardingStatus(), getCloneSources()]);
+  const others = sources.filter((b) => b.id !== s.businessId);
   const hasContent = s.ideas + s.writing + s.ready + s.published > 0;
 
   const steps = [s.hasProfile, s.shopifyConnected, s.gscConnected, hasContent];

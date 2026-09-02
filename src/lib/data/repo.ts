@@ -93,6 +93,19 @@ const FALLBACK_PILLARS = [
   { name: "Eco options", desc: "Green burial, biodegradable caskets." },
 ];
 
+/** Stores that already have a brand profile — valid sources for "copy setup". */
+export async function getCloneSources(): Promise<{ id: string; name: string }[]> {
+  if (!hasDatabase) return [];
+  const rows = await prisma.business
+    .findMany({
+      where: { profileMd: { not: null } },
+      select: { id: true, name: true, profileMd: true },
+      orderBy: { createdAt: "asc" },
+    })
+    .catch(() => []);
+  return rows.filter((r) => (r.profileMd ?? "").trim().length > 0).map((r) => ({ id: r.id, name: r.name }));
+}
+
 /** Live onboarding state for a store — powers the guided setup checklist. */
 export async function getOnboardingStatus(bizId?: string): Promise<OnboardingStatusVM> {
   bizId = bizId ?? (await activeBizId());
