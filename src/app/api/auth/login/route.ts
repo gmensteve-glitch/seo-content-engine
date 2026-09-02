@@ -1,6 +1,8 @@
-// Password login. Compares the submitted password to DASHBOARD_PASSWORD and, on
-// success, sets the HttpOnly auth cookie (value = DASHBOARD_TOKEN) the middleware
-// checks. Both are server-only secrets, never exposed to the client.
+// Password login. DASHBOARD_PASSWORD may hold ONE password or a comma-separated
+// LIST (so extra people — e.g. an SEO consultant — get their own credential that
+// can be revoked independently). Any match sets the HttpOnly auth cookie (value =
+// DASHBOARD_TOKEN) the middleware checks. Both are server-only secrets, never
+// exposed to the client. Note: all passwords grant the same shared access level.
 //
 // Redirects use a RELATIVE Location so they resolve against the public URL the
 // browser used — behind a proxy, req.url's host is the internal container host.
@@ -27,13 +29,15 @@ export async function POST(req: Request): Promise<Response> {
   const form = await req.formData().catch(() => null);
   const password = String(form?.get("password") ?? "");
 
-  const expected = process.env.DASHBOARD_PASSWORD;
+  const raw = process.env.DASHBOARD_PASSWORD;
   const token = process.env.DASHBOARD_TOKEN;
 
   // Auth not configured — nothing to log into; send to the dashboard.
-  if (!expected || !token) return redirect("/");
+  if (!raw || !token) return redirect("/");
 
-  if (password !== expected) return redirect("/login?error=1");
+  // Accept any password in the comma-separated list.
+  const allowed = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  if (!allowed.includes(password)) return redirect("/login?error=1");
 
   return redirect("/", { name: "dash_auth", value: token, maxAge: 60 * 60 * 24 * 30 });
 }
