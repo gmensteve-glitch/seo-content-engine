@@ -4,6 +4,8 @@ import { PageHeader, Card, Pill } from "@/components/ui";
 import { getOnboardingStatus, getCloneSources } from "@/lib/data/repo";
 import { runIntakeAction, cloneSetupAction, seedIdeasAction } from "@/app/actions";
 import { SubmitButton } from "@/components/submit-button";
+import { ShopifyOAuthConnect } from "@/components/shopify-oauth-connect";
+import { shopifyOAuthEnabled } from "@/lib/connectors/shopify-oauth";
 import {
   Check,
   Fingerprint,
@@ -61,6 +63,7 @@ function StepShell({
 export default async function SetupPage() {
   const [s, sources] = await Promise.all([getOnboardingStatus(), getCloneSources()]);
   const others = sources.filter((b) => b.id !== s.businessId);
+  const oauth = shopifyOAuthEnabled();
   const hasContent = s.ideas + s.writing + s.ready + s.published > 0;
 
   const steps = [s.hasProfile, s.shopifyConnected, s.gscConnected, hasContent];
@@ -230,10 +233,17 @@ export default async function SetupPage() {
             </Link>
             .
           </p>
+        ) : oauth ? (
+          <div>
+            <p className="mb-2 text-[12.5px] text-[var(--muted)]">
+              Approve once in Shopify — no Admin API token to create or paste.
+            </p>
+            <ShopifyOAuthConnect compact />
+          </div>
         ) : (
           <div>
             <p className="mb-2 text-[12.5px] text-[var(--muted)]">
-              Paste this store&apos;s Shopify Admin API token so the engine can publish here.
+              Connect this store&apos;s Shopify so the engine can publish here.
             </p>
             <Link
               href="/connectors"
