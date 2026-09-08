@@ -24,10 +24,7 @@ import {
 function refresh(id?: string): void {
   revalidatePath("/categories");
   revalidatePath("/categories/live");
-  if (id) {
-    revalidatePath(`/categories/${id}`);
-    revalidatePath(`/categories/${id}/paste`);
-  }
+  if (id) revalidatePath(`/categories/${id}`);
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 400));

@@ -27,6 +27,7 @@ import {
   fixPassageCategoryAction,
   saveCategoryEditsAction,
   restartCategoryDraftAction,
+  markCategoryLiveAction,
   markCategoryNotLiveAction,
   markCategoryRefreshAction,
   setCategoryStrategyAction,
@@ -48,40 +49,6 @@ const READ_CSS = `
 `;
 
 type Tab = "read" | "edit" | "score" | "html" | "text";
-
-/** Clickable step bar — the way to move along to Paste and Done. */
-function Steps({ step, pasteHref }: { step: 1 | 2 | 3; pasteHref: string | null }) {
-  const items: { n: 1 | 2 | 3; label: string; href: string | null }[] = [
-    { n: 1, label: "Review", href: null },
-    { n: 2, label: "Paste", href: pasteHref },
-    { n: 3, label: "Done", href: pasteHref ? `${pasteHref}?step=done` : null },
-  ];
-  return (
-    <div className="grid grid-cols-3 gap-1.5">
-      {items.map((it) => {
-        const cls = `flex flex-col gap-1.5 ${it.href ? "group cursor-pointer" : ""}`;
-        const inner = (
-          <>
-            <div className={`h-1 rounded-full ${it.n < step ? "bg-[var(--success)]" : it.n === step ? "bg-[var(--accent)]" : "bg-[var(--border)] group-hover:bg-[var(--border-strong)]"}`} />
-            <div className={`text-[11.5px] ${it.n === step ? "font-medium text-[var(--text)]" : it.href ? "text-[var(--muted)] group-hover:text-[var(--text)]" : "text-[var(--subtle)]"}`}>
-              {it.n} · {it.label}
-              {it.href && it.n !== step ? " →" : ""}
-            </div>
-          </>
-        );
-        return it.href ? (
-          <Link key={it.n} href={it.href} className={cls}>
-            {inner}
-          </Link>
-        ) : (
-          <div key={it.n} className={cls}>
-            {inner}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 function Field({ label, name, value, rows, limit, mono }: { label: string; name: string; value: string; rows?: number; limit?: number; mono?: boolean }) {
   const [v, setV] = useState(value);
@@ -129,12 +96,15 @@ function CopyButton({ text, small = false }: { text: string; small?: boolean }) 
   );
 }
 
-function CopyBlock({ label, value, mono = false, limit }: { label: string; value: string; mono?: boolean; limit?: number }) {
+function CopyBlock({ label, hint, value, mono = false, limit }: { label: string; hint: string; value: string; mono?: boolean; limit?: number }) {
   const over = limit != null && value.length > limit;
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)]">
       <div className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-2.5">
-        <div className="flex-1 text-[13px] font-medium">{label}</div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-medium">{label}</div>
+          <div className="text-[11.5px] text-[var(--muted)]">{hint}</div>
+        </div>
         <span className={`font-mono text-[11px] ${over ? "text-[var(--danger)]" : "text-[var(--subtle)]"}`}>
           {limit != null ? `${value.length} / ${limit}` : `${value.split(/\s+/).filter(Boolean).length} words`}
         </span>
@@ -211,17 +181,14 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
       {/* Scrolling body */}
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-6">
         <div className="mx-auto flex max-w-[720px] flex-col gap-[18px] pb-8">
-          {/* Step header */}
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-center justify-between text-[12px] text-[var(--muted)]">
-              <Link href="/categories" className="flex items-center gap-1.5 hover:text-[var(--text)]">
-                <ArrowLeft size={13} /> {p.liveTitle ?? p.handle}
-              </Link>
-              <div>
-                <span className="font-medium text-[var(--text)]">Step 1 of 3</span> · Review
-              </div>
-            </div>
-            <Steps step={1} pasteHref={hasDraft && !drafting ? `/categories/${p.id}/paste` : null} />
+          {/* Header */}
+          <div className="flex items-center justify-between text-[12px] text-[var(--muted)]">
+            <Link href="/categories" className="flex items-center gap-1.5 hover:text-[var(--text)]">
+              <ArrowLeft size={13} /> Queue
+            </Link>
+            <a href={p.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 font-mono hover:text-[var(--text)]">
+              /collections/{p.handle} <ExternalLink size={11} />
+            </a>
           </div>
 
           {/* Status line */}
@@ -517,23 +484,23 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
           {/* HTML */}
           {hasDraft && tab === "html" && (
             <div className="flex flex-col gap-3">
-              <CopyBlock label="Collection title (H1)" value={p.h1 ?? ""} limit={70} />
-              <CopyBlock label="Intro — above the grid" value={p.intro ?? ""} />
-              <CopyBlock label="Long-form — below the grid (HTML)" value={p.bodyHtml ?? ""} mono />
-              <CopyBlock label="SEO title" value={p.seoTitle ?? ""} limit={60} />
-              <CopyBlock label="Meta description" value={p.metaDescription ?? ""} limit={155} />
-              <CopyBlock label="FAQ schema (JSON-LD, optional)" value={p.faqJsonLd ?? ""} mono />
+              <CopyBlock label="Collection title (H1)" hint="Shopify → Products → Collections → the collection → Title. Replaces “Products”." value={p.h1 ?? ""} limit={70} />
+              <CopyBlock label="Intro — above the grid" hint="Same page → Description (the box under the title)." value={p.intro ?? ""} />
+              <CopyBlock label="Long-form — below the grid (HTML)" hint="The below-grid section (metafield or Custom Liquid). Paste as HTML." value={p.bodyHtml ?? ""} mono />
+              <CopyBlock label="SEO title" hint="Search engine listing → Edit → Page title." value={p.seoTitle ?? ""} limit={60} />
+              <CopyBlock label="Meta description" hint="Search engine listing → Edit → Description." value={p.metaDescription ?? ""} limit={155} />
+              <CopyBlock label="FAQ schema (JSON-LD, optional)" hint="Your theme’s JSON-LD slot. The visible FAQ is already in the long-form." value={p.faqJsonLd ?? ""} mono />
             </div>
           )}
 
           {/* TEXT */}
           {hasDraft && tab === "text" && (
             <div className="flex flex-col gap-3">
-              <CopyBlock label="Collection title (H1)" value={p.h1 ?? ""} limit={70} />
-              <CopyBlock label="Intro — above the grid" value={p.intro ?? ""} />
-              <CopyBlock label="Long-form — below the grid (plain text)" value={p.bodyText ?? ""} />
-              <CopyBlock label="SEO title" value={p.seoTitle ?? ""} limit={60} />
-              <CopyBlock label="Meta description" value={p.metaDescription ?? ""} limit={155} />
+              <CopyBlock label="Collection title (H1)" hint="Shopify → Products → Collections → the collection → Title." value={p.h1 ?? ""} limit={70} />
+              <CopyBlock label="Intro — above the grid" hint="Same page → Description." value={p.intro ?? ""} />
+              <CopyBlock label="Long-form — below the grid (plain text)" hint="For a rich-text editor. Headings and links will need re-applying — use the HTML tab if you can." value={p.bodyText ?? ""} />
+              <CopyBlock label="SEO title" hint="Search engine listing → Edit → Page title." value={p.seoTitle ?? ""} limit={60} />
+              <CopyBlock label="Meta description" hint="Search engine listing → Edit → Description." value={p.metaDescription ?? ""} limit={155} />
             </div>
           )}
 
@@ -609,15 +576,21 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
             )}
           </div>
           <div className="flex items-center gap-4">
-            {hasDraft && !drafting && p.status !== "DRAFT_READY" && (
-              <Link href={`/categories/${p.id}/paste`} className="flex h-[44px] items-center gap-1 text-[13px] text-[var(--muted)] hover:text-[var(--text)]">
-                {p.status === "NEEDS_FIX" ? "Paste anyway" : "Go to paste"} <ArrowRight size={13} />
-              </Link>
+            {hasDraft && !drafting && p.status === "NEEDS_FIX" && (
+              <form action={markCategoryLiveAction}>
+                <input type="hidden" name="id" value={p.id} />
+                <SubmitButton pendingLabel="Saving…" className="flex h-[44px] items-center gap-1 text-[13px] text-[var(--muted)] hover:text-[var(--text)]">
+                  Mark live anyway <ArrowRight size={13} />
+                </SubmitButton>
+              </form>
             )}
             {p.status === "DRAFT_READY" && (
-              <Link href={`/categories/${p.id}/paste`} className={`${btn} bg-[var(--success)] text-white hover:brightness-110`}>
-                Looks good — paste it <ArrowRight size={15} />
-              </Link>
+              <form action={markCategoryLiveAction}>
+                <input type="hidden" name="id" value={p.id} />
+                <SubmitButton icon={<Check size={15} strokeWidth={2.5} />} pendingLabel="Saving…" className={`${btn} bg-[var(--success)] text-white hover:brightness-110`} title="Do this after you’ve pasted the blocks (HTML or Text tab) into Shopify">
+                  It’s in Shopify — mark as live
+                </SubmitButton>
+              </form>
             )}
             {p.status === "NEEDS_FIX" && (
               <form action={autoFixCategoryAction}>
