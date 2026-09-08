@@ -1,0 +1,462 @@
+// The category-page writer — SEO content for a store's collection pages
+// (/collections/metal-caskets …), delivered as paste-ready blocks. Two LLM
+// stages, both on the BEST tier because this is brainstorming + communication:
+//   1. brief  — the angle, keyword targets, section plan (what to say)
+//   2. draft  — the prose itself, as structured JSON blocks (how to say it)
+// Everything factual (prices, products, gauges, widths) comes from the live
+// catalog facts handed in; the writer is told it may not state a number that
+// isn't there, and a deterministic fact-check enforces it afterwards.
+// No images — the product grid is the visual.
+
+import { structured, MODELS } from "@/lib/ai/claude";
+import { aiEnabled, dataforseoEnabled, firecrawlEnabled } from "@/lib/env";
+import { serpTop, keywordVolumes } from "@/lib/connectors/dataforseo";
+import { scrapeMany } from "@/lib/connectors/firecrawl";
+import { factsForPrompt, type CatalogFacts } from "@/lib/categories/facts";
+
+export interface LinkTarget {
+  title: string;
+  url: string;
+  kind: "hub" | "collection" | "blog" | "product";
+}
+
+export interface CategoryContext {
+  businessName: string;
+  domain: string;
+  businessContext: string; // profile markdown
+  brandVoice: string;
+  houseRules: string;
+  fixNotes: string[];
+  collection: {
+    title: string;
+    handle: string;
+    url: string;
+    tier: 1 | 2 | 3;
+    keywordSeed: string;
+    /** For state/regional collections: the place the page is about. */
+    locality: string | null;
+  };
+  facts: CatalogFacts | null;
+  links: LinkTarget[]; // the ONLY internal links the writer may use
+}
+
+export interface CategoryBrief {
+  primaryKeyword: string;
+  secondaryKeywords: string[];
+  keywordVolumes: { keyword: string; volume: number | null }[];
+  angle: string;
+  sections: { heading: string; purpose: string }[];
+  questions: string[];
+  wordTarget: number;
+  competitorsCover: string[];
+  competitorUrls: string[];
+}
+
+export interface CategoryDraftJson {
+  h1: string;
+  intro: string;
+  sections: { heading: string; bodyMarkdown: string }[];
+  comparisonTable: { caption: string; headers: string[]; rows: string[][] } | null;
+  faqs: { question: string; answer: string }[];
+  whyUs: string;
+  relatedGuides: { title: string; url: string }[];
+  seoTitle: string;
+  metaDescription: string;
+}
+
+/** Depth by tier — hubs go deep, colour pages stay short and focused. */
+export function tierSpec(tier: 1 | 2 | 3): {
+  words: [number, number];
+  sections: [number, number];
+  faqs: [number, number];
+  table: boolean;
+  links: [number, number];
+} {
+  if (tier === 1) return { words: [1500, 2000], sections: [5, 6], faqs: [6, 8], table: true, links: [10, 15] };
+  if (tier === 2) return { words: [800, 1200], sections: [4, 5], faqs: [5, 6], table: false, links: [6, 10] };
+  return { words: [300, 500], sections: [2, 3], faqs: [3, 4], table: false, links: [3, 5] };
+}
+
+// ── Brief (brainstorm) ─────────────────────────────────────────
+
+const BRIEF_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    primaryKeyword: { type: "string" },
+    secondaryKeywords: { type: "array", items: { type: "string" } },
+    angle: { type: "string" },
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: { heading: { type: "string" }, purpose: { type: "string" } },
+        required: ["heading", "purpose"],
+      },
+    },
+    questions: { type: "array", items: { type: "string" } },
+    competitorsCover: { type: "array", items: { type: "string" } },
+  },
+  required: ["primaryKeyword", "secondaryKeywords", "angle", "sections", "questions", "competitorsCover"],
+};
+
+const BRIEF_SYSTEM = `You are a senior e-commerce SEO strategist planning the editorial content for a store's category (collection) page. Category pages win COMMERCIAL searches ("metal caskets", "oversized caskets") — the shopper is ready to buy. Plan content that answers what a buyer needs to decide, uses the store's real catalog, and out-structures the competing category pages. Never invent products, prices or facts: plan around what the catalog facts contain.`;
+
+function linksForPrompt(links: LinkTarget[]): string {
+  if (!links.length) return "(none available yet)";
+  return links.map((l) => `- [${l.kind}] ${l.title} — ${l.url}`).join("\n");
+}
+
+function offlineBrief(ctx: CategoryContext): CategoryBrief {
+  const spec = tierSpec(ctx.collection.tier);
+  const kw = ctx.collection.keywordSeed;
+  const name = ctx.collection.title;
+  const sections =
+    ctx.collection.tier === 3
+      ? [
+          { heading: `${name}: what's available`, purpose: "the models and finishes available" },
+          { heading: `${name} prices at ${ctx.businessName}`, purpose: "live price range and value" },
+        ]
+      : [
+          { heading: `Types of ${name.toLowerCase()}`, purpose: "sub-types and what each is for" },
+          { heading: `How to choose`, purpose: "the decisions that matter: material, size, interior" },
+          { heading: `${name} prices at ${ctx.businessName}`, purpose: "live catalog range vs funeral-home pricing" },
+          { heading: `Delivery and funeral-home acceptance`, purpose: "overnight delivery; the FTC Funeral Rule" },
+          ...(ctx.collection.tier === 1 ? [{ heading: `Sizes and options`, purpose: "widths, gauges, interiors" }] : []),
+        ];
+  const place = ctx.collection.locality;
+  const questions = [
+    place
+      ? `Do funeral homes in ${place} have to accept a casket I bought online?`
+      : `Does a funeral home have to accept a casket I buy online?`,
+    `How much do ${kw} cost?`,
+    place ? `How fast can a casket be delivered in ${place}?` : `How fast can it be delivered?`,
+    `What sizes are available?`,
+    `Can I choose the interior?`,
+    `What's included in the price?`,
+    `Is a gasketed casket necessary?`,
+    `How do I place an order?`,
+  ].slice(0, Math.max(spec.faqs[0], 3));
+  return {
+    primaryKeyword: kw,
+    secondaryKeywords: [`${kw} for sale`, `buy ${kw} online`, `affordable ${kw}`],
+    keywordVolumes: [],
+    angle: `Factory-direct ${kw} with real prices, delivered overnight to any funeral home${place ? ` in ${place}` : ""}.`,
+    sections,
+    questions,
+    wordTarget: Math.round((spec.words[0] + spec.words[1]) / 2),
+    competitorsCover: [],
+    competitorUrls: [],
+  };
+}
+
+/** Does this SERP result look like a category page (not a blog/article)? */
+function looksLikeCategory(url: string): boolean {
+  return /\/(collections|category|categories|shop|c|products)\//i.test(url) && !/\/blogs?\//i.test(url);
+}
+
+export async function buildCategoryBrief(ctx: CategoryContext): Promise<CategoryBrief> {
+  if (!aiEnabled()) return offlineBrief(ctx);
+  const spec = tierSpec(ctx.collection.tier);
+
+  // Competitor category pages for the seed keyword — enrichment, never a dependency.
+  let competitorUrls: string[] = [];
+  let competitorSummary = "";
+  if (dataforseoEnabled()) {
+    try {
+      const serp = await serpTop(ctx.collection.keywordSeed, { limit: 10 });
+      const ours = ctx.domain.replace(/^www\./, "");
+      competitorUrls = serp
+        .filter((r) => looksLikeCategory(r.url) && !r.url.includes(ours))
+        .slice(0, 4)
+        .map((r) => r.url);
+      competitorSummary = serp
+        .slice(0, 8)
+        .map((r) => `#${r.position} ${r.title} — ${r.url}\n   ${r.description}`)
+        .join("\n");
+      if (firecrawlEnabled() && competitorUrls.length) {
+        const pages = await scrapeMany(competitorUrls.slice(0, 2));
+        competitorSummary +=
+          "\n\nCOMPETITOR CATEGORY PAGE CONTENT:\n" +
+          pages.map((p) => `--- ${p.title} (${p.wordCount} words) ${p.url}\n${p.markdown.slice(0, 3000)}`).join("\n\n");
+      }
+    } catch (e) {
+      console.error("[category-brief] SERP/scrape degraded:", e instanceof Error ? e.message : e);
+    }
+  }
+
+  let raw: Omit<CategoryBrief, "keywordVolumes" | "wordTarget" | "competitorUrls">;
+  try {
+    raw = await structured({
+      model: MODELS.research,
+      effort: "high",
+      system: BRIEF_SYSTEM,
+      schema: BRIEF_SCHEMA,
+      prompt: `STORE: ${ctx.businessName} (${ctx.domain})
+BUSINESS CONTEXT:
+${ctx.businessContext.slice(0, 4000)}
+
+COLLECTION PAGE: "${ctx.collection.title}" — ${ctx.collection.url}
+Tier: ${ctx.collection.tier} (1 = hub/head term, 2 = sub-collection, 3 = colour/variant/state)
+${ctx.collection.locality ? `LOCAL PAGE: this collection is for families in ${ctx.collection.locality} — plan short, place-specific content (delivery there, the Funeral Rule, local buyer questions) and link to the hub for the general guide.\n` : ""}Seed keyword: ${ctx.collection.keywordSeed}
+Depth for this tier: ${spec.sections[0]}–${spec.sections[1]} sections below the product grid, ${spec.faqs[0]}–${spec.faqs[1]} FAQs, ~${spec.words[0]}–${spec.words[1]} words.
+
+LIVE CATALOG FACTS (the only facts that may be planned around):
+${ctx.facts ? factsForPrompt(ctx.facts) : "(catalog not readable — plan generically, no prices)"}
+
+INTERNAL PAGES AVAILABLE TO LINK:
+${linksForPrompt(ctx.links)}
+
+SEARCH LANDSCAPE:
+${competitorSummary || "(no SERP data — infer from the keyword)"}
+
+Produce the plan: the primary keyword a buyer types (commercial intent, singular/plural as searched), 4–6 secondary keywords, the angle that beats competing category pages, the section plan (heading + one-line purpose; the intro and the FAQ and "Why ${ctx.businessName}" are added automatically so do NOT include them), the buyer questions the FAQ must answer, and what the competitors cover.`,
+    });
+  } catch (e) {
+    console.error("[category-brief] LLM failed, offline brief:", e instanceof Error ? e.message : e);
+    return offlineBrief(ctx);
+  }
+
+  // Let real search volume pick the primary among the candidates when available.
+  let volumes: CategoryBrief["keywordVolumes"] = [];
+  let primaryKeyword = raw.primaryKeyword.trim();
+  let secondaryKeywords = raw.secondaryKeywords.map((k) => k.trim()).filter(Boolean);
+  if (dataforseoEnabled()) {
+    try {
+      const candidates = [primaryKeyword, ...secondaryKeywords].slice(0, 8);
+      const vols = await keywordVolumes(candidates);
+      volumes = vols.map((v) => ({ keyword: v.keyword, volume: v.volume }));
+      const best = [...vols].filter((v) => v.volume != null).sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0))[0];
+      if (best && best.keyword && best.keyword !== primaryKeyword) {
+        secondaryKeywords = [primaryKeyword, ...secondaryKeywords.filter((k) => k !== best.keyword)];
+        primaryKeyword = best.keyword;
+      }
+    } catch (e) {
+      console.error("[category-brief] volumes degraded:", e instanceof Error ? e.message : e);
+    }
+  }
+
+  return {
+    ...raw,
+    primaryKeyword,
+    secondaryKeywords,
+    keywordVolumes: volumes,
+    wordTarget: Math.round((spec.words[0] + spec.words[1]) / 2),
+    competitorUrls,
+  };
+}
+
+// ── Draft (communication) ──────────────────────────────────────
+
+const DRAFT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    h1: { type: "string" },
+    intro: { type: "string" },
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: { heading: { type: "string" }, bodyMarkdown: { type: "string" } },
+        required: ["heading", "bodyMarkdown"],
+      },
+    },
+    comparisonTable: {
+      anyOf: [
+        { type: "null" },
+        {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            caption: { type: "string" },
+            headers: { type: "array", items: { type: "string" } },
+            rows: { type: "array", items: { type: "array", items: { type: "string" } } },
+          },
+          required: ["caption", "headers", "rows"],
+        },
+      ],
+    },
+    faqs: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: { question: { type: "string" }, answer: { type: "string" } },
+        required: ["question", "answer"],
+      },
+    },
+    whyUs: { type: "string" },
+    relatedGuides: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: { title: { type: "string" }, url: { type: "string" } },
+        required: ["title", "url"],
+      },
+    },
+    seoTitle: { type: "string" },
+    metaDescription: { type: "string" },
+  },
+  required: [
+    "h1",
+    "intro",
+    "sections",
+    "comparisonTable",
+    "faqs",
+    "whyUs",
+    "relatedGuides",
+    "seoTitle",
+    "metaDescription",
+  ],
+};
+
+const DRAFT_SYSTEM = `You write the editorial content for e-commerce category pages: the copy above and below a product grid that helps a buyer decide and helps the page rank for its commercial keyword. You write like an experienced, plainspoken practitioner talking to a family under stress — warm, specific, never salesy. You never invent a product, price, measurement, guarantee or delivery timeline: every number you state comes from the catalog facts you are given.`;
+
+function guidance(ctx: CategoryContext): string {
+  const spec = tierSpec(ctx.collection.tier);
+  const name = ctx.businessName;
+  return `RULES — these are hard requirements:
+- LENGTH: ${spec.words[0]}–${spec.words[1]} words across the sections + FAQ + "why us". Do not exceed the upper bound.
+- FACTS: every price, gauge, width, material and product name must appear in the LIVE CATALOG FACTS. State the price range as it is given there. You MAY reference typical funeral-home / industry pricing as context, but only in a sentence that clearly says it is funeral-home or industry pricing (e.g. "Funeral homes commonly list a comparable casket at $X–$Y"), framed as "commonly" / "typically" — never as our price.
+- NO PLACEHOLDERS: this is delivered as finished text. No brackets like [price], no TODOs, no "add …" notes.
+- NO IMAGES: text, lists, one table at most. Never reference or embed an image.
+- INTERNAL LINKS: you may link ONLY to URLs in the INTERNAL PAGES list, using the exact URL given, with natural anchor text (a keyword variant, never "click here"). Aim for ${spec.links[0]}–${spec.links[1]} internal links spread across sections. Do not invent any other internal URL. External links: at most 1, to https://www.ftc.gov (the Funeral Rule) if you cite the rule.
+- FTC FUNERAL RULE (federal, real): funeral homes must accept a casket bought elsewhere and may not charge a handling fee for it. State it exactly that way; no other legal claims.
+- OUR OPERATIONS: do not invent how ${name} ships, packs or schedules. "Delivered overnight to any funeral home in the country" is the promise; say timing is confirmed at order.
+- ANSWER-FIRST: the intro's first two sentences answer the search directly (what this is, the real price range, the delivery promise). Every section's first sentence answers that section's question on its own, quotable out of context.
+- H1: ≤ 70 characters, leads with the primary keyword, then the ${name} promise. It replaces the store's current H1.
+- INTRO: 60–90 words, plain prose (no markdown, no links), for ABOVE the product grid.
+- SECTIONS: ${spec.sections[0]}–${spec.sections[1]} H2 sections for BELOW the grid, following the brief's plan. Body is Markdown (paragraphs, short lists; links in [text](url) form using only allowed URLs). Include a "prices" section using the live range and a "delivery & funeral-home acceptance" section.
+- COMPARISON TABLE: ${spec.table ? "include ONE table (e.g. gauges/materials/sizes compared), 3–5 columns, 3–6 rows, only facts from the catalog." : "set to null for this tier."}
+- FAQ: ${spec.faqs[0]}–${spec.faqs[1]} real buyer questions from the brief, each answered in 2–4 self-contained sentences (prime AI-answer material). Plain text answers, no links.
+- WHY US: 90–160 words on ${name} — factory-direct, the delivery promise, the tone from the brand voice. No hype.
+- RELATED GUIDES: 2–3 items chosen ONLY from the [blog] entries in INTERNAL PAGES (title + exact URL). Empty list if none.
+- SEO TITLE: ≤ 60 characters, keyword first, brand last ("… – ${name}"). META DESCRIPTION: ≤ 155 characters, the answer + the differentiator, written to earn the click.
+- BAN: "in conclusion", "it's important to note", "when it comes to", "navigate", "delve", "in today's world", em-dash overuse, reflexive hedging.
+- TONE: ${ctx.brandVoice ? "the brand voice below" : "compassionate, practical, plainspoken"}.
+${
+  ctx.collection.locality
+    ? `\nTHIS IS A LOCAL PAGE FOR ${ctx.collection.locality.toUpperCase()} — the same catalog, for families there:
+- Name ${ctx.collection.locality} in the H1, the first sentence of the intro, the SEO title and at least two section headings. A reader must instantly see this page is for ${ctx.collection.locality}.
+- Lead with the local answer: families in ${ctx.collection.locality} can buy a casket from ${name} and have it delivered overnight to any funeral home there; under the FTC Funeral Rule the funeral home must accept it and may not charge a handling fee.
+- Keep it SHORT and specific to the place. Do not repeat the hub's general buying guide — link to the hub for that.
+- Never invent ${ctx.collection.locality}-specific statutes, fees, cemeteries or funeral homes. The Funeral Rule is federal and real; for anything state-specific say to confirm with the state funeral board.
+- Include at least two place-named FAQs ("Do funeral homes in ${ctx.collection.locality} have to accept a casket I bought online?").`
+    : ""
+}${ctx.houseRules ? `\nHOUSE RULES (learned from the operator's feedback — obey):\n${ctx.houseRules}` : ""}${
+    ctx.fixNotes.length ? `\nOPERATOR NOTES FOR THIS PAGE (obey exactly):\n${ctx.fixNotes.map((n) => `- ${n}`).join("\n")}` : ""
+  }`;
+}
+
+function offlineDraft(ctx: CategoryContext, brief: CategoryBrief): CategoryDraftJson {
+  const f = ctx.facts;
+  const money = (n: number | null | undefined) => (n == null ? "" : `$${n.toLocaleString("en-US")}`);
+  const range = f?.priceMin != null && f?.priceMax != null ? `${money(f.priceMin)}–${money(f.priceMax)}` : "";
+  const name = ctx.businessName;
+  const kw = brief.primaryKeyword;
+  const title = ctx.collection.title.replace(/\b\w/g, (c) => c.toUpperCase());
+  const collections = ctx.links.filter((l) => l.kind !== "blog").slice(0, 4);
+  const blogs = ctx.links.filter((l) => l.kind === "blog").slice(0, 3);
+  const spec = tierSpec(ctx.collection.tier);
+  return {
+    h1: `${title} — Factory-Direct, Delivered Overnight`,
+    intro: `${title} from ${name} are sold factory-direct${range ? `, priced from ${range}` : ""}, and delivered overnight to any funeral home in the country. Under the FTC Funeral Rule the funeral home must accept a casket you buy elsewhere and cannot charge a handling fee. Browse the collection below; the guide underneath explains how to choose.`,
+    sections: brief.sections.map((s, i) => ({
+      heading: s.heading,
+      bodyMarkdown:
+        i === 0 && collections.length
+          ? `${s.purpose}. See also ${collections.map((c) => `[${c.title}](${c.url})`).join(", ")}.`
+          : `${s.purpose}.${range && /price/i.test(s.heading) ? ` At ${name}, ${kw} run ${range} in the current catalog.` : ""}`,
+    })),
+    comparisonTable: null,
+    faqs: brief.questions.slice(0, spec.faqs[1]).map((q) => ({
+      question: q,
+      answer: /accept/i.test(q)
+        ? `Yes. Under the FTC Funeral Rule, a funeral home must accept a casket you bought elsewhere and may not charge a handling fee for it.`
+        : /cost|price/i.test(q) && range
+          ? `${title} at ${name} currently range from ${range}, sold factory-direct.`
+          : /deliver|fast/i.test(q)
+            ? `Timing is confirmed when you order; ${name} delivers overnight to any funeral home in the country.`
+            : `Every option is listed on the product page, and a real person at ${name} confirms the details when you order.`,
+    })),
+    whyUs: `${name} sells factory-direct and delivers overnight to any funeral home in the country, so families pay the maker's price instead of a funeral-home markup. Every order is handled with care and confirmed by a real person.`,
+    relatedGuides: blogs.map((b) => ({ title: b.title, url: b.url })),
+    seoTitle: `${title} for Sale – ${name}`.slice(0, 60),
+    metaDescription: `Shop ${kw} factory-direct${range ? ` from ${range}` : ""}. Delivered overnight to any funeral home — they must accept it under the FTC Funeral Rule.`.slice(0, 155),
+  };
+}
+
+export async function writeCategoryDraft(ctx: CategoryContext, brief: CategoryBrief): Promise<CategoryDraftJson> {
+  if (!aiEnabled()) return offlineDraft(ctx, brief);
+  return structured<CategoryDraftJson>({
+    model: MODELS.writer,
+    effort: "high",
+    maxTokens: 16000,
+    system: DRAFT_SYSTEM,
+    schema: DRAFT_SCHEMA,
+    prompt: `STORE: ${ctx.businessName} (${ctx.domain})
+BRAND VOICE:
+${ctx.brandVoice || "(none provided)"}
+
+BUSINESS CONTEXT:
+${ctx.businessContext.slice(0, 3000)}
+
+COLLECTION PAGE: "${ctx.collection.title}" — ${ctx.collection.url} (tier ${ctx.collection.tier})
+
+BRIEF:
+Primary keyword: ${brief.primaryKeyword}
+Secondary keywords: ${brief.secondaryKeywords.join(", ")}
+Angle: ${brief.angle}
+Section plan:
+${brief.sections.map((s) => `- ${s.heading} — ${s.purpose}`).join("\n")}
+Buyer questions for the FAQ:
+${brief.questions.map((q) => `- ${q}`).join("\n")}
+${brief.competitorsCover.length ? `Competitors cover: ${brief.competitorsCover.join("; ")}` : ""}
+
+LIVE CATALOG FACTS (the only source of numbers and product names):
+${ctx.facts ? factsForPrompt(ctx.facts) : "(catalog not readable — state NO prices or product names)"}
+
+INTERNAL PAGES (the only internal URLs you may link):
+${linksForPrompt(ctx.links)}
+
+${guidance(ctx)}
+
+Write the page now as the JSON blocks.`,
+  });
+}
+
+/** Fix a draft against concrete issues (fact-check failures, grader feedback). */
+export async function reviseCategoryDraft(
+  ctx: CategoryContext,
+  brief: CategoryBrief,
+  draft: CategoryDraftJson,
+  issues: string[],
+): Promise<CategoryDraftJson> {
+  if (!aiEnabled()) return draft;
+  return structured<CategoryDraftJson>({
+    model: MODELS.writer,
+    effort: "medium",
+    maxTokens: 16000,
+    system: DRAFT_SYSTEM,
+    schema: DRAFT_SCHEMA,
+    prompt: `Revise this category-page draft to fix EVERY issue listed. Keep everything that isn't flagged. Return the complete corrected JSON.
+
+ISSUES TO FIX:
+${issues.map((i) => `- ${i}`).join("\n")}
+
+LIVE CATALOG FACTS (the only source of numbers and product names):
+${ctx.facts ? factsForPrompt(ctx.facts) : "(catalog not readable — state NO prices or product names)"}
+
+INTERNAL PAGES (the only internal URLs you may link):
+${linksForPrompt(ctx.links)}
+
+${guidance(ctx)}
+
+CURRENT DRAFT (JSON):
+${JSON.stringify(draft)}`,
+  });
+}

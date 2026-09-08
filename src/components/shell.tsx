@@ -17,6 +17,7 @@ import {
   Wand2,
   LogOut,
   Search,
+  Layers,
 } from "lucide-react";
 import { RecommendButton } from "@/components/recommend-button";
 import { BusinessSwitcher } from "@/components/business-switcher";
@@ -43,6 +44,9 @@ const NAV_GROUPS: {
       { href: "/ideas", label: "Ideas", icon: Lightbulb },
       { href: "/ready", label: "Ready to publish", icon: CheckCircle2 },
       { href: "/refresh", label: "Needs refresh", icon: RefreshCw },
+      // Category (collection) pages: the engine writes paste-ready blocks;
+      // a person pastes them into Shopify. Deliberately manual.
+      { href: "/categories", label: "Category pages", icon: Layers },
     ],
   },
   {

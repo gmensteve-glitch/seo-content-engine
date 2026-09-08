@@ -102,6 +102,10 @@ async function refreshTick(): Promise<void> {
     const out = await autoRefreshAll(2);
     const total = Object.values(out).reduce((a, b) => a + b, 0);
     if (total) console.log(`[scheduler] auto-refreshed ${total} post(s) back into Ready`);
+    // Category pages are manual: we only FLAG live ones that are due, never rewrite.
+    const { flagCategoryRefreshes } = await import("@/lib/categories/service");
+    const flagged = await flagCategoryRefreshes();
+    if (flagged) console.log(`[scheduler] flagged ${flagged} category page(s) for refresh`);
   } catch (e) {
     console.error("[scheduler] refresh tick failed:", e instanceof Error ? e.message : e);
   }

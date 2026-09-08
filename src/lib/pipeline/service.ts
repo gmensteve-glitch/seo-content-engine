@@ -2046,7 +2046,7 @@ export async function getStalePosts(businessId: string, max = 12): Promise<Stale
 }
 
 /** House rules from accumulated blog feedback, for the writer's prompt. "" when none. */
-async function buildContentGuidance(businessId: string): Promise<string> {
+export async function buildContentGuidance(businessId: string): Promise<string> {
   const fb = await prisma.contentFeedback.findMany({
     where: { businessId },
     orderBy: { createdAt: "desc" },

@@ -78,8 +78,71 @@ model Business {
   contentFeedback ContentFeedback[]
   geo         GeoCitation[]
   recommendations Recommendation[]
+  categoryPages CategoryPage[]
 
   @@index([domain])
+}
+
+// A collection/category page on the store (e.g. /collections/metal-caskets),
+// discovered by crawling the public site. The engine writes paste-ready SEO
+// content for it; a HUMAN pastes it into Shopify — there is deliberately no
+// publish path. Status tracks that manual workflow plus refresh timing.
+model CategoryPage {
+  id         String   @id @default(cuid())
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+
+  // Discovery (from the live site)
+  handle         String // "metal-caskets"
+  url            String // absolute public URL
+  liveTitle      String? // the collection's current title/H1 on the site
+  productCount   Int?
+  liveHasContent Boolean  @default(false) // the live page already carries editorial copy
+  lastCrawledAt  DateTime?
+  removedAt      DateTime? // no longer found on the site at the last crawl
+
+  // Strategy
+  tier              Int      @default(2) // 1 hub · 2 sub-collection · 3 colour/variant
+  targetKeyword     String?
+  secondaryKeywords String[] @default([])
+  status            CategoryStatus @default(NOT_STARTED)
+
+  // Paste-ready blocks (the deliverable)
+  h1              String?
+  intro           String?  @db.Text
+  bodyHtml        String?  @db.Text
+  seoTitle        String?
+  metaDescription String?
+  faqJsonLd       String?  @db.Text
+
+  // Provenance + quality
+  factsJson     String?  @db.Text // catalog facts the draft was written from
+  briefJson     String?  @db.Text
+  overall       Int?     // rubric grade 0–100
+  gradeNotes    String?  @db.Text
+  factIssues    String[] @default([]) // fact-check failures (empty = passed)
+  fixNotes      String[] @default([]) // operator "fix it" notes applied on regeneration
+  draftedAt     DateTime?
+
+  // Manual publish tracking
+  liveAt       DateTime?
+  liveSnapshot String?   // hash of the blocks that were pasted live
+  refreshDueAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessId, handle])
+  @@index([businessId, status, tier])
+}
+
+enum CategoryStatus {
+  NOT_STARTED
+  DRAFTING
+  DRAFT_READY
+  NEEDS_FIX // a draft exists but failed the fact-check or quality bar
+  LIVE
+  NEEDS_REFRESH
 }
 
 // An SEO recommendation submitted from the dashboard — a screenshot (base64)

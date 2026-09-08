@@ -1,32 +1,36 @@
 // Thin wrapper around the Anthropic SDK — the one place every agent talks to Claude.
 //
-// MODEL STRATEGY (cost vs quality): each stage runs on the cheapest model that
-// still holds the standard, instead of Opus for everything.
-//   • Haiku  — high-volume, low-stakes generation (idea brainstorming, keyword
-//              extraction). Cheap and fast; a weaker model here costs nothing.
-//   • Sonnet — the workhorse: the writer (biggest token spender at ~20k output ×
-//              several passes), the grader (runs on every revise/boost loop), the
-//              competitive research/brief, and business profiling. Sonnet 5 writes
-//              and judges at near-Opus quality for a fraction of the cost.
-//   • Opus   — reserved. Not in the routine loop; opt in per run via PIPELINE_MODEL
-//              when a flagship piece justifies the premium.
-// Set PIPELINE_MODEL to override every stage at once (a global cost/speed lever).
+// MODEL STRATEGY (cost vs quality): three tiers, each stage on the cheapest tier
+// that still holds the standard.
+//   • BEST  (Opus 5)   — where quality is the product: brainstorming (ideas, the
+//                        research brief's angle) and communication (the writer,
+//                        the prose people actually read). Thinking on.
+//   • MID   (Sonnet 5) — reliable judgment that runs often: the grader, and the
+//                        one-off business profiling at intake.
+//   • CHEAP (Haiku 4.5) — mechanical work where a small model is as good as a
+//                        big one: keyword/fact extraction, structuring, parsing.
+//                        ~5× cheaper than Sonnet, ~25× cheaper than Opus on
+//                        output tokens. Haiku 4.5 takes no `thinking`/`effort`.
+// Set PIPELINE_MODEL to override the BEST/MID stages at once (cheap stages stay
+// pinned — mechanical work never needs a premium model).
 //
 // Request bodies are cast to `any` at the call site because SDK typings lag new
-// params (adaptive thinking, output_config) — the wire shape is correct.
+// params (adaptive thinking, output_config, fallbacks) — the wire shape is correct.
 
 import Anthropic from "@anthropic-ai/sdk";
 import { recordUsage } from "@/lib/ai/cost";
 
-const HAIKU = "claude-haiku-4-5-20251001";
+const HAIKU = "claude-haiku-4-5";
 const SONNET = "claude-sonnet-5";
+const OPUS = "claude-opus-5";
 
 export const MODELS = {
   intake: SONNET, // business profiling — rare, wants good synthesis
   keyword: HAIKU, // simple extraction
-  ideas: HAIKU, // idea brainstorming — high volume, low stakes
-  research: SONNET, // competitive gap-map brief
-  writer: SONNET, // the content — quality lever + biggest spender
+  extract: HAIKU, // structuring / fact extraction / parsing — mechanical
+  ideas: OPUS, // brainstorming — the best model, per operator preference
+  research: OPUS, // the brief's angle + gap: brainstorming
+  writer: OPUS, // the content itself — communication, the quality lever
   grader: SONNET, // reliable rubric judgment, runs often
 } as const;
 
@@ -43,15 +47,19 @@ function textFrom(msg: Anthropic.Message): string {
     .trim();
 }
 
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+
 export interface CompleteOpts {
   prompt: string;
   system?: string;
   model?: string;
   maxTokens?: number;
-  /** Cheap, low-stakes stage (ideation, extraction): pin to a small model and
-   *  ignore the global PIPELINE_MODEL override — brainstorming never needs a
-   *  premium model, so it stays cheap even during a premium run. */
+  /** Cheap, mechanical stage (extraction, structuring): pin to the small model
+   *  and ignore the global PIPELINE_MODEL override. */
   cheap?: boolean;
+  /** Thinking depth for models that support it (ignored on Haiku). Default
+   *  "high"; use "low"/"medium" for routine work, "xhigh" for flagship prose. */
+  effort?: Effort;
 }
 
 /** Cache the (stable) system prompt so it isn't re-billed at full price on every
@@ -64,22 +72,70 @@ function cachedSystem(system?: string) {
 /** Resolve the model: cheap stages stay pinned; everything else honors the
  *  global PIPELINE_MODEL override. */
 function resolveModel(opts: CompleteOpts, fallback: string): string {
-  if (opts.cheap) return opts.model ?? MODELS.ideas;
+  if (opts.cheap) return opts.model ?? MODELS.extract;
   return process.env.PIPELINE_MODEL || opts.model || fallback;
+}
+
+const isHaiku = (model: string) => model.startsWith("claude-haiku");
+const isOpus = (model: string) => model.startsWith("claude-opus");
+
+/** The thinking/effort block for a model. Haiku 4.5 rejects both, so it gets
+ *  neither; everything current runs adaptive thinking with an effort level. */
+function reasoningFor(model: string, effort?: Effort): Record<string, unknown> {
+  if (isHaiku(model)) return {};
+  return {
+    thinking: { type: "adaptive" },
+    ...(effort ? { output_config: { effort } } : {}),
+  };
+}
+
+/**
+ * Send a request. On the BEST tier, opt into server-side refusal fallbacks so a
+ * safety-classifier decline (plausible for death/funeral content) re-runs on a
+ * fallback model inside the same call instead of failing the piece. If the
+ * account/SDK doesn't accept the beta, retry once without it — the fallback
+ * is a safety net, never a dependency.
+ */
+async function send(body: Record<string, unknown>): Promise<Anthropic.Message> {
+  const model = String(body.model);
+  if (isOpus(model)) {
+    try {
+      const msg = (await client().beta.messages.create({
+        ...body,
+        betas: ["server-side-fallback-2026-07-01"],
+        fallbacks: "default",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any)) as unknown as Anthropic.Message;
+      return msg;
+    } catch (e) {
+      if (!(e instanceof Anthropic.BadRequestError)) throw e;
+      console.warn("[claude] fallbacks not accepted, retrying plain:", e.message);
+    }
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (await client().messages.create(body as any)) as Anthropic.Message;
+}
+
+function mergeOutputConfig(
+  body: Record<string, unknown>,
+  extra: Record<string, unknown>,
+): Record<string, unknown> {
+  const existing = (body.output_config as Record<string, unknown> | undefined) ?? {};
+  return { ...body, output_config: { ...existing, ...extra } };
 }
 
 /** Free-form text generation (e.g. the writer). */
 export async function completeText(opts: CompleteOpts): Promise<string> {
-  const body = {
-    model: resolveModel(opts, MODELS.writer),
+  const model = resolveModel(opts, MODELS.writer);
+  const body: Record<string, unknown> = {
+    model,
     max_tokens: opts.maxTokens ?? 16000,
-    thinking: { type: "adaptive" },
+    ...reasoningFor(model, opts.effort),
     system: cachedSystem(opts.system),
     messages: [{ role: "user", content: opts.prompt }],
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const msg = (await client().messages.create(body as any)) as Anthropic.Message;
-  recordUsage(body.model, msg.usage);
+  const msg = await send(body);
+  recordUsage(model, msg.usage);
   if (msg.stop_reason === "refusal") {
     throw new Error("Claude declined this request (refusal).");
   }
@@ -93,17 +149,17 @@ export interface StructuredOpts<_T> extends CompleteOpts {
 
 /** Schema-constrained JSON output (research, grader). Returns the parsed object. */
 export async function structured<T>(opts: StructuredOpts<T>): Promise<T> {
-  const body = {
-    model: resolveModel(opts, MODELS.grader),
+  const model = resolveModel(opts, MODELS.grader);
+  let body: Record<string, unknown> = {
+    model,
     max_tokens: opts.maxTokens ?? 16000,
-    thinking: { type: "adaptive" },
+    ...reasoningFor(model, opts.effort),
     system: cachedSystem(opts.system),
     messages: [{ role: "user", content: opts.prompt }],
-    output_config: { format: { type: "json_schema", schema: opts.schema } },
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const msg = (await client().messages.create(body as any)) as Anthropic.Message;
-  recordUsage(body.model, msg.usage);
+  body = mergeOutputConfig(body, { format: { type: "json_schema", schema: opts.schema } });
+  const msg = await send(body);
+  recordUsage(model, msg.usage);
   if (msg.stop_reason === "refusal") {
     throw new Error("Claude declined this request (refusal).");
   }
