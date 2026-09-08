@@ -52,6 +52,8 @@ export interface CategoryPageVM {
   id: string;
   handle: string;
   url: string;
+  /** The collection's own name on the store — what a person calls the page. */
+  name: string;
   title: string; // the H1 we wrote, else the live title
   liveTitle: string | null;
   productCount: number | null;
@@ -124,6 +126,7 @@ function toVM(row: Row, domain: string): CategoryPageVM {
     id: row.id,
     handle: row.handle,
     url: row.url,
+    name: row.liveTitle ?? row.handle.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
     title: row.h1 ?? row.liveTitle ?? row.handle,
     liveTitle: row.liveTitle,
     productCount: row.productCount,

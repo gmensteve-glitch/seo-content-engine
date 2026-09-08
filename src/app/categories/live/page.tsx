@@ -32,7 +32,7 @@ export default async function CategoryLivePage({
           <div className="flex items-center gap-2.5 rounded-xl border border-[var(--success)] bg-[var(--success-bg)] px-5 py-4 text-[14px] text-[var(--success)]">
             <CheckCircle2 size={18} />
             <span>
-              <span className="font-semibold">{just.title}</span> is live. Nice work.
+              <span className="font-semibold">{just.name}</span> is live. Nice work.
             </span>
             <Link href="/categories" className="ml-auto flex items-center gap-1 text-[13px] font-medium hover:underline">
               Next page <ArrowRight size={13} />
@@ -62,7 +62,7 @@ export default async function CategoryLivePage({
                     <CheckCircle2 size={15} className="shrink-0 text-[var(--success)]" />
                   )}
                   <Link href={`/categories/${p.id}`} className="truncate text-[13.5px] font-medium hover:underline">
-                    {p.title}
+                    {p.name}
                   </Link>
                   <a href={p.url} target="_blank" rel="noreferrer" className="shrink-0 text-[var(--subtle)] hover:text-[var(--text)]" title="View live page">
                     <ExternalLink size={12} />

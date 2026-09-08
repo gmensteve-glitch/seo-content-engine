@@ -50,21 +50,158 @@ const READ_CSS = `
 
 type Tab = "read" | "edit" | "score" | "html" | "text";
 
-function Field({ label, name, value, rows, limit, mono }: { label: string; name: string; value: string; rows?: number; limit?: number; mono?: boolean }) {
-  const [v, setV] = useState(value);
+const btn = "flex h-[46px] items-center gap-2 rounded-full px-6 text-[14px] font-semibold";
+
+type Edits = Record<string, string>;
+
+function Field({
+  label,
+  name,
+  original,
+  edits,
+  onChange,
+  rows,
+  limit,
+  mono,
+}: {
+  label: string;
+  name: string;
+  original: string;
+  edits: Edits;
+  onChange: (name: string, value: string) => void;
+  rows?: number;
+  limit?: number;
+  mono?: boolean;
+}) {
+  const v = edits[name] ?? original;
+  const changed = v !== original;
   const over = limit != null && v.length > limit;
+  const box = `w-full rounded-lg border bg-[var(--surface-0)] ${changed ? "border-[var(--accent)]" : "border-[var(--border-strong)]"}`;
   return (
     <label className="flex flex-col gap-1.5">
       <span className="flex items-center justify-between text-[12px] text-[var(--muted)]">
-        <span>{label}</span>
+        <span>
+          {label}
+          {changed && <span className="ml-2 text-[11px] font-medium text-[var(--accent)]">edited</span>}
+        </span>
         {limit != null && <span className={`font-mono text-[11px] ${over ? "text-[var(--danger)]" : "text-[var(--subtle)]"}`}>{v.length} / {limit}</span>}
       </span>
       {rows ? (
-        <textarea name={name} value={v} onChange={(e) => setV(e.target.value)} rows={rows} className={`w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3.5 py-2.5 leading-relaxed ${mono ? "font-mono text-[12.5px]" : "text-[14px]"}`} />
+        <textarea
+          name={name}
+          value={v}
+          onChange={(e) => onChange(name, e.target.value)}
+          rows={rows}
+          className={`${box} px-3.5 py-2.5 leading-relaxed ${mono ? "font-mono text-[12.5px]" : "text-[14px]"}`}
+        />
       ) : (
-        <input name={name} value={v} onChange={(e) => setV(e.target.value)} className="h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3.5 text-[14px]" />
+        <input name={name} value={v} onChange={(e) => onChange(name, e.target.value)} className={`${box} h-10 px-3.5 text-[14px]`} />
       )}
     </label>
+  );
+}
+
+/**
+ * The Edit tab. Holds what you've typed; the Update button only exists while
+ * something differs from the saved draft. Remounted (via key) whenever the
+ * draft is re-saved, so a fresh save starts clean.
+ */
+function EditTab({
+  page: p,
+  action,
+  pending,
+  result,
+}: {
+  page: CategoryPageDetailVM;
+  action: (formData: FormData) => void;
+  pending: boolean;
+  result: PassageFixResult;
+}) {
+  const [edits, setEdits] = useState<Edits>({});
+  const d = p.draft!;
+  const originals: Edits = {
+    h1: d.h1,
+    intro: d.intro,
+    whyUs: d.whyUs,
+    seoTitle: d.seoTitle,
+    metaDescription: d.metaDescription,
+  };
+  d.sections.forEach((s, i) => {
+    originals[`section_heading_${i}`] = s.heading;
+    originals[`section_body_${i}`] = s.bodyMarkdown;
+  });
+  d.faqs.forEach((f, i) => {
+    originals[`faq_q_${i}`] = f.question;
+    originals[`faq_a_${i}`] = f.answer;
+  });
+  const changedCount = Object.keys(edits).filter((k) => edits[k] !== originals[k]).length;
+  const dirty = changedCount > 0;
+
+  function onChange(name: string, value: string) {
+    setEdits((prev) => ({ ...prev, [name]: value }));
+  }
+  const field = (label: string, name: string, extra: { rows?: number; limit?: number; mono?: boolean } = {}) => (
+    <Field label={label} name={name} original={originals[name] ?? ""} edits={edits} onChange={onChange} {...extra} />
+  );
+
+  return (
+    <form action={action} className="relative flex flex-col gap-5 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-6 py-6 pb-24">
+      <input type="hidden" name="id" value={p.id} />
+      <input type="hidden" name="sectionCount" value={d.sections.length} />
+      <input type="hidden" name="faqCount" value={d.faqs.length} />
+      <p className="text-[13px] text-[var(--muted)]">
+        Change any text here. An <span className="font-medium text-[var(--text)]">Update</span> button appears as soon as something changes; it rebuilds the HTML
+        from what you wrote, re-checks every number against the catalog, and re-grades. Sections and “Why us” are Markdown — links stay in{" "}
+        <span className="font-mono text-[12px]">[text](url)</span> form.
+      </p>
+      {field("Collection title (H1)", "h1", { limit: 70 })}
+      {field("Intro — above the grid", "intro", { rows: 4 })}
+      {d.sections.map((s, i) => (
+        <div key={i} className="flex flex-col gap-2.5 border-t border-[var(--border)] pt-4">
+          {field(`Section ${i + 1} — heading`, `section_heading_${i}`)}
+          {field("Body (Markdown)", `section_body_${i}`, { rows: Math.min(14, Math.max(4, Math.ceil(s.bodyMarkdown.length / 90))), mono: true })}
+        </div>
+      ))}
+      <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-4">
+        <div className="text-[12px] font-semibold uppercase tracking-wide text-[var(--muted)]">FAQ</div>
+        {d.faqs.map((_, i) => (
+          <div key={i} className="flex flex-col gap-2 rounded-lg bg-[var(--surface-2)] p-3.5">
+            {field(`Question ${i + 1}`, `faq_q_${i}`)}
+            {field("Answer", `faq_a_${i}`, { rows: 3 })}
+          </div>
+        ))}
+      </div>
+      <div className="border-t border-[var(--border)] pt-4">{field("Why us (Markdown)", "whyUs", { rows: 5, mono: true })}</div>
+      <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-4">
+        {field("SEO title", "seoTitle", { limit: 60 })}
+        {field("Meta description", "metaDescription", { rows: 2, limit: 155 })}
+      </div>
+
+      {/* Sticky footer — only shows up once something changed (or while saving / after a result) */}
+      {(dirty || pending || result) && (
+        <div className="sticky bottom-4 -mx-6 -mb-24 mt-2 flex flex-wrap items-center gap-4 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-1)] px-5 py-3 shadow-[0_8px_30px_rgba(0,0,0,0.12)]">
+          {(dirty || pending) && (
+            <button type="submit" disabled={pending} className={`${btn} bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-60`}>
+              {pending ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} strokeWidth={2.5} />}
+              {pending ? "Updating…" : "Update"}
+            </button>
+          )}
+          {dirty && !pending && (
+            <>
+              <span className="text-[12.5px] text-[var(--muted)]">
+                {changedCount} {changedCount === 1 ? "field" : "fields"} changed · about 20 seconds, it re-grades so the score stays honest
+              </span>
+              <button type="button" onClick={() => setEdits({})} className="ml-auto text-[13px] text-[var(--muted)] hover:text-[var(--text)]">
+                Discard changes
+              </button>
+            </>
+          )}
+          {result && !dirty && !pending && (
+            <span className={`text-[13px] ${result.ok ? "text-[var(--success)]" : "text-[var(--warn)]"}`}>{result.message}</span>
+          )}
+        </div>
+      )}
+    </form>
   );
 }
 
@@ -160,7 +297,6 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
   const drafting = p.status === "DRAFTING";
   const draftingMin = drafting ? p.statusMinutes : 0;
   const issueCount = p.factIssues.length + (p.overall != null && p.overall < p.threshold ? 1 : 0);
-  const btn = "flex h-[46px] items-center gap-2 rounded-full px-6 text-[14px] font-semibold";
   const quiet = "flex h-[44px] items-center gap-1.5 text-[13px] text-[var(--muted)] hover:text-[var(--text)]";
   const tabBtn = (t: Tab, label: string) => (
     <button
@@ -365,50 +501,7 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
 
           {/* EDIT */}
           {hasDraft && tab === "edit" && p.draft && (
-            <form key={p.draftedAt ?? "edit"} action={editAction} className="flex flex-col gap-5 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-6 py-6">
-              <input type="hidden" name="id" value={p.id} />
-              <input type="hidden" name="sectionCount" value={p.draft.sections.length} />
-              <input type="hidden" name="faqCount" value={p.draft.faqs.length} />
-              <p className="text-[13px] text-[var(--muted)]">
-                Change any text here, then <span className="font-medium text-[var(--text)]">Save &amp; update</span>. The HTML is rebuilt from what you wrote, every
-                number is re-checked against the catalog, and it’s re-graded. Sections and “Why us” are Markdown — links stay in{" "}
-                <span className="font-mono text-[12px]">[text](url)</span> form.
-              </p>
-              <Field label="Collection title (H1)" name="h1" value={p.draft.h1} limit={70} />
-              <Field label="Intro — above the grid" name="intro" value={p.draft.intro} rows={4} />
-              {p.draft.sections.map((s, i) => (
-                <div key={i} className="flex flex-col gap-2.5 border-t border-[var(--border)] pt-4">
-                  <Field label={`Section ${i + 1} — heading`} name={`section_heading_${i}`} value={s.heading} />
-                  <Field label="Body (Markdown)" name={`section_body_${i}`} value={s.bodyMarkdown} rows={Math.min(14, Math.max(4, Math.ceil(s.bodyMarkdown.length / 90)))} mono />
-                </div>
-              ))}
-              <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-4">
-                <div className="text-[12px] font-semibold uppercase tracking-wide text-[var(--muted)]">FAQ</div>
-                {p.draft.faqs.map((f, i) => (
-                  <div key={i} className="flex flex-col gap-2 rounded-lg bg-[var(--surface-2)] p-3.5">
-                    <Field label={`Question ${i + 1}`} name={`faq_q_${i}`} value={f.question} />
-                    <Field label="Answer" name={`faq_a_${i}`} value={f.answer} rows={3} />
-                  </div>
-                ))}
-              </div>
-              <div className="border-t border-[var(--border)] pt-4">
-                <Field label="Why us (Markdown)" name="whyUs" value={p.draft.whyUs} rows={5} mono />
-              </div>
-              <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-4">
-                <Field label="SEO title" name="seoTitle" value={p.draft.seoTitle} limit={60} />
-                <Field label="Meta description" name="metaDescription" value={p.draft.metaDescription} rows={2} limit={155} />
-              </div>
-              <div className="flex flex-wrap items-center gap-4 border-t border-[var(--border)] pt-4">
-                <button type="submit" disabled={editPending} className={`${btn} bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-60`}>
-                  {editPending ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} strokeWidth={2.5} />}
-                  {editPending ? "Rebuilding & grading…" : "Save & update"}
-                </button>
-                <span className="text-[12px] text-[var(--subtle)]">About 20 seconds — it re-grades so the score stays honest.</span>
-                {editResult && (
-                  <span className={`text-[13px] ${editResult.ok ? "text-[var(--success)]" : "text-[var(--warn)]"}`}>{editResult.message}</span>
-                )}
-              </div>
-            </form>
+            <EditTab key={p.draftedAt ?? "edit"} page={p} action={editAction} pending={editPending} result={editResult} />
           )}
 
           {/* SCORE */}
