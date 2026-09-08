@@ -12,6 +12,7 @@ import {
   draftCategoryPage,
   draftCategoryTier,
   fixCategoryPage,
+  fixCategoryPassage,
   markCategoryLive,
   markCategoryNeedsRefresh,
   markCategoryNotLive,
@@ -79,6 +80,31 @@ export async function fixCategoryAction(formData: FormData): Promise<void> {
   );
   await settle();
   refresh(id);
+}
+
+export type PassageFixResult = { ok: boolean; message: string } | null;
+
+/** Highlight → "fix this": rewrites only the highlighted passage. Awaited so the
+ *  operator sees the result in place (one small model call + a re-grade). */
+export async function fixPassageCategoryAction(
+  _prev: PassageFixResult,
+  formData: FormData,
+): Promise<PassageFixResult> {
+  const id = String(formData.get("id") ?? "");
+  const selectedText = String(formData.get("selectedText") ?? "");
+  const instruction = String(formData.get("instruction") ?? "");
+  if (!id || !selectedText.trim() || !instruction.trim()) {
+    return { ok: false, message: "Highlight some text and say what to change." };
+  }
+  try {
+    const res = await fixCategoryPassage(id, selectedText, instruction);
+    refresh(id);
+    return res;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[categories] passage fix failed:", msg);
+    return { ok: false, message: `Couldn't apply that fix: ${msg}` };
+  }
 }
 
 export async function markCategoryLiveAction(formData: FormData): Promise<void> {

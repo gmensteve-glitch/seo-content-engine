@@ -98,22 +98,27 @@ function reasoningFor(model: string, effort?: Effort): Record<string, unknown> {
  */
 async function send(body: Record<string, unknown>): Promise<Anthropic.Message> {
   const model = String(body.model);
+  // Stream every request and take the final message: long outputs (a full
+  // category page as JSON, a 2,000-word draft) plus adaptive thinking can run
+  // past a non-streaming HTTP timeout and come back cut off mid-JSON.
   if (isOpus(model)) {
     try {
-      const msg = (await client().beta.messages.create({
-        ...body,
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any)) as unknown as Anthropic.Message;
-      return msg;
+      const msg = await client().beta.messages
+        .stream({
+          ...body,
+          betas: ["server-side-fallback-2026-07-01"],
+          fallbacks: "default",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any)
+        .finalMessage();
+      return msg as unknown as Anthropic.Message;
     } catch (e) {
       if (!(e instanceof Anthropic.BadRequestError)) throw e;
       console.warn("[claude] fallbacks not accepted, retrying plain:", e.message);
     }
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (await client().messages.create(body as any)) as Anthropic.Message;
+  return client().messages.stream(body as any).finalMessage();
 }
 
 function mergeOutputConfig(
@@ -158,10 +163,26 @@ export async function structured<T>(opts: StructuredOpts<T>): Promise<T> {
     messages: [{ role: "user", content: opts.prompt }],
   };
   body = mergeOutputConfig(body, { format: { type: "json_schema", schema: opts.schema } });
-  const msg = await send(body);
-  recordUsage(model, msg.usage);
-  if (msg.stop_reason === "refusal") {
-    throw new Error("Claude declined this request (refusal).");
+
+  // A malformed JSON reply is almost always an output that got cut off
+  // (max_tokens) or a transient hiccup — say which, and retry the hiccup once.
+  for (let attempt = 0; ; attempt++) {
+    const msg = await send(body);
+    recordUsage(model, msg.usage);
+    if (msg.stop_reason === "refusal") {
+      throw new Error("Claude declined this request (refusal).");
+    }
+    const text = textFrom(msg);
+    try {
+      return JSON.parse(text) as T;
+    } catch (e) {
+      if (msg.stop_reason === "max_tokens") {
+        throw new Error(
+          `Output was cut off at the ${body.max_tokens}-token limit before the JSON finished — raise maxTokens for this call.`,
+        );
+      }
+      if (attempt >= 1) throw e;
+      console.warn("[claude] malformed JSON reply — retrying once:", e instanceof Error ? e.message : e);
+    }
   }
-  return JSON.parse(textFrom(msg)) as T;
 }

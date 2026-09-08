@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useActionState, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -15,6 +15,8 @@ import {
   ExternalLink,
   Sparkles,
   Undo2,
+  Copy,
+  Highlighter,
 } from "lucide-react";
 import type { CategoryPageDetailVM } from "@/lib/categories/service";
 import { SubmitButton } from "@/components/submit-button";
@@ -22,14 +24,16 @@ import {
   draftCategoryAction,
   autoFixCategoryAction,
   fixCategoryAction,
+  fixPassageCategoryAction,
   markCategoryNotLiveAction,
   markCategoryRefreshAction,
   setCategoryStrategyAction,
+  type PassageFixResult,
 } from "@/app/categories/actions";
 
 const READ_CSS = `
 .cat-read { font-size: 15.5px; line-height: 1.65; color: var(--text); }
-.cat-read h2 { font-size: 18px; font-weight: 600; line-height: 1.3; margin: 26px 0 8px; }
+.cat-read h2 { font-size: 18px; font-weight: 600; line-height: 1.3; margin: 26px 0 8px; scroll-margin-top: 16px; }
 .cat-read h3 { font-size: 15.5px; font-weight: 600; margin: 18px 0 6px; }
 .cat-read p { margin: 0 0 12px; max-width: 62ch; }
 .cat-read ul, .cat-read ol { margin: 0 0 12px 22px; max-width: 62ch; }
@@ -38,18 +42,16 @@ const READ_CSS = `
 .cat-read table { border-collapse: collapse; width: 100%; margin: 8px 0 16px; font-size: 13.5px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .cat-read th { text-align: left; font-weight: 500; color: var(--muted); background: var(--surface-2); padding: 9px 12px; }
 .cat-read td { padding: 9px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+.cat-read ::selection { background: var(--accent-bg); }
 `;
+
+type Tab = "read" | "score" | "html" | "text";
 
 function Progress({ step }: { step: 1 | 2 | 3 }) {
   return (
     <div className="grid grid-cols-3 gap-1.5">
       {[1, 2, 3].map((s) => (
-        <div
-          key={s}
-          className={`h-1 rounded-full ${
-            s < step ? "bg-[var(--success)]" : s === step ? "bg-[var(--accent)]" : "bg-[var(--border)]"
-          }`}
-        />
+        <div key={s} className={`h-1 rounded-full ${s < step ? "bg-[var(--success)]" : s === step ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`} />
       ))}
     </div>
   );
@@ -59,14 +61,100 @@ function money(n: number | null | undefined): string {
   return n == null ? "—" : `$${Math.round(n).toLocaleString("en-US")}`;
 }
 
+function CopyButton({ text, small = false }: { text: string; small?: boolean }) {
+  const [done, setDone] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setDone(true);
+      setTimeout(() => setDone(false), 1600);
+    } catch {
+      /* clipboard blocked — text is selectable */
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className={`flex items-center gap-1.5 rounded-full font-medium ${small ? "h-8 px-3 text-[12px]" : "h-9 px-3.5 text-[12.5px]"} ${
+        done ? "bg-[var(--success-bg)] text-[var(--success)]" : "bg-[var(--accent)] text-white hover:opacity-90"
+      }`}
+    >
+      {done ? <Check size={13} strokeWidth={2.5} /> : <Copy size={13} />} {done ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+function CopyBlock({ label, value, mono = false, limit }: { label: string; value: string; mono?: boolean; limit?: number }) {
+  const over = limit != null && value.length > limit;
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)]">
+      <div className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-2.5">
+        <div className="flex-1 text-[13px] font-medium">{label}</div>
+        <span className={`font-mono text-[11px] ${over ? "text-[var(--danger)]" : "text-[var(--subtle)]"}`}>
+          {limit != null ? `${value.length} / ${limit}` : `${value.split(/\s+/).filter(Boolean).length} words`}
+        </span>
+        <CopyButton text={value} small />
+      </div>
+      <pre className={`max-h-[46vh] overflow-auto whitespace-pre-wrap px-4 py-3 leading-relaxed ${mono ? "font-mono text-[11.5px] text-[var(--muted)]" : "text-[13.5px]"}`}>
+        {value}
+      </pre>
+    </div>
+  );
+}
+
 export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
+  const [tab, setTab] = useState<Tab>("read");
   const [fixOpen, setFixOpen] = useState(false);
   const [details, setDetails] = useState(false);
+
+  // Highlight → fix this passage
+  const readRef = useRef<HTMLDivElement>(null);
+  const [sel, setSel] = useState<{ text: string; top: number; left: number } | null>(null);
+  const [passage, setPassage] = useState<string | null>(null);
+  const [passageResult, passageAction, passagePending] = useActionState<PassageFixResult, FormData>(
+    fixPassageCategoryAction,
+    null,
+  );
+  // The result we'd already seen when the panel was opened — so a fresh success
+  // closes the panel, but a stale one from an earlier fix doesn't. (Derived, no effect.)
+  const [seenResult, setSeenResult] = useState<PassageFixResult>(null);
+  const freshResult = passageResult !== seenResult ? passageResult : null;
+  const panelOpen = passage != null && !freshResult?.ok;
+
+  function onMouseUp() {
+    const s = window.getSelection();
+    const text = s?.toString().trim() ?? "";
+    if (!s || text.length < 4 || !readRef.current) {
+      setSel(null);
+      return;
+    }
+    const range = s.getRangeAt(0);
+    if (!readRef.current.contains(range.commonAncestorContainer)) {
+      setSel(null);
+      return;
+    }
+    const rect = range.getBoundingClientRect();
+    const host = readRef.current.getBoundingClientRect();
+    setSel({ text, top: rect.top - host.top - 44, left: Math.max(0, rect.left - host.left) });
+  }
+
   const hasDraft = Boolean(p.bodyHtml);
   const drafting = p.status === "DRAFTING";
   const issueCount = p.factIssues.length + (p.overall != null && p.overall < p.threshold ? 1 : 0);
   const btn = "flex h-[46px] items-center gap-2 rounded-full px-6 text-[14px] font-semibold";
   const quiet = "flex h-[44px] items-center gap-1.5 text-[13px] text-[var(--muted)] hover:text-[var(--text)]";
+  const tabBtn = (t: Tab, label: string) => (
+    <button
+      type="button"
+      onClick={() => setTab(t)}
+      className={`h-9 rounded-full px-3.5 text-[13px] font-medium ${
+        tab === t ? "bg-[var(--surface-2)] text-[var(--text)]" : "text-[var(--muted)] hover:text-[var(--text)]"
+      }`}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <div className="relative -m-6 flex h-[calc(100vh-49px)] flex-col">
@@ -95,9 +183,7 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
               Writing — live catalog, plan, draft, editor pass, fact-check, grade. Usually 2–4 minutes. This page updates itself.
             </div>
           )}
-          {!drafting && p.status === "NOT_STARTED" && (
-            <div className="text-[13px] text-[var(--muted)]">Nothing written yet.</div>
-          )}
+          {!drafting && p.status === "NOT_STARTED" && <div className="text-[13px] text-[var(--muted)]">Nothing written yet.</div>}
           {!drafting && p.status === "DRAFT_READY" && (
             <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[13px] text-[var(--muted)]">
               <span className="flex items-center gap-1.5 rounded-full bg-[var(--success-bg)] px-[11px] py-[5px] text-[12px] font-semibold text-[var(--success)]">
@@ -119,17 +205,26 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
           {!drafting && p.status === "NEEDS_FIX" && (
             <div className="rounded-xl border border-[var(--warn)] bg-[var(--warn-bg)] px-5 py-4">
               <div className="flex items-center gap-2 text-[14px] font-semibold text-[var(--warn)]">
-                <AlertTriangle size={16} /> Needs {issueCount} fix{issueCount === 1 ? "" : "es"}
-                {p.overall != null && <span className="font-normal opacity-80">· score {p.overall} of {p.threshold}</span>}
-              </div>
-              <ul className="mt-2 list-disc pl-5 text-[13px] leading-relaxed text-[var(--warn)]">
-                {p.factIssues.slice(0, 4).map((i, k) => (
-                  <li key={k}>{i}</li>
-                ))}
-                {p.overall != null && p.overall < p.threshold && p.gradeNotes && (
-                  <li>{p.gradeNotes.split(/(?<=[.;])\s+/)[0]}</li>
+                <AlertTriangle size={16} />
+                {p.draftFailed ? "The last redraft hit an error" : `Needs ${issueCount} fix${issueCount === 1 ? "" : "es"}`}
+                {p.overall != null && !p.draftFailed && (
+                  <span className="font-normal opacity-80">
+                    · score {p.overall} of {p.threshold}
+                  </span>
                 )}
-              </ul>
+              </div>
+              {p.draftFailed ? (
+                <p className="mt-1.5 text-[13px] text-[var(--warn)]">
+                  Nothing was lost — the previous draft is still below. Press <span className="font-semibold">Fix these</span> to run it again.
+                </p>
+              ) : (
+                <ul className="mt-2 list-disc pl-5 text-[13px] leading-relaxed text-[var(--warn)]">
+                  {p.factIssues.slice(0, 4).map((i, k) => (
+                    <li key={k}>{i}</li>
+                  ))}
+                  {p.overall != null && p.overall < p.threshold && p.gradeNotes && <li>{p.gradeNotes.split(/(?<=[.;])\s+/)[0]}</li>}
+                </ul>
+              )}
             </div>
           )}
           {!drafting && p.status === "LIVE" && (
@@ -153,9 +248,40 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
             </div>
           )}
 
-          {/* The page, as a shopper reads it */}
-          {hasDraft ? (
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-12 py-10">
+          {/* Tabs */}
+          {hasDraft && (
+            <div className="flex items-center gap-1 border-b border-[var(--border)] pb-2">
+              {tabBtn("read", "Read")}
+              {tabBtn("score", "Score")}
+              {tabBtn("html", "HTML")}
+              {tabBtn("text", "Text")}
+              {tab === "read" && (
+                <span className="ml-auto flex items-center gap-1.5 text-[11.5px] text-[var(--subtle)]">
+                  <Highlighter size={12} /> Highlight any text to fix just that part
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* READ */}
+          {hasDraft && tab === "read" && (
+            <div ref={readRef} onMouseUp={onMouseUp} className="relative rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-12 py-10">
+              {sel && !panelOpen && (
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setPassage(sel.text);
+                    setSeenResult(passageResult);
+                    setSel(null);
+                    window.getSelection()?.removeAllRanges();
+                  }}
+                  style={{ top: sel.top, left: sel.left }}
+                  className="absolute z-10 flex h-9 items-center gap-1.5 rounded-full bg-[var(--accent)] px-3.5 text-[12.5px] font-semibold text-white shadow-lg hover:opacity-90"
+                >
+                  <Wand2 size={13} /> Fix this
+                </button>
+              )}
               <h1 className="text-[26px] font-semibold leading-tight tracking-tight">{p.h1}</h1>
               <p className="mt-5 max-w-[62ch] text-[15.5px] leading-[1.65] text-[var(--text)]">{p.intro}</p>
               <div className="mt-6 flex h-16 items-center justify-center rounded-lg border border-dashed border-[var(--border-strong)] text-[12px] tracking-wider text-[var(--subtle)]">
@@ -163,24 +289,155 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
               </div>
               <div className="cat-read mt-2" dangerouslySetInnerHTML={{ __html: p.bodyHtml ?? "" }} />
             </div>
-          ) : (
-            !drafting && (
-              <div className="rounded-xl border border-dashed border-[var(--border-strong)] px-6 py-16 text-center text-[13px] text-[var(--muted)]">
-                Drafting pulls this collection’s live products and prices, plans the page for its keyword, writes it,
-                tightens it, checks every number against the catalog, and grades it.
-              </div>
-            )
           )}
 
-          {/* Fix panel */}
+          {/* Passage fix panel */}
+          {panelOpen && (
+            <div className="rounded-xl border border-[var(--accent)] bg-[var(--surface-1)] p-5">
+              <div className="mb-2 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-[var(--accent)]">
+                <Highlighter size={13} /> Fix this passage
+              </div>
+              <blockquote className="mb-3 max-h-24 overflow-y-auto rounded-lg border-l-2 border-[var(--accent)] bg-[var(--surface-2)] px-3.5 py-2.5 text-[13px] leading-relaxed text-[var(--muted)]">
+                “{passage}”
+              </blockquote>
+              <form action={passageAction} className="flex flex-col gap-3">
+                <input type="hidden" name="id" value={p.id} />
+                <input type="hidden" name="selectedText" value={passage} />
+                <textarea
+                  name="instruction"
+                  rows={2}
+                  required
+                  autoFocus
+                  placeholder="What should change here? e.g. ‘shorter’, ‘drop the veneer mention’, ‘say this in plain English’"
+                  className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3.5 py-3 text-[14px]"
+                />
+                <div className="flex flex-wrap items-center gap-4">
+                  <button type="submit" disabled={passagePending} className={`${btn} bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-60`}>
+                    {passagePending ? <Loader2 size={15} className="animate-spin" /> : <Wand2 size={15} />}
+                    {passagePending ? "Rewriting…" : "Rewrite this passage"}
+                  </button>
+                  <span className="text-[12px] text-[var(--subtle)]">Only this passage changes. About 30 seconds.</span>
+                  <button type="button" onClick={() => setPassage(null)} className="ml-auto text-[13px] text-[var(--muted)] hover:text-[var(--text)]">
+                    Cancel
+                  </button>
+                </div>
+              </form>
+              {freshResult && !freshResult.ok && (
+                <p className="mt-3 text-[13px] text-[var(--warn)]">{freshResult.message}</p>
+              )}
+            </div>
+          )}
+          {freshResult?.ok && (
+            <div className="flex items-center gap-2 rounded-xl border border-[var(--success)] bg-[var(--success-bg)] px-4 py-3 text-[13px] text-[var(--success)]">
+              <Check size={15} strokeWidth={2.5} /> {freshResult.message}
+            </div>
+          )}
+
+          {/* SCORE */}
+          {hasDraft && tab === "score" && (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-end justify-between rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-6 py-5">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">Overall</div>
+                  <div className={`text-[40px] font-semibold leading-none tracking-tight ${p.overall != null && p.overall >= p.threshold ? "text-[var(--success)]" : "text-[var(--warn)]"}`}>
+                    {p.overall ?? "—"}
+                  </div>
+                  <div className="mt-1 text-[12px] text-[var(--subtle)]">{p.threshold} to pass</div>
+                </div>
+                <div className="flex flex-col items-end gap-1 text-[12.5px] text-[var(--muted)]">
+                  {p.words != null && <span>{p.words.toLocaleString()} words</span>}
+                  {p.links && (
+                    <span>
+                      {p.links.internal} internal · {p.links.external} authority links
+                    </span>
+                  )}
+                  <span className={p.factIssues.length ? "text-[var(--warn)]" : "text-[var(--success)]"}>
+                    {p.factIssues.length ? `${p.factIssues.length} fact-check issue${p.factIssues.length === 1 ? "" : "s"}` : "Fact-check passed"}
+                  </span>
+                </div>
+              </div>
+
+              {p.gradeDimensions.length > 0 && (
+                <div className="flex flex-col gap-3.5 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-6 py-5">
+                  {p.gradeDimensions.map((d) => {
+                    const pct = d.max ? d.score / d.max : 0;
+                    return (
+                      <div key={d.key}>
+                        <div className="flex items-center justify-between text-[13px]">
+                          <span className="font-medium">{d.label}</span>
+                          <span className="font-mono text-[12px] text-[var(--muted)]">
+                            {d.score}/{d.max}
+                          </span>
+                        </div>
+                        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]">
+                          <div className={`h-full rounded-full ${pct >= 0.85 ? "bg-[var(--success)]" : pct >= 0.6 ? "bg-[var(--warn)]" : "bg-[var(--danger)]"}`} style={{ width: `${Math.round(pct * 100)}%` }} />
+                        </div>
+                        {d.note && <div className="mt-1.5 text-[12.5px] leading-snug text-[var(--muted)]">{d.note}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {p.factIssues.length > 0 && (
+                <div className="rounded-xl border border-[var(--warn)] bg-[var(--warn-bg)] px-5 py-4 text-[13px] text-[var(--warn)]">
+                  <div className="mb-1 font-semibold">Fact-check</div>
+                  <ul className="list-disc pl-5 leading-relaxed">
+                    {p.factIssues.map((i, k) => (
+                      <li key={k}>{i}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {p.gradeNotes && !p.draftFailed && (
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-5 py-4">
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">What would raise it</div>
+                  <p className="text-[13.5px] leading-relaxed text-[var(--muted)]">{p.gradeNotes}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* HTML */}
+          {hasDraft && tab === "html" && (
+            <div className="flex flex-col gap-3">
+              <CopyBlock label="Collection title (H1)" value={p.h1 ?? ""} limit={70} />
+              <CopyBlock label="Intro — above the grid" value={p.intro ?? ""} />
+              <CopyBlock label="Long-form — below the grid (HTML)" value={p.bodyHtml ?? ""} mono />
+              <CopyBlock label="SEO title" value={p.seoTitle ?? ""} limit={60} />
+              <CopyBlock label="Meta description" value={p.metaDescription ?? ""} limit={155} />
+              <CopyBlock label="FAQ schema (JSON-LD, optional)" value={p.faqJsonLd ?? ""} mono />
+            </div>
+          )}
+
+          {/* TEXT */}
+          {hasDraft && tab === "text" && (
+            <div className="flex flex-col gap-3">
+              <CopyBlock label="Collection title (H1)" value={p.h1 ?? ""} limit={70} />
+              <CopyBlock label="Intro — above the grid" value={p.intro ?? ""} />
+              <CopyBlock label="Long-form — below the grid (plain text)" value={p.bodyText ?? ""} />
+              <CopyBlock label="SEO title" value={p.seoTitle ?? ""} limit={60} />
+              <CopyBlock label="Meta description" value={p.metaDescription ?? ""} limit={155} />
+            </div>
+          )}
+
+          {!hasDraft && !drafting && (
+            <div className="rounded-xl border border-dashed border-[var(--border-strong)] px-6 py-16 text-center text-[13px] text-[var(--muted)]">
+              Drafting pulls this collection’s live products and prices, plans the page for its keyword, writes it, tightens it,
+              checks every number against the catalog, and grades it.
+            </div>
+          )}
+
+          {/* Fix with a note (whole page) */}
           {fixOpen && hasDraft && !drafting && (
             <div className="rounded-xl border border-[var(--accent)] bg-[var(--surface-1)] p-5">
               <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-[var(--accent)]">
-                <Wand2 size={13} /> Fix something
+                <Wand2 size={13} /> Fix with a note
               </div>
               <p className="mb-3 text-[13px] text-[var(--muted)]">
-                Say what to change in plain words. It redrafts this page now. Tick “remember” and the rule applies to every
-                future category page and blog.
+                For changes across the whole page. It redrafts now. Tick “remember” and the rule applies to every future category page and blog.
+                (To change one spot, highlight it on the Read tab instead.)
               </p>
               <form action={fixCategoryAction} className="flex flex-col gap-3">
                 <input type="hidden" name="id" value={p.id} />
@@ -222,7 +479,7 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
           <div className="flex items-center gap-[22px]">
             {hasDraft && !drafting && p.status !== "LIVE" && (
               <button type="button" onClick={() => setFixOpen((v) => !v)} className={quiet}>
-                <Wand2 size={14} /> Fix something
+                <Wand2 size={14} /> Fix with a note
               </button>
             )}
             {(hasDraft || p.brief) && (
@@ -236,7 +493,12 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
               </a>
             )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
+            {p.status === "NEEDS_FIX" && hasDraft && (
+              <Link href={`/categories/${p.id}/paste`} className="text-[13px] text-[var(--muted)] hover:text-[var(--text)]">
+                Paste anyway →
+              </Link>
+            )}
             {p.status === "DRAFT_READY" && (
               <Link href={`/categories/${p.id}/paste`} className={`${btn} bg-[var(--success)] text-white hover:brightness-110`}>
                 Looks good — paste it <ArrowRight size={15} />
@@ -246,7 +508,7 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
               <form action={autoFixCategoryAction}>
                 <input type="hidden" name="id" value={p.id} />
                 <SubmitButton icon={<Wand2 size={15} />} pendingLabel="Starting…" className={`${btn} bg-[var(--accent)] text-white hover:opacity-90`}>
-                  Fix these
+                  {p.draftFailed ? "Try again" : "Fix these"}
                 </SubmitButton>
               </form>
             )}
@@ -275,81 +537,17 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
         </div>
       </div>
 
-      {/* Details drawer */}
+      {/* Details drawer — facts, plan, strategy */}
       {details && (
         <div className="absolute inset-0 z-20 flex justify-end bg-black/40" onClick={() => setDetails(false)}>
-          <div
-            className="flex h-full w-[400px] flex-col overflow-y-auto border-l border-[var(--border)] bg-[var(--surface-1)] p-6"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="flex h-full w-[400px] flex-col overflow-y-auto border-l border-[var(--border)] bg-[var(--surface-1)] p-6" onClick={(e) => e.stopPropagation()}>
             <div className="mb-5 flex items-center justify-between">
               <div className="text-[15px] font-semibold">Details</div>
               <button type="button" onClick={() => setDetails(false)} className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-[var(--surface-2)]" aria-label="Close">
                 <X size={16} />
               </button>
             </div>
-
             <div className="flex flex-col gap-6 text-[13px]">
-              {/* Score */}
-              {p.gradeDimensions.length > 0 && (
-                <section>
-                  <div className="mb-2 flex items-baseline justify-between">
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">Score</div>
-                    <div className={`text-[20px] font-semibold ${p.overall != null && p.overall >= p.threshold ? "text-[var(--success)]" : "text-[var(--warn)]"}`}>
-                      {p.overall}<span className="text-[12px] font-normal text-[var(--subtle)]"> / {p.threshold} to pass</span>
-                    </div>
-                  </div>
-                  <div className="flex flex-col gap-2.5">
-                    {p.gradeDimensions.map((d) => (
-                      <div key={d.key}>
-                        <div className="flex items-center justify-between text-[12.5px]">
-                          <span>{d.label}</span>
-                          <span className="font-mono text-[11.5px] text-[var(--muted)]">
-                            {d.score}/{d.max}
-                          </span>
-                        </div>
-                        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]">
-                          <div
-                            className={`h-full rounded-full ${d.score / d.max >= 0.85 ? "bg-[var(--success)]" : d.score / d.max >= 0.6 ? "bg-[var(--warn)]" : "bg-[var(--danger)]"}`}
-                            style={{ width: `${Math.round((d.score / d.max) * 100)}%` }}
-                          />
-                        </div>
-                        {d.note && <div className="mt-1 text-[11.5px] leading-snug text-[var(--subtle)]">{d.note}</div>}
-                      </div>
-                    ))}
-                  </div>
-                  {p.gradeNotes && (
-                    <p className="mt-3 rounded-lg bg-[var(--surface-2)] px-3 py-2.5 text-[12.5px] leading-relaxed text-[var(--muted)]">
-                      {p.gradeNotes}
-                    </p>
-                  )}
-                </section>
-              )}
-
-              {/* Fact-check */}
-              {hasDraft && (
-                <section>
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">Fact-check</div>
-                  {p.factIssues.length === 0 ? (
-                    <div className="flex items-center gap-2 text-[var(--success)]">
-                      <Check size={14} strokeWidth={2.5} /> Every price, link and claim passed
-                    </div>
-                  ) : (
-                    <ul className="list-disc pl-5 text-[var(--warn)]">
-                      {p.factIssues.map((i, k) => (
-                        <li key={k}>{i}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {!p.hasPolicies && (
-                    <p className="mt-2 text-[12px] text-[var(--subtle)]">
-                      No shipping/returns policy page was readable on the site, so the copy avoids shipping specifics.
-                    </p>
-                  )}
-                </section>
-              )}
-
-              {/* Catalog facts */}
               {p.facts && (
                 <section>
                   <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">Live catalog</div>
@@ -380,10 +578,12 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
                     )}
                   </dl>
                   <p className="mt-1.5 text-[11px] text-[var(--subtle)]">Pulled {new Date(p.facts.fetchedAt).toLocaleString()}</p>
+                  {!p.hasPolicies && (
+                    <p className="mt-2 text-[12px] text-[var(--subtle)]">No shipping/returns policy page was readable on the site, so the copy avoids shipping specifics.</p>
+                  )}
                 </section>
               )}
 
-              {/* Brief */}
               {p.brief && (
                 <section>
                   <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">Plan</div>
@@ -411,7 +611,6 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
                 </section>
               )}
 
-              {/* Strategy */}
               <section>
                 <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">Strategy</div>
                 <form action={setCategoryStrategyAction} className="flex flex-col gap-2.5">
@@ -432,7 +631,17 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
                 </form>
               </section>
 
-              {/* Danger-ish actions */}
+              {p.fixNotes.length > 0 && (
+                <section>
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">Fixes applied</div>
+                  <ul className="list-disc pl-5 text-[12.5px] text-[var(--muted)]">
+                    {p.fixNotes.map((n, k) => (
+                      <li key={k}>{n}</li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
               {(hasDraft || p.status === "LIVE") && !drafting && (
                 <section className="flex flex-col gap-2 border-t border-[var(--border)] pt-4">
                   {p.status !== "LIVE" && (

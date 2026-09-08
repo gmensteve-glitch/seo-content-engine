@@ -27,11 +27,39 @@ function sameTabInternal(html: string, domain: string): string {
   );
 }
 
+/** URL-safe id for a heading, so any in-page anchor resolves on the live page. */
+export function headingId(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/&[a-z]+;/g, " ")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .slice(0, 60);
+}
+
+/** Strip any table-of-contents / "jump to" list the writer slipped in. */
+function stripJumpLists(mdText: string): string {
+  return mdText
+    .split(/\n{2,}/)
+    .filter((block) => {
+      const lines = block.trim().split("\n");
+      const isList = lines.length >= 2 && lines.every((l) => /^\s*([-*•]|\d+[.)])\s+/.test(l));
+      const anchors = (block.match(/\]\(#[^)]+\)/g) ?? []).length;
+      return !(isList && anchors >= Math.max(2, lines.length - 1)) && !/^\s*(jump to|in this guide|table of contents|contents)\s*:?\s*$/i.test(block.trim());
+    })
+    .join("\n\n");
+}
+
 /** The below-the-grid HTML: sections, table, FAQ, why-us, related guides. */
 export function assembleBodyHtml(draft: CategoryDraftJson, businessName: string, domain = ""): string {
   const parts: string[] = [];
   for (const s of draft.sections) {
-    parts.push(`<h2>${escapeHtml(s.heading.trim())}</h2>\n${md(s.bodyMarkdown)}`);
+    const heading = s.heading.trim();
+    const body = md(stripJumpLists(s.bodyMarkdown));
+    // A section that was only a table of contents has nothing left — drop it.
+    if (!body.replace(/<[^>]+>/g, "").trim()) continue;
+    parts.push(`<h2 id="${headingId(heading)}">${escapeHtml(heading)}</h2>\n${body}`);
   }
   const t = draft.comparisonTable;
   if (t && t.headers.length && t.rows.length) {
@@ -39,24 +67,25 @@ export function assembleBodyHtml(draft: CategoryDraftJson, businessName: string,
     const rows = t.rows
       .map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`)
       .join("\n");
+    const cap = t.caption.trim();
     parts.push(
-      `<h2>${escapeHtml(t.caption.trim())}</h2>\n<table>\n<thead><tr>${head}</tr></thead>\n<tbody>\n${rows}\n</tbody>\n</table>`,
+      `<h2 id="${headingId(cap)}">${escapeHtml(cap)}</h2>\n<table>\n<thead><tr>${head}</tr></thead>\n<tbody>\n${rows}\n</tbody>\n</table>`,
     );
   }
   if (draft.faqs.length) {
     parts.push(
-      `<h2>Frequently asked questions</h2>\n` +
+      `<h2 id="faq">Frequently asked questions</h2>\n` +
         draft.faqs
           .map((f) => `<h3>${escapeHtml(f.question.trim())}</h3>\n<p>${escapeHtml(f.answer.trim())}</p>`)
           .join("\n"),
     );
   }
   if (draft.whyUs.trim()) {
-    parts.push(`<h2>Why ${escapeHtml(businessName)}</h2>\n${md(draft.whyUs)}`);
+    parts.push(`<h2 id="why-${headingId(businessName)}">Why ${escapeHtml(businessName)}</h2>\n${md(stripJumpLists(draft.whyUs))}`);
   }
   if (draft.relatedGuides.length) {
     parts.push(
-      `<h2>Related guides</h2>\n<ul>\n` +
+      `<h2 id="related-guides">Related guides</h2>\n<ul>\n` +
         draft.relatedGuides
           .map((g) => `<li><a href="${escapeHtml(g.url)}">${escapeHtml(g.title)}</a></li>`)
           .join("\n") +
@@ -168,8 +197,13 @@ export function factCheck(
   const allowedSet = new Set(allowed.map((l) => l.url.replace(/\/+$/, "")));
   const authorityHosts = AUTHORITY_LINKS.map((l) => new URL(l.url).hostname.replace(/^www\./, ""));
   const ours = domain.replace(/^www\./, "");
+  const ids = new Set([...bodyHtml.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
   for (const m of bodyHtml.matchAll(/href="([^"]+)"/g)) {
     const href = m[1].replace(/\/+$/, "");
+    if (href.startsWith("#")) {
+      if (!ids.has(href.slice(1))) issues.push(`in-page link to a heading that doesn't exist: ${href}`);
+      continue;
+    }
     const internal = href.startsWith("/") || href.includes(ours);
     if (internal) {
       if (!allowedSet.has(href)) issues.push(`internal link to a page not in the allowed list: ${href}`);
@@ -212,6 +246,27 @@ export function factCheck(
 
 export function wordCount(draft: CategoryDraftJson): number {
   return draftAsMarkdown(draft, "").split(/\s+/).filter(Boolean).length;
+}
+
+/** Plain-text rendition of the body HTML, for the Text tab / a text-only paste. */
+export function bodyAsText(html: string): string {
+  return html
+    .replace(/<h2[^>]*>/gi, "\n\n")
+    .replace(/<\/h2>/gi, "\n")
+    .replace(/<h3[^>]*>/gi, "\n")
+    .replace(/<\/h3>/gi, "\n")
+    .replace(/<\/p>|<\/li>|<br\s*\/?>|<\/tr>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<\/t[dh]>/gi, "  ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /** Internal + authority link counts in the assembled body. */

@@ -125,6 +125,7 @@ model CategoryPage {
   overall       Int?     // rubric grade 0–100
   gradeNotes    String?  @db.Text
   gradeJson     String?  @db.Text // per-dimension scores + notes (the Score view)
+  draftJson     String?  @db.Text // the writer's structured blocks (for passage-level fixes)
   factIssues    String[] @default([]) // fact-check failures (empty = passed)
   fixNotes      String[] @default([]) // operator "fix it" notes applied on regeneration
   draftedAt     DateTime?

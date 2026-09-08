@@ -14,11 +14,13 @@ import {
   writeCategoryDraft,
   reviseCategoryDraft,
   tightenCategoryDraft,
+  rewriteCategoryPassage,
   tierSpec,
   type CategoryBrief,
   type CategoryContext,
   type CategoryDraftJson,
   type LinkTarget,
+  type PassageTarget,
 } from "@/lib/agents/category-writer";
 import {
   assembleBodyHtml,
@@ -28,6 +30,7 @@ import {
   snapshotHash,
   wordCount,
   linkCounts,
+  bodyAsText,
 } from "@/lib/categories/assemble";
 import { gradeDraft } from "@/lib/agents/grader";
 import { RUBRIC, type GradeResult } from "@/lib/grader/rubric";
@@ -80,6 +83,8 @@ export interface CategoryPageDetailVM extends CategoryPageVM {
   h1: string | null;
   intro: string | null;
   bodyHtml: string | null;
+  bodyText: string | null;
+  draftFailed: boolean; // the last (re)draft hit a technical error
   seoTitle: string | null;
   metaDescription: string | null;
   faqJsonLd: string | null;
@@ -276,6 +281,8 @@ export async function getCategoryPage(id: string): Promise<CategoryPageDetailVM 
     h1: row.h1,
     intro: row.intro,
     bodyHtml: row.bodyHtml,
+    bodyText: row.bodyHtml ? bodyAsText(row.bodyHtml) : null,
+    draftFailed: Boolean(row.gradeNotes?.startsWith("Draft failed")),
     seoTitle: row.seoTitle,
     metaDescription: row.metaDescription,
     faqJsonLd: row.faqJsonLd,
@@ -474,6 +481,7 @@ export async function draftCategoryPage(id: string, opts: { note?: string } = {}
         overall: result.grade.overall,
         gradeNotes: result.grade.feedback,
         gradeJson: JSON.stringify({ overall: result.grade.overall, dimensions: result.grade.dimensions }),
+        draftJson: JSON.stringify(result.draft),
         factIssues: result.issues,
         fixNotes: ctx.fixNotes,
         draftedAt: new Date(),
@@ -492,6 +500,121 @@ export async function draftCategoryPage(id: string, opts: { note?: string } = {}
     });
     return toVM(updated, domain);
   }
+}
+
+// ── Targeted passage fix ───────────────────────────────────────
+
+const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+const stripMd = (s: string) =>
+  s
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[*_`#>]/g, "")
+    .replace(/^\s*([-•]|\d+[.)])\s+/gm, "");
+
+/** Find which block of the draft contains the highlighted text. */
+function locatePassage(draft: CategoryDraftJson, selected: string): PassageTarget | null {
+  const sel = norm(selected);
+  // A long selection may span blocks; match on its opening words.
+  const probe = sel.length > 80 ? sel.slice(0, 80) : sel;
+  if (!probe) return null;
+  const has = (t: string) => norm(stripMd(t)).includes(probe);
+  if (has(draft.h1)) return { kind: "h1" };
+  if (has(draft.intro)) return { kind: "intro" };
+  for (let i = 0; i < draft.sections.length; i++) {
+    if (has(draft.sections[i].heading) || has(draft.sections[i].bodyMarkdown)) return { kind: "section", index: i };
+  }
+  for (let i = 0; i < draft.faqs.length; i++) {
+    if (has(draft.faqs[i].question) || has(draft.faqs[i].answer)) return { kind: "faq", index: i };
+  }
+  if (has(draft.whyUs)) return { kind: "whyUs" };
+  return null;
+}
+
+/**
+ * Rewrite ONE highlighted passage per the operator's instruction, then
+ * re-assemble, re-check and re-grade the page. Fast (one small model call +
+ * a grade) and surgical — nothing else on the page changes.
+ */
+export async function fixCategoryPassage(
+  id: string,
+  selectedText: string,
+  instruction: string,
+): Promise<{ ok: boolean; message: string }> {
+  requireDb();
+  const row = await prisma.categoryPage.findUnique({ where: { id } });
+  if (!row?.bodyHtml) return { ok: false, message: "Nothing to fix yet — draft the page first." };
+  if (!row.draftJson) {
+    return { ok: false, message: "This draft predates passage fixes — redraft once, then highlight-to-fix works." };
+  }
+  let draft: CategoryDraftJson;
+  try {
+    draft = JSON.parse(row.draftJson) as CategoryDraftJson;
+  } catch {
+    return { ok: false, message: "Couldn't read the stored draft — redraft the page." };
+  }
+  const target = locatePassage(draft, selectedText);
+  if (!target) {
+    return { ok: false, message: "Couldn't find that exact text in the draft. Try highlighting a shorter piece inside one paragraph." };
+  }
+
+  const biz = await prisma.business.findUnique({ where: { id: row.businessId } });
+  const threshold = biz?.qualityThreshold ?? 85;
+  const ctx = await contextFor(row);
+  const brief = row.briefJson ? (JSON.parse(row.briefJson) as CategoryBrief) : await buildCategoryBrief(ctx);
+
+  const replacement = await rewriteCategoryPassage(ctx, draft, target, selectedText, instruction);
+  if (!replacement.trim()) return { ok: false, message: "The rewrite came back empty — try rephrasing the instruction." };
+
+  const next: CategoryDraftJson = JSON.parse(JSON.stringify(draft)) as CategoryDraftJson;
+  switch (target.kind) {
+    case "h1":
+      next.h1 = replacement;
+      break;
+    case "intro":
+      next.intro = replacement;
+      break;
+    case "section":
+      next.sections[target.index].bodyMarkdown = replacement;
+      break;
+    case "faq":
+      next.faqs[target.index].answer = replacement;
+      break;
+    case "whyUs":
+      next.whyUs = replacement;
+      break;
+  }
+
+  const result = await assembleAndCheck(ctx, brief, next, threshold);
+  const ok = result.issues.length === 0 && result.grade.overall >= threshold;
+  const where =
+    target.kind === "section"
+      ? `“${draft.sections[target.index].heading}”`
+      : target.kind === "faq"
+        ? "an FAQ answer"
+        : target.kind;
+  await prisma.categoryPage.update({
+    where: { id },
+    data: {
+      status: row.status === "LIVE" ? "LIVE" : ok ? "DRAFT_READY" : "NEEDS_FIX",
+      h1: next.h1.trim(),
+      intro: next.intro.trim(),
+      bodyHtml: result.bodyHtml,
+      faqJsonLd: faqJsonLd(next.faqs),
+      overall: result.grade.overall,
+      gradeNotes: result.grade.feedback,
+      gradeJson: JSON.stringify({ overall: result.grade.overall, dimensions: result.grade.dimensions }),
+      draftJson: JSON.stringify(next),
+      factIssues: result.issues,
+      fixNotes: [...row.fixNotes, `${where}: ${instruction.trim()}`],
+      draftedAt: new Date(),
+    },
+  });
+  return {
+    ok: true,
+    message: ok
+      ? `Rewrote ${where}. Score ${result.grade.overall}.`
+      : `Rewrote ${where}. Score ${result.grade.overall} — ${result.issues.length ? result.issues[0] : "still under the bar; see Score."}`,
+  };
 }
 
 /** Draft every undrafted page in a tier, one after another (bounded). */

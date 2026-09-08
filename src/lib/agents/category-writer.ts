@@ -8,7 +8,7 @@
 // isn't there, and a deterministic fact-check enforces it afterwards.
 // No images — the product grid is the visual.
 
-import { structured, MODELS } from "@/lib/ai/claude";
+import { structured, completeText, MODELS } from "@/lib/ai/claude";
 import { aiEnabled, dataforseoEnabled, firecrawlEnabled } from "@/lib/env";
 import { serpTop, keywordVolumes } from "@/lib/connectors/dataforseo";
 import { scrapeMany } from "@/lib/connectors/firecrawl";
@@ -334,6 +334,7 @@ function guidance(ctx: CategoryContext): string {
 - PRICES IN PROSE are whole dollars: "$1,299", "from $999", "$999–$4,999". Never ".99" in running text (the table may show exact prices).
 - NO PLACEHOLDERS: this is delivered as finished text. No brackets like [price], no TODOs, no "add …" notes.
 - NO IMAGES: text, lists, one table at most. Never reference or embed an image.
+- NO TABLE OF CONTENTS, no "jump to" list, no in-page anchor links (#…). The headings are the navigation.
 - SAY EACH THING ONCE. The intro is the only summary on the page; the first section must NOT restate it. No "quick answer" or recap paragraph anywhere in the sections. The Funeral Rule is explained in full exactly once (in a "your rights" section) and may be mentioned in passing at most once more, in a few words. No repeated price ranges, delivery promises, or "factory-direct" lines across sections.
 - INTERNAL LINKS: you may link ONLY to URLs in the INTERNAL PAGES list, using the exact URL given, with natural anchor text (a keyword variant, never "click here"). Aim for ${spec.links[0]}–${spec.links[1]} internal links spread across sections. Do not invent any other internal URL.
 - AUTHORITY LINKS: include 2–3 external links, chosen ONLY from this list, inline where the claim is made:
@@ -410,7 +411,7 @@ export async function writeCategoryDraft(ctx: CategoryContext, brief: CategoryBr
   return structured<CategoryDraftJson>({
     model: MODELS.writer,
     effort: "high",
-    maxTokens: 16000,
+    maxTokens: 28000,
     system: DRAFT_SYSTEM,
     schema: DRAFT_SCHEMA,
     prompt: `STORE: ${ctx.businessName} (${ctx.domain})
@@ -447,6 +448,72 @@ Write the page now as the JSON blocks.`,
   });
 }
 
+/** Where a highlighted passage lives in the draft. */
+export type PassageTarget =
+  | { kind: "h1" }
+  | { kind: "intro" }
+  | { kind: "section"; index: number }
+  | { kind: "faq"; index: number }
+  | { kind: "whyUs" };
+
+/**
+ * Targeted fix — rewrite ONE passage the operator highlighted, per their
+ * instruction, leaving everything else untouched. Returns the replacement in
+ * the passage's own format (plain text for h1/intro/FAQ answers, Markdown for
+ * sections and why-us).
+ */
+export async function rewriteCategoryPassage(
+  ctx: CategoryContext,
+  draft: CategoryDraftJson,
+  target: PassageTarget,
+  selectedText: string,
+  instruction: string,
+): Promise<string> {
+  const current =
+    target.kind === "h1"
+      ? draft.h1
+      : target.kind === "intro"
+        ? draft.intro
+        : target.kind === "section"
+          ? draft.sections[target.index]?.bodyMarkdown ?? ""
+          : target.kind === "faq"
+            ? draft.faqs[target.index]?.answer ?? ""
+            : draft.whyUs;
+  const format =
+    target.kind === "section" || target.kind === "whyUs"
+      ? "Markdown (paragraphs, short lists, links in [text](url) form — only allowed URLs)"
+      : "plain text, no markdown, no links";
+  if (!aiEnabled()) return current;
+  const out = await completeText({
+    model: MODELS.writer,
+    effort: "medium",
+    maxTokens: 6000,
+    system: DRAFT_SYSTEM,
+    prompt: `The operator highlighted a passage in a category page and asked for a change. Rewrite ONLY this passage. Keep everything they didn't mention exactly as it is — same facts, same links, same length unless the instruction says otherwise.
+
+INSTRUCTION FROM THE OPERATOR:
+${instruction}
+
+HIGHLIGHTED TEXT (the part they mean):
+"${selectedText}"
+
+THE FULL PASSAGE THIS TEXT IS IN (return a replacement for ALL of it, in ${format}):
+${current}
+
+LIVE CATALOG FACTS (the only source of numbers and product names):
+${ctx.facts ? factsForPrompt(ctx.facts) : "(catalog not readable — state NO prices or product names)"}
+
+STORE POLICY (the only source for shipping / returns / guarantee claims):
+${ctx.policies || "(none readable — say details are confirmed at order)"}
+
+INTERNAL PAGES (the only internal URLs you may link):
+${linksForPrompt(ctx.links)}
+
+Rules that still apply: whole-dollar prices in prose; no placeholders; no images; no table of contents; no invented reviewers or credentials; the Funeral Rule stated accurately. Return ONLY the replacement passage — no preamble, no quotes, no code fences.`,
+  });
+  return out.replace(/^```[a-z]*\n?|```$/g, "").trim();
+}
+
 /**
  * Editor pass — the same model reads the draft as a demanding editor and
  * tightens it: removes every repeated fact or promise, the recap paragraphs,
@@ -459,7 +526,7 @@ export async function tightenCategoryDraft(ctx: CategoryContext, brief: Category
   return structured<CategoryDraftJson>({
     model: MODELS.writer,
     effort: "medium",
-    maxTokens: 16000,
+    maxTokens: 28000,
     system: `You are a demanding editor for e-commerce category pages. You cut repetition and filler ruthlessly and keep every concrete fact. You never add a fact, number, product, link or claim that isn't already in the draft.`,
     schema: DRAFT_SCHEMA,
     prompt: `Edit this category-page draft. Target ${spec.words[0]}–${spec.words[1]} words total (sections + FAQ + why-us).
@@ -498,7 +565,7 @@ export async function reviseCategoryDraft(
   return structured<CategoryDraftJson>({
     model: MODELS.writer,
     effort: "medium",
-    maxTokens: 16000,
+    maxTokens: 28000,
     system: DRAFT_SYSTEM,
     schema: DRAFT_SCHEMA,
     prompt: `Revise this category-page draft to fix EVERY issue listed. Keep everything that isn't flagged. Return the complete corrected JSON.
