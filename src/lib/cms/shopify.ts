@@ -29,8 +29,34 @@ export class ShopifyAdapter implements CmsAdapter {
   }
 
   private async req<T>(path: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(`${this.base()}${path}`, { ...init, headers: this.headers() });
-    if (!res.ok) throw new Error(`Shopify ${init?.method ?? "GET"} ${path} → HTTP ${res.status}`);
+    const url = `${this.base()}${path}`;
+    // Shopify calls occasionally fail at the network layer ("fetch failed" —
+    // a transient DNS/connect/TLS hiccup, common on serverless egress). Retry a
+    // few times with backoff before giving up, and surface the real underlying
+    // cause code (ENOTFOUND, ECONNREFUSED, cert error, timeout) so a genuine
+    // failure is diagnosable instead of an opaque "fetch failed".
+    let res: Response | null = null;
+    let netErr: unknown;
+    for (let attempt = 0; attempt < 3 && !res; attempt++) {
+      try {
+        res = await fetch(url, { ...init, headers: this.headers() });
+      } catch (e) {
+        netErr = e;
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      }
+    }
+    if (!res) {
+      const cause = (netErr as { cause?: { code?: string; message?: string } } | undefined)?.cause;
+      const detail =
+        cause?.code || cause?.message || (netErr instanceof Error ? netErr.message : "network error");
+      throw new Error(`couldn't reach ${this.cfg.storeDomain} (${detail})`);
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(
+        `Shopify ${init?.method ?? "GET"} ${path} → HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`,
+      );
+    }
     return (await res.json()) as T;
   }
 
