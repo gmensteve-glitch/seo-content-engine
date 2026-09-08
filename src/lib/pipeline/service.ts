@@ -2672,7 +2672,7 @@ export async function ensureHeroImage(
 export async function publishNow(
   draftId: string,
   publishState: "published" | "draft" = "published",
-): Promise<{ url: string; adminUrl: string | null }> {
+): Promise<{ url: string; adminUrl: string | null; live: boolean }> {
   requireDb();
 
   // Internal links go into the body BEFORE it hits the CMS.
@@ -2691,6 +2691,7 @@ export async function publishNow(
   let cmsId: string | null = null;
   let url = `/blogs/guides/${slug}`;
   let adminUrl: string | null = null;
+  let live = false; // true once the piece is actually in the store's CMS
 
   const connector = await prisma.connector.findUnique({
     where: { businessId_type: { businessId: draft.businessId, type: cmsConnectorType(platform) } },
@@ -2769,6 +2770,7 @@ export async function publishNow(
         : await adapter.publish(publishInput);
       cmsId = res.cmsId;
       url = res.url;
+      live = true;
       // Shopify now hosts the image — drop the base64 blob to reclaim DB space.
       if (heroRow?.heroImageData) {
         await prisma.draft
@@ -2781,9 +2783,12 @@ export async function publishNow(
         const handle = storeDomain.replace(/^https?:\/\//, "").replace(/\.myshopify\.com$/, "");
         adminUrl = `https://admin.shopify.com/store/${handle}/content/articles/${cmsId}`;
       }
-    } catch {
-      cmsId = null;
-      url = `/blogs/guides/${slug}`;
+    } catch (e) {
+      // A store IS connected, so a failure here is real — a bad/expired token,
+      // no blog to publish into, or a failed pre-publish check. Surface it
+      // instead of faking success with a dead local URL that 404s the operator.
+      const reason = e instanceof Error ? e.message : String(e);
+      throw new Error(`Couldn't publish to ${draft.business.name}'s Shopify — ${reason}`);
     }
   }
 
@@ -2804,7 +2809,7 @@ export async function publishNow(
 
   // Record the link graph + add a backward link from the top target to this page.
   await recordLinks(draft.id, planned);
-  return { url: page.url, adminUrl };
+  return { url: page.url, adminUrl, live };
 }
 
 /** Public site base URL (for internal-link verification) from a connector config. */

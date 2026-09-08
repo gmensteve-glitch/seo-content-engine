@@ -312,16 +312,20 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
 
   const publish = (publishState: "published" | "draft") =>
     run("publish", "/api/review/publish", { draftId: vm.id, publishState }, (d) => {
+      const target = (d.url as string) || "";
+      const external = /^https?:\/\//i.test(target);
       setDone({
         label: publishState === "draft" ? "Published as a hidden Shopify draft" : "Published live to Shopify",
-        href: (d.url as string) || "/performance",
+        // Only link out to a real store URL; a local/demo path would 404.
+        href: external ? target : "/performance",
       });
     });
 
   // Send as hidden draft, then jump to the post in Shopify admin in a new tab.
   // Open the tab synchronously on click so the browser's popup blocker allows it,
   // then point it at the admin URL once the API returns.
-  const sendAsDraft = () => {
+  const sendAsDraft = async () => {
+    if (busy) return;
     const win = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
     // Show a friendly loading state in the new tab — publishing (image upload +
     // link checks) takes a few seconds, so it isn't just a blank page.
@@ -334,14 +338,38 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
         /* cross-origin write can fail — ignore */
       }
     }
-    run("draft", "/api/review/publish", { draftId: vm.id, publishState: "draft" }, (d) => {
-      const target = (d.adminUrl as string) || (d.url as string) || "";
+    setBusy("draft");
+    setNote("");
+    try {
+      const { ok, data } = await post("/api/review/publish", {
+        draftId: vm.id,
+        publishState: "draft",
+      });
+      if (!ok) {
+        // Publish genuinely failed — close the placeholder tab and show why,
+        // rather than sending the operator to a dead URL.
+        if (win) win.close();
+        setNote(data.error ? `Publish failed: ${data.error}` : "Publish failed — try again.");
+        return;
+      }
+      const target = (data.adminUrl as string) || (data.url as string) || "";
+      const external = /^https?:\/\//i.test(target);
       if (win) {
-        if (target) win.location.href = target;
+        if (external) win.location.href = target;
         else win.close();
       }
-      setDone({ label: "Sent as a hidden Shopify draft — opening it in Shopify", href: target || "/performance" });
-    });
+      setDone({
+        label: external
+          ? "Sent as a hidden Shopify draft — opening it in Shopify"
+          : "Saved as a hidden draft.",
+        href: external ? target : "/ready",
+      });
+    } catch {
+      if (win) win.close();
+      setNote("Network error — try again.");
+    } finally {
+      setBusy(null);
+    }
   };
 
   const submitFeedback = () => {

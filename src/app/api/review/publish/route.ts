@@ -16,9 +16,17 @@ export async function POST(req: Request): Promise<Response> {
   if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
 
   // Default live; "draft" lands as a HIDDEN CMS draft for review before go-live.
-  const { url, adminUrl } = await publishNow(
-    draftId,
-    publishState === "draft" ? "draft" : "published",
-  );
-  return NextResponse.json({ ok: true, url, adminUrl });
+  try {
+    const { url, adminUrl, live } = await publishNow(
+      draftId,
+      publishState === "draft" ? "draft" : "published",
+    );
+    return NextResponse.json({ ok: true, url, adminUrl, live });
+  } catch (e) {
+    // Bubble the real reason up to the review UI (bad token, no blog, failed
+    // pre-publish check) instead of a generic failure.
+    const error = e instanceof Error ? e.message : "Publish failed";
+    console.error("[publish] failed:", error);
+    return NextResponse.json({ error }, { status: 502 });
+  }
 }
