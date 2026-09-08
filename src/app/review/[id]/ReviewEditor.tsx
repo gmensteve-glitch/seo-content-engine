@@ -41,6 +41,7 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
   >(null);
   const [note, setNote] = useState("");
   const [done, setDone] = useState<null | { label: string; href: string }>(null);
+  const [pubError, setPubError] = useState<string | null>(null);
   const [fbMode, setFbMode] = useState<null | "LIKE" | "REJECT" | "FIX">(null);
   const [fbText, setFbText] = useState("");
   const [fixText, setFixText] = useState("");
@@ -310,16 +311,30 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       setNote("Re-graded.");
     });
 
-  const publish = (publishState: "published" | "draft") =>
-    run("publish", "/api/review/publish", { draftId: vm.id, publishState }, (d) => {
-      const target = (d.url as string) || "";
+  const publish = async (publishState: "published" | "draft") => {
+    if (busy) return;
+    setBusy("publish");
+    setNote("");
+    setPubError(null);
+    try {
+      const { ok, data } = await post("/api/review/publish", { draftId: vm.id, publishState });
+      if (!ok) {
+        setPubError(data.error ? String(data.error) : "Publish failed — try again.");
+        return;
+      }
+      const target = (data.url as string) || "";
       const external = /^https?:\/\//i.test(target);
       setDone({
         label: publishState === "draft" ? "Published as a hidden Shopify draft" : "Published live to Shopify",
         // Only link out to a real store URL; a local/demo path would 404.
         href: external ? target : "/performance",
       });
-    });
+    } catch {
+      setPubError("Network error — try again.");
+    } finally {
+      setBusy(null);
+    }
+  };
 
   // Send as hidden draft, then jump to the post in Shopify admin in a new tab.
   // Open the tab synchronously on click so the browser's popup blocker allows it,
@@ -340,16 +355,17 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
     }
     setBusy("draft");
     setNote("");
+    setPubError(null);
     try {
       const { ok, data } = await post("/api/review/publish", {
         draftId: vm.id,
         publishState: "draft",
       });
       if (!ok) {
-        // Publish genuinely failed — close the placeholder tab and show why,
-        // rather than sending the operator to a dead URL.
+        // Publish genuinely failed — close the placeholder tab and show why
+        // right by the button, rather than sending the operator to a dead URL.
         if (win) win.close();
-        setNote(data.error ? `Publish failed: ${data.error}` : "Publish failed — try again.");
+        setPubError(data.error ? String(data.error) : "Publish failed — try again.");
         return;
       }
       const target = (data.adminUrl as string) || (data.url as string) || "";
@@ -830,6 +846,12 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
               <Rocket size={14} /> {busy === "draft" ? "Sending…" : "Send as hidden draft ↗"}
             </button>
           </div>
+
+          {pubError && (
+            <div className="mt-2.5 rounded-lg border border-[var(--danger)] bg-[var(--danger-bg)] px-3 py-2 text-[12px] text-[var(--danger)]">
+              <span className="font-medium">Couldn&apos;t publish to Shopify.</span> {pubError}
+            </div>
+          )}
 
           {/* Feedback — teach me your taste. LIKE keeps it, REJECT pulls it. */}
           <div className="mt-4 border-t border-[var(--success)] pt-3">
