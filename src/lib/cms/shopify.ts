@@ -17,8 +17,15 @@ export class ShopifyAdapter implements CmsAdapter {
 
   constructor(private cfg: ShopifyConfig) {}
 
+  /** The bare admin host — tolerant of a storeDomain saved with a scheme and/or
+   *  trailing slash (e.g. "https://store.myshopify.com/"), which would otherwise
+   *  produce "https://https://store.myshopify.com//admin/..." → ENOTFOUND. */
+  private host(): string {
+    return this.cfg.storeDomain.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  }
+
   private base() {
-    return `https://${this.cfg.storeDomain}/admin/api/${API_VERSION}`;
+    return `https://${this.host()}/admin/api/${API_VERSION}`;
   }
 
   private headers() {
@@ -71,7 +78,7 @@ export class ShopifyAdapter implements CmsAdapter {
   }
 
   private articleUrl(blogHandle: string, slug: string): string {
-    return `https://${this.cfg.storeDomain.replace(/\.myshopify\.com$/, "")}.myshopify.com/blogs/${blogHandle}/${slug}`;
+    return `https://${this.host()}/blogs/${blogHandle}/${slug}`;
   }
 
   // Shopify's SEO "Page title" and "Meta description" fields are metafields in

@@ -867,6 +867,14 @@ export async function saveConnector(
   if (!encryptionEnabled()) {
     throw new Error("Encryption key not configured — set CONNECTOR_ENCRYPTION_KEY to store credentials.");
   }
+  // Store a clean myshopify host — tolerate a pasted "https://store.myshopify.com/"
+  // so the CMS adapter never builds "https://https://…" (→ ENOTFOUND).
+  if (type === "SHOPIFY" && typeof config.storeDomain === "string") {
+    config = {
+      ...config,
+      storeDomain: config.storeDomain.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""),
+    };
+  }
   const configEnc = encryptJson(config);
   await prisma.connector.upsert({
     where: { businessId_type: { businessId, type } },
@@ -2781,7 +2789,11 @@ export async function publishNow(
       // Shopify admin editor URL — where a hidden draft can be reviewed/previewed.
       const storeDomain = (config as Record<string, unknown>).storeDomain;
       if (platform === "shopify" && typeof storeDomain === "string" && cmsId) {
-        const handle = storeDomain.replace(/^https?:\/\//, "").replace(/\.myshopify\.com$/, "");
+        const handle = storeDomain
+          .trim()
+          .replace(/^https?:\/\//, "")
+          .replace(/\/+$/, "")
+          .replace(/\.myshopify\.com$/, "");
         adminUrl = `https://admin.shopify.com/store/${handle}/content/articles/${cmsId}`;
       }
     } catch (e) {
