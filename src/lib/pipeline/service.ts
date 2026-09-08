@@ -875,6 +875,21 @@ export async function saveConnector(
       storeDomain: config.storeDomain.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""),
     };
   }
+
+  // For a publishing target, verify the credentials actually WORK before calling
+  // it connected — a stored-but-dead token that still showed green was the classic
+  // footgun (a manual/automation token that 401s at publish time). Refuse to store
+  // a broken connector so "connected" always means "can publish".
+  if (type === "SHOPIFY" || type === "WORDPRESS" || type === "WEBFLOW") {
+    const platform = type.toLowerCase() as CmsPlatform;
+    const health = await getCmsAdapter(platform, config).healthCheck();
+    if (!health.ok) {
+      throw new Error(
+        `Those ${type[0]}${type.slice(1).toLowerCase()} credentials didn't work: ${health.message ?? "authentication failed"}. Nothing was saved.`,
+      );
+    }
+  }
+
   const configEnc = encryptJson(config);
   await prisma.connector.upsert({
     where: { businessId_type: { businessId, type } },
