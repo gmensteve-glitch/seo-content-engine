@@ -11,6 +11,7 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma, hasDatabase } from "@/lib/db";
+import { activeBizId } from "@/lib/active-business";
 import { inngest } from "@/lib/jobs/client";
 import { inngestEnabled, encryptionEnabled } from "@/lib/env";
 import { runIntake } from "@/lib/agents/intake";
@@ -2810,6 +2811,47 @@ export async function publishNow(
   // Record the link graph + add a backward link from the top target to this page.
   await recordLinks(draft.id, planned);
   return { url: page.url, adminUrl, live };
+}
+
+/**
+ * Recover drafts that a *failed* publish wrongly marked PUBLISHED (legacy bug:
+ * the CMS call threw, was swallowed, and the draft was flipped to PUBLISHED with
+ * a Page that never got a cmsId). On a store with a live CMS connector, a
+ * "published" draft whose Page has no cmsId never reached the CMS — so put it
+ * back in Ready (PASSED) and drop the phantom Page. Safe + idempotent: it only
+ * touches stores that HAVE a connected CMS (offline/demo stores legitimately
+ * publish to a local URL with no cmsId, so they're left alone), and once a piece
+ * is restored there's nothing left to heal. Returns how many were restored.
+ */
+export async function restoreFailedPublishes(bizId?: string): Promise<number> {
+  if (!hasDatabase) return 0;
+  const businessId = bizId ?? (await activeBizId());
+
+  const cmsConnector = await prisma.connector.findFirst({
+    where: {
+      businessId,
+      status: "CONNECTED",
+      type: { in: ["SHOPIFY", "WORDPRESS", "WEBFLOW"] as ConnectorType[] },
+    },
+    select: { id: true },
+  });
+  if (!cmsConnector) return 0; // no live CMS → local-only pages are intentional
+
+  const phantoms = await prisma.page.findMany({
+    where: { businessId, cmsId: null, draft: { status: "PUBLISHED" } },
+    select: { id: true, draftId: true },
+  });
+  if (phantoms.length === 0) return 0;
+
+  let restored = 0;
+  for (const p of phantoms) {
+    if (!p.draftId) continue;
+    // Back to Ready, then drop the phantom Page (cascades its bogus link edges).
+    await prisma.draft.update({ where: { id: p.draftId }, data: { status: "PASSED" } });
+    await prisma.page.delete({ where: { id: p.id } }).catch(() => {});
+    restored += 1;
+  }
+  return restored;
 }
 
 /** Public site base URL (for internal-link verification) from a connector config. */
