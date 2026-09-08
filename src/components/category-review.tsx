@@ -25,6 +25,7 @@ import {
   autoFixCategoryAction,
   fixCategoryAction,
   fixPassageCategoryAction,
+  saveCategoryEditsAction,
   markCategoryNotLiveAction,
   markCategoryRefreshAction,
   setCategoryStrategyAction,
@@ -45,15 +46,57 @@ const READ_CSS = `
 .cat-read ::selection { background: var(--accent-bg); }
 `;
 
-type Tab = "read" | "score" | "html" | "text";
+type Tab = "read" | "edit" | "score" | "html" | "text";
 
-function Progress({ step }: { step: 1 | 2 | 3 }) {
+/** Clickable step bar — the way to move along to Paste and Done. */
+function Steps({ step, pasteHref }: { step: 1 | 2 | 3; pasteHref: string | null }) {
+  const items: { n: 1 | 2 | 3; label: string; href: string | null }[] = [
+    { n: 1, label: "Review", href: null },
+    { n: 2, label: "Paste", href: pasteHref },
+    { n: 3, label: "Done", href: pasteHref ? `${pasteHref}?step=done` : null },
+  ];
   return (
     <div className="grid grid-cols-3 gap-1.5">
-      {[1, 2, 3].map((s) => (
-        <div key={s} className={`h-1 rounded-full ${s < step ? "bg-[var(--success)]" : s === step ? "bg-[var(--accent)]" : "bg-[var(--border)]"}`} />
-      ))}
+      {items.map((it) => {
+        const cls = `flex flex-col gap-1.5 ${it.href ? "group cursor-pointer" : ""}`;
+        const inner = (
+          <>
+            <div className={`h-1 rounded-full ${it.n < step ? "bg-[var(--success)]" : it.n === step ? "bg-[var(--accent)]" : "bg-[var(--border)] group-hover:bg-[var(--border-strong)]"}`} />
+            <div className={`text-[11.5px] ${it.n === step ? "font-medium text-[var(--text)]" : it.href ? "text-[var(--muted)] group-hover:text-[var(--text)]" : "text-[var(--subtle)]"}`}>
+              {it.n} · {it.label}
+              {it.href && it.n !== step ? " →" : ""}
+            </div>
+          </>
+        );
+        return it.href ? (
+          <Link key={it.n} href={it.href} className={cls}>
+            {inner}
+          </Link>
+        ) : (
+          <div key={it.n} className={cls}>
+            {inner}
+          </div>
+        );
+      })}
     </div>
+  );
+}
+
+function Field({ label, name, value, rows, limit, mono }: { label: string; name: string; value: string; rows?: number; limit?: number; mono?: boolean }) {
+  const [v, setV] = useState(value);
+  const over = limit != null && v.length > limit;
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="flex items-center justify-between text-[12px] text-[var(--muted)]">
+        <span>{label}</span>
+        {limit != null && <span className={`font-mono text-[11px] ${over ? "text-[var(--danger)]" : "text-[var(--subtle)]"}`}>{v.length} / {limit}</span>}
+      </span>
+      {rows ? (
+        <textarea name={name} value={v} onChange={(e) => setV(e.target.value)} rows={rows} className={`w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3.5 py-2.5 leading-relaxed ${mono ? "font-mono text-[12.5px]" : "text-[14px]"}`} />
+      ) : (
+        <input name={name} value={v} onChange={(e) => setV(e.target.value)} className="h-10 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3.5 text-[14px]" />
+      )}
+    </label>
   );
 }
 
@@ -122,6 +165,9 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
   const freshResult = passageResult !== seenResult ? passageResult : null;
   const panelOpen = passage != null && !freshResult?.ok;
 
+  // Edit tab
+  const [editResult, editAction, editPending] = useActionState<PassageFixResult, FormData>(saveCategoryEditsAction, null);
+
   function onMouseUp() {
     const s = window.getSelection();
     const text = s?.toString().trim() ?? "";
@@ -173,7 +219,7 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
                 <span className="font-medium text-[var(--text)]">Step 1 of 3</span> · Review
               </div>
             </div>
-            <Progress step={1} />
+            <Steps step={1} pasteHref={hasDraft && !drafting ? `/categories/${p.id}/paste` : null} />
           </div>
 
           {/* Status line */}
@@ -252,6 +298,7 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
           {hasDraft && (
             <div className="flex items-center gap-1 border-b border-[var(--border)] pb-2">
               {tabBtn("read", "Read")}
+              {p.draft && tabBtn("edit", "Edit")}
               {tabBtn("score", "Score")}
               {tabBtn("html", "HTML")}
               {tabBtn("text", "Text")}
@@ -333,46 +380,98 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
             </div>
           )}
 
+          {/* EDIT */}
+          {hasDraft && tab === "edit" && p.draft && (
+            <form action={editAction} className="flex flex-col gap-5 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-6 py-6">
+              <input type="hidden" name="id" value={p.id} />
+              <input type="hidden" name="sectionCount" value={p.draft.sections.length} />
+              <input type="hidden" name="faqCount" value={p.draft.faqs.length} />
+              <p className="text-[13px] text-[var(--muted)]">
+                Change any text here, then <span className="font-medium text-[var(--text)]">Save &amp; update</span>. The HTML is rebuilt from what you wrote, every
+                number is re-checked against the catalog, and it’s re-graded. Sections and “Why us” are Markdown — links stay in{" "}
+                <span className="font-mono text-[12px]">[text](url)</span> form.
+              </p>
+              <Field label="Collection title (H1)" name="h1" value={p.draft.h1} limit={70} />
+              <Field label="Intro — above the grid" name="intro" value={p.draft.intro} rows={4} />
+              {p.draft.sections.map((s, i) => (
+                <div key={i} className="flex flex-col gap-2.5 border-t border-[var(--border)] pt-4">
+                  <Field label={`Section ${i + 1} — heading`} name={`section_heading_${i}`} value={s.heading} />
+                  <Field label="Body (Markdown)" name={`section_body_${i}`} value={s.bodyMarkdown} rows={Math.min(14, Math.max(4, Math.ceil(s.bodyMarkdown.length / 90)))} mono />
+                </div>
+              ))}
+              <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-4">
+                <div className="text-[12px] font-semibold uppercase tracking-wide text-[var(--muted)]">FAQ</div>
+                {p.draft.faqs.map((f, i) => (
+                  <div key={i} className="flex flex-col gap-2 rounded-lg bg-[var(--surface-2)] p-3.5">
+                    <Field label={`Question ${i + 1}`} name={`faq_q_${i}`} value={f.question} />
+                    <Field label="Answer" name={`faq_a_${i}`} value={f.answer} rows={3} />
+                  </div>
+                ))}
+              </div>
+              <div className="border-t border-[var(--border)] pt-4">
+                <Field label="Why us (Markdown)" name="whyUs" value={p.draft.whyUs} rows={5} mono />
+              </div>
+              <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-4">
+                <Field label="SEO title" name="seoTitle" value={p.draft.seoTitle} limit={60} />
+                <Field label="Meta description" name="metaDescription" value={p.draft.metaDescription} rows={2} limit={155} />
+              </div>
+              <div className="flex flex-wrap items-center gap-4 border-t border-[var(--border)] pt-4">
+                <button type="submit" disabled={editPending} className={`${btn} bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-60`}>
+                  {editPending ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} strokeWidth={2.5} />}
+                  {editPending ? "Rebuilding & grading…" : "Save & update"}
+                </button>
+                <span className="text-[12px] text-[var(--subtle)]">About 20 seconds — it re-grades so the score stays honest.</span>
+                {editResult && (
+                  <span className={`text-[13px] ${editResult.ok ? "text-[var(--success)]" : "text-[var(--warn)]"}`}>{editResult.message}</span>
+                )}
+              </div>
+            </form>
+          )}
+
           {/* SCORE */}
           {hasDraft && tab === "score" && (
             <div className="flex flex-col gap-4">
-              <div className="flex items-end justify-between rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-6 py-5">
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">Overall</div>
-                  <div className={`text-[40px] font-semibold leading-none tracking-tight ${p.overall != null && p.overall >= p.threshold ? "text-[var(--success)]" : "text-[var(--warn)]"}`}>
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-6 py-5">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <span className={`text-[44px] font-semibold leading-none tracking-tight ${p.overall != null && p.overall >= p.threshold ? "text-[var(--success)]" : "text-[var(--warn)]"}`}>
                     {p.overall ?? "—"}
-                  </div>
-                  <div className="mt-1 text-[12px] text-[var(--subtle)]">{p.threshold} to pass</div>
+                  </span>
+                  <span className="text-[13px] text-[var(--muted)]">
+                    / 100 · {p.overall != null && p.overall >= p.threshold ? "passed" : "below"} threshold ({p.threshold}) · loop {p.loops} · cost{" "}
+                    <span className="font-medium text-[var(--text)]">${(p.costCents / 100).toFixed(2)}</span>
+                  </span>
                 </div>
-                <div className="flex flex-col items-end gap-1 text-[12.5px] text-[var(--muted)]">
+                <div className="mt-2 flex flex-wrap gap-x-3 text-[12.5px] text-[var(--muted)]">
                   {p.words != null && <span>{p.words.toLocaleString()} words</span>}
                   {p.links && (
                     <span>
-                      {p.links.internal} internal · {p.links.external} authority links
+                      · {p.links.internal} internal · {p.links.external} authority links
                     </span>
                   )}
                   <span className={p.factIssues.length ? "text-[var(--warn)]" : "text-[var(--success)]"}>
-                    {p.factIssues.length ? `${p.factIssues.length} fact-check issue${p.factIssues.length === 1 ? "" : "s"}` : "Fact-check passed"}
+                    · {p.factIssues.length ? `${p.factIssues.length} fact-check issue${p.factIssues.length === 1 ? "" : "s"}` : "fact-check passed"}
                   </span>
                 </div>
               </div>
 
               {p.gradeDimensions.length > 0 && (
-                <div className="flex flex-col gap-3.5 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-6 py-5">
+                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-6 py-2">
                   {p.gradeDimensions.map((d) => {
                     const pct = d.max ? d.score / d.max : 0;
                     return (
-                      <div key={d.key}>
-                        <div className="flex items-center justify-between text-[13px]">
-                          <span className="font-medium">{d.label}</span>
-                          <span className="font-mono text-[12px] text-[var(--muted)]">
-                            {d.score}/{d.max}
-                          </span>
+                      <div key={d.key} className="grid grid-cols-[170px_minmax(0,1fr)] gap-x-5 border-b border-[var(--border)] py-4 last:border-b-0">
+                        <div className="text-[13px] text-[var(--text)]">{d.label}</div>
+                        <div>
+                          <div className="flex items-center gap-3">
+                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--surface-2)]">
+                              <div className={`h-full rounded-full ${pct >= 0.85 ? "bg-[var(--success)]" : pct >= 0.6 ? "bg-[var(--warn)]" : "bg-[var(--danger)]"}`} style={{ width: `${Math.round(pct * 100)}%` }} />
+                            </div>
+                            <span className="w-10 text-right font-mono text-[12px] text-[var(--muted)]">
+                              {d.score}/{d.max}
+                            </span>
+                          </div>
+                          {d.note && <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--muted)]">{d.note}</p>}
                         </div>
-                        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]">
-                          <div className={`h-full rounded-full ${pct >= 0.85 ? "bg-[var(--success)]" : pct >= 0.6 ? "bg-[var(--warn)]" : "bg-[var(--danger)]"}`} style={{ width: `${Math.round(pct * 100)}%` }} />
-                        </div>
-                        {d.note && <div className="mt-1.5 text-[12.5px] leading-snug text-[var(--muted)]">{d.note}</div>}
                       </div>
                     );
                   })}
@@ -391,9 +490,9 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
               )}
 
               {p.gradeNotes && !p.draftFailed && (
-                <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-5 py-4">
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">What would raise it</div>
-                  <p className="text-[13.5px] leading-relaxed text-[var(--muted)]">{p.gradeNotes}</p>
+                <div className="flex gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-5 py-4 text-[13.5px] leading-relaxed">
+                  <span className="shrink-0 font-semibold">Notes:</span>
+                  <p className="text-[var(--muted)]">{p.gradeNotes}</p>
                 </div>
               )}
             </div>
@@ -494,9 +593,9 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
             )}
           </div>
           <div className="flex items-center gap-4">
-            {p.status === "NEEDS_FIX" && hasDraft && (
-              <Link href={`/categories/${p.id}/paste`} className="text-[13px] text-[var(--muted)] hover:text-[var(--text)]">
-                Paste anyway →
+            {hasDraft && !drafting && p.status !== "DRAFT_READY" && (
+              <Link href={`/categories/${p.id}/paste`} className="flex h-[44px] items-center gap-1 text-[13px] text-[var(--muted)] hover:text-[var(--text)]">
+                {p.status === "NEEDS_FIX" ? "Paste anyway" : "Go to paste"} <ArrowRight size={13} />
               </Link>
             )}
             {p.status === "DRAFT_READY" && (

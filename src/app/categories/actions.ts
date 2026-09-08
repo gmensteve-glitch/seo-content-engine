@@ -13,6 +13,7 @@ import {
   draftCategoryTier,
   fixCategoryPage,
   fixCategoryPassage,
+  saveCategoryEdits,
   markCategoryLive,
   markCategoryNeedsRefresh,
   markCategoryNotLive,
@@ -104,6 +105,43 @@ export async function fixPassageCategoryAction(
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[categories] passage fix failed:", msg);
     return { ok: false, message: `Couldn't apply that fix: ${msg}` };
+  }
+}
+
+/** Hand edits from the Edit tab: rebuild HTML, re-check, re-grade. Awaited. */
+export async function saveCategoryEditsAction(
+  _prev: PassageFixResult,
+  formData: FormData,
+): Promise<PassageFixResult> {
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { ok: false, message: "Missing page." };
+  const str = (k: string) => String(formData.get(k) ?? "");
+  const sectionCount = Number(formData.get("sectionCount") ?? 0) || 0;
+  const faqCount = Number(formData.get("faqCount") ?? 0) || 0;
+  const sections = Array.from({ length: sectionCount }, (_, i) => ({
+    heading: str(`section_heading_${i}`),
+    bodyMarkdown: str(`section_body_${i}`),
+  }));
+  const faqs = Array.from({ length: faqCount }, (_, i) => ({
+    question: str(`faq_q_${i}`),
+    answer: str(`faq_a_${i}`),
+  }));
+  try {
+    const res = await saveCategoryEdits(id, {
+      h1: str("h1"),
+      intro: str("intro"),
+      sections,
+      faqs,
+      whyUs: str("whyUs"),
+      seoTitle: str("seoTitle"),
+      metaDescription: str("metaDescription"),
+    });
+    refresh(id);
+    return res;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[categories] save edits failed:", msg);
+    return { ok: false, message: `Couldn't save: ${msg}` };
   }
 }
 

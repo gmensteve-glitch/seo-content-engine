@@ -52,9 +52,11 @@ export function CategoryPasteWizard({
   seoTitle,
   metaDescription,
   faqJsonLd,
+  startAtDone = false,
 }: {
   id: string;
   title: string;
+  startAtDone?: boolean;
   h1: string;
   intro: string;
   bodyHtml: string;
@@ -71,7 +73,7 @@ export function CategoryPasteWizard({
     { key: "faq", label: "FAQ schema", value: faqJsonLd, where: "Optional. Your theme’s JSON-LD slot. The visible FAQ is already in the guide.", optional: true },
   ];
 
-  const [i, setI] = useState(0);
+  const [i, setI] = useState(startAtDone ? blocks.length : 0);
   const [done, setDone] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
   const [showHtml, setShowHtml] = useState(false);

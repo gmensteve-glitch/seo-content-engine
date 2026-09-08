@@ -34,6 +34,7 @@ import {
 } from "@/lib/categories/assemble";
 import { gradeDraft } from "@/lib/agents/grader";
 import { RUBRIC, type GradeResult } from "@/lib/grader/rubric";
+import { withCostScope } from "@/lib/ai/cost";
 import { buildContentGuidance } from "@/lib/pipeline/service";
 import type { CategoryStatus } from "@prisma/client";
 
@@ -90,6 +91,10 @@ export interface CategoryPageDetailVM extends CategoryPageVM {
   faqJsonLd: string | null;
   gradeNotes: string | null;
   gradeDimensions: GradeDimensionVM[];
+  costCents: number;
+  loops: number;
+  /** The structured blocks, for the Edit tab. */
+  draft: CategoryDraftJson | null;
   fixNotes: string[];
   facts: CatalogFacts | null;
   brief: CategoryBrief | null;
@@ -288,6 +293,9 @@ export async function getCategoryPage(id: string): Promise<CategoryPageDetailVM 
     faqJsonLd: row.faqJsonLd,
     gradeNotes: row.gradeNotes,
     gradeDimensions: grade ? gradeDimensions : [],
+    costCents: row.costCents,
+    loops: row.loops,
+    draft: parse<CategoryDraftJson>(row.draftJson),
     fixNotes: row.fixNotes,
     facts,
     brief,
@@ -436,32 +444,38 @@ export async function draftCategoryPage(id: string, opts: { note?: string } = {}
 
   await prisma.categoryPage.update({ where: { id }, data: { status: "DRAFTING" } });
   try {
-    const ctx = await contextFor(row, opts.note);
-    const brief = await buildCategoryBrief(ctx);
-    const first = await writeCategoryDraft(ctx, brief);
-    const tightened = await tightenCategoryDraft(ctx, brief, first).catch((e) => {
-      console.error("[category] editor pass failed, using draft as-is:", e instanceof Error ? e.message : e);
-      return first;
-    });
-    let result = await assembleAndCheck(ctx, brief, tightened, threshold);
+    let loops = 0;
+    const { result: run, cents } = await withCostScope(async () => {
+      const ctx = await contextFor(row, opts.note);
+      const brief = await buildCategoryBrief(ctx);
+      const first = await writeCategoryDraft(ctx, brief);
+      const tightened = await tightenCategoryDraft(ctx, brief, first).catch((e) => {
+        console.error("[category] editor pass failed, using draft as-is:", e instanceof Error ? e.message : e);
+        return first;
+      });
+      let result = await assembleAndCheck(ctx, brief, tightened, threshold);
 
-    for (let loop = 0; loop < MAX_REVISE_LOOPS; loop++) {
-      const ok = result.issues.length === 0 && result.grade.overall >= threshold;
-      if (ok) break;
-      const toFix = [
-        ...result.issues,
-        ...(result.grade.overall < threshold
-          ? [`Grader (${result.grade.overall}/${threshold}): ${result.grade.feedback}`]
-          : []),
-      ];
-      const revised = await reviseCategoryDraft(ctx, brief, result.draft, toFix);
-      const next = await assembleAndCheck(ctx, brief, revised, threshold);
-      // Keep the better of the two — a revision must not make things worse.
-      const better =
-        next.issues.length < result.issues.length ||
-        (next.issues.length === result.issues.length && next.grade.overall >= result.grade.overall);
-      if (better) result = next;
-    }
+      for (let loop = 0; loop < MAX_REVISE_LOOPS; loop++) {
+        const ok = result.issues.length === 0 && result.grade.overall >= threshold;
+        if (ok) break;
+        loops += 1;
+        const toFix = [
+          ...result.issues,
+          ...(result.grade.overall < threshold
+            ? [`Grader (${result.grade.overall}/${threshold}): ${result.grade.feedback}`]
+            : []),
+        ];
+        const revised = await reviseCategoryDraft(ctx, brief, result.draft, toFix);
+        const next = await assembleAndCheck(ctx, brief, revised, threshold);
+        // Keep the better of the two — a revision must not make things worse.
+        const better =
+          next.issues.length < result.issues.length ||
+          (next.issues.length === result.issues.length && next.grade.overall >= result.grade.overall);
+        if (better) result = next;
+      }
+      return { ctx, brief, result };
+    });
+    const { ctx, brief, result } = run;
 
     const ok = result.issues.length === 0 && result.grade.overall >= threshold;
     const updated = await prisma.categoryPage.update({
@@ -482,6 +496,8 @@ export async function draftCategoryPage(id: string, opts: { note?: string } = {}
         gradeNotes: result.grade.feedback,
         gradeJson: JSON.stringify({ overall: result.grade.overall, dimensions: result.grade.dimensions }),
         draftJson: JSON.stringify(result.draft),
+        costCents: cents,
+        loops,
         factIssues: result.issues,
         fixNotes: ctx.fixNotes,
         draftedAt: new Date(),
@@ -584,7 +600,7 @@ export async function fixCategoryPassage(
       break;
   }
 
-  const result = await assembleAndCheck(ctx, brief, next, threshold);
+  const { result, cents } = await withCostScope(() => assembleAndCheck(ctx, brief, next, threshold));
   const ok = result.issues.length === 0 && result.grade.overall >= threshold;
   const where =
     target.kind === "section"
@@ -604,6 +620,7 @@ export async function fixCategoryPassage(
       gradeNotes: result.grade.feedback,
       gradeJson: JSON.stringify({ overall: result.grade.overall, dimensions: result.grade.dimensions }),
       draftJson: JSON.stringify(next),
+      costCents: { increment: cents },
       factIssues: result.issues,
       fixNotes: [...row.fixNotes, `${where}: ${instruction.trim()}`],
       draftedAt: new Date(),
@@ -614,6 +631,82 @@ export async function fixCategoryPassage(
     message: ok
       ? `Rewrote ${where}. Score ${result.grade.overall}.`
       : `Rewrote ${where}. Score ${result.grade.overall} — ${result.issues.length ? result.issues[0] : "still under the bar; see Score."}`,
+  };
+}
+
+// ── Manual edits ───────────────────────────────────────────────
+
+export interface CategoryEdits {
+  h1: string;
+  intro: string;
+  sections: { heading: string; bodyMarkdown: string }[];
+  faqs: { question: string; answer: string }[];
+  whyUs: string;
+  seoTitle: string;
+  metaDescription: string;
+}
+
+/**
+ * Apply the operator's hand edits to the structured blocks, rebuild the HTML,
+ * re-run the fact-check and re-grade — so what they paste is exactly what
+ * they wrote, and the score still means something.
+ */
+export async function saveCategoryEdits(id: string, edits: CategoryEdits): Promise<{ ok: boolean; message: string }> {
+  requireDb();
+  const row = await prisma.categoryPage.findUnique({ where: { id } });
+  if (!row?.bodyHtml || !row.draftJson) return { ok: false, message: "Nothing to edit yet — draft the page first." };
+  let draft: CategoryDraftJson;
+  try {
+    draft = JSON.parse(row.draftJson) as CategoryDraftJson;
+  } catch {
+    return { ok: false, message: "Couldn't read the stored draft — redraft the page." };
+  }
+  const next: CategoryDraftJson = {
+    ...draft,
+    h1: edits.h1.trim() || draft.h1,
+    intro: edits.intro.trim() || draft.intro,
+    sections: edits.sections
+      .map((s) => ({ heading: s.heading.trim(), bodyMarkdown: s.bodyMarkdown.trim() }))
+      .filter((s) => s.heading || s.bodyMarkdown),
+    faqs: edits.faqs
+      .map((f) => ({ question: f.question.trim(), answer: f.answer.trim() }))
+      .filter((f) => f.question && f.answer),
+    whyUs: edits.whyUs.trim(),
+    seoTitle: edits.seoTitle.trim() || draft.seoTitle,
+    metaDescription: edits.metaDescription.trim() || draft.metaDescription,
+  };
+
+  const biz = await prisma.business.findUnique({ where: { id: row.businessId } });
+  const threshold = biz?.qualityThreshold ?? 85;
+  const ctx = await contextFor(row);
+  const brief = row.briefJson ? (JSON.parse(row.briefJson) as CategoryBrief) : await buildCategoryBrief(ctx);
+  const { result, cents } = await withCostScope(() => assembleAndCheck(ctx, brief, next, threshold));
+  const ok = result.issues.length === 0 && result.grade.overall >= threshold;
+
+  await prisma.categoryPage.update({
+    where: { id },
+    data: {
+      status: row.status === "LIVE" ? "LIVE" : ok ? "DRAFT_READY" : "NEEDS_FIX",
+      h1: next.h1,
+      intro: next.intro,
+      bodyHtml: result.bodyHtml,
+      seoTitle: next.seoTitle,
+      metaDescription: next.metaDescription,
+      faqJsonLd: faqJsonLd(next.faqs),
+      overall: result.grade.overall,
+      gradeNotes: result.grade.feedback,
+      gradeJson: JSON.stringify({ overall: result.grade.overall, dimensions: result.grade.dimensions }),
+      draftJson: JSON.stringify(next),
+      costCents: { increment: cents },
+      factIssues: result.issues,
+      draftedAt: new Date(),
+    },
+  });
+  return {
+    ok: true,
+    message: ok
+      ? `Saved. HTML rebuilt, fact-check passed, score ${result.grade.overall}.`
+      : `Saved and rebuilt. Score ${result.grade.overall}${result.issues.length ? ` — ${result.issues[0]}` : " — under the bar; see Score."}`,
   };
 }
 
