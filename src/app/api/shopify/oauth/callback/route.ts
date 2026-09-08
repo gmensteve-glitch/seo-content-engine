@@ -8,6 +8,7 @@ import {
   isValidShopDomain,
   verifyHmac,
   exchangeToken,
+  appBaseUrl,
   SHOPIFY_OAUTH_COOKIE,
 } from "@/lib/connectors/shopify-oauth";
 
@@ -19,7 +20,7 @@ function back(origin: string, status: string): Response {
 
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const origin = url.origin;
+  const origin = appBaseUrl(req);
   if (!shopifyOAuthEnabled()) return back(origin, "shopify_error=not_configured");
 
   const params = url.searchParams;

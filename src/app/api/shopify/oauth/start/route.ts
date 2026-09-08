@@ -10,6 +10,7 @@ import {
   normalizeShop,
   buildAuthorizeUrl,
   callbackUrl,
+  appBaseUrl,
   SHOPIFY_OAUTH_COOKIE,
 } from "@/lib/connectors/shopify-oauth";
 
@@ -19,11 +20,11 @@ export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const back = "/connectors";
   if (!shopifyOAuthEnabled()) {
-    return NextResponse.redirect(new URL(`${back}?shopify_error=not_configured`, url.origin));
+    return NextResponse.redirect(new URL(`${back}?shopify_error=not_configured`, appBaseUrl(req)));
   }
   const shop = normalizeShop(url.searchParams.get("shop") ?? "");
   if (!shop) {
-    return NextResponse.redirect(new URL(`${back}?shopify_error=domain`, url.origin));
+    return NextResponse.redirect(new URL(`${back}?shopify_error=domain`, appBaseUrl(req)));
   }
 
   const businessId = await activeBizId();
@@ -35,12 +36,12 @@ export async function GET(req: Request): Promise<Response> {
   if (url.searchParams.get("legacy") !== "1") {
     try {
       await connectShopifyWithAppCredentials(businessId, shop);
-      return NextResponse.redirect(new URL(`${back}?connected=shopify`, url.origin));
+      return NextResponse.redirect(new URL(`${back}?connected=shopify`, appBaseUrl(req)));
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
       console.error("[shopify] app-credentials connect failed:", detail);
       const q = new URLSearchParams({ shopify_error: "credentials", detail: detail.slice(0, 300) });
-      return NextResponse.redirect(new URL(`${back}?${q.toString()}`, url.origin));
+      return NextResponse.redirect(new URL(`${back}?${q.toString()}`, appBaseUrl(req)));
     }
   }
 
