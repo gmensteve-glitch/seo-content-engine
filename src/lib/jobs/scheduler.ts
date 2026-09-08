@@ -111,6 +111,16 @@ async function refreshTick(): Promise<void> {
   }
 }
 
+async function categoryRecoveryTick(olderThanMs?: number): Promise<void> {
+  try {
+    const { recoverInterruptedCategoryDrafts } = await import("@/lib/categories/service");
+    const n = await recoverInterruptedCategoryDrafts(olderThanMs);
+    if (n) console.log(`[scheduler] recovered ${n} interrupted category draft(s)`);
+  } catch (e) {
+    console.error("[scheduler] category recovery failed:", e instanceof Error ? e.message : e);
+  }
+}
+
 // Auto-advance: idea → brief → approve, self-throttled to a Ready backlog.
 // This is what keeps the Ready list stocked without any manual gates.
 async function autoAdvanceTick(): Promise<void> {
@@ -142,6 +152,12 @@ export function startScheduler(): void {
 
   // First ticks shortly after boot, then on their intervals. The worker tick
   // also heals any drafts stranded by a previous crash/restart/timeout.
+  // Category drafts run in this process, so every DRAFTING row at boot was
+  // orphaned by the restart — recover them immediately, then sweep for
+  // anything stuck longer than the cutoff every few minutes.
+  void categoryRecoveryTick(0);
+  setInterval(() => void categoryRecoveryTick(), 5 * 60 * 1000);
+
   setTimeout(() => {
     void workerTick();
     void boostTick();

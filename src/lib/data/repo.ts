@@ -346,7 +346,17 @@ export async function getGoalDiagnostics(bizId?: string): Promise<GoalDiagnostic
     local: localScores.filter((s) => s >= b).length,
     ever: everScores.filter((s) => s >= b).length,
   });
-  const cur = readyAt(bar);
+  // "Ready" on the Overview must mean exactly what the Ready list shows:
+  // PASSED pieces at the current bar. Near-misses that qualify are promoted
+  // into Ready (up to capacity) by promoteQualifyingDrafts, not counted here.
+  const passedScores = (kind: "LOCAL" | "OTHER") =>
+    pool
+      .filter((d) => d.status === "PASSED" && (kind === "LOCAL" ? d.brief?.idea?.kind === "LOCAL" : d.brief?.idea?.kind !== "LOCAL"))
+      .map((d) => d.grades[0]?.overall ?? 0);
+  const cur = {
+    local: passedScores("LOCAL").filter((s) => s >= bar).length,
+    ever: passedScores("OTHER").filter((s) => s >= bar).length,
+  };
 
   // Highest bar (≥60) that still meets BOTH category targets — least lowering.
   let goalBar: number | null = null;

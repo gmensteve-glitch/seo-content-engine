@@ -70,6 +70,10 @@ export interface CategoryPageVM {
   liveAt: string | null;
   refreshDueAt: string | null;
   lastCrawledAt: string | null;
+  /** When the current status was set — e.g. how long it's been DRAFTING. */
+  statusSince: string;
+  /** Minutes in the current status (computed server-side, so the UI stays pure). */
+  statusMinutes: number;
 }
 
 export interface GradeDimensionVM {
@@ -138,6 +142,8 @@ function toVM(row: Row, domain: string): CategoryPageVM {
     liveAt: row.liveAt?.toISOString() ?? null,
     refreshDueAt: row.refreshDueAt?.toISOString() ?? null,
     lastCrawledAt: row.lastCrawledAt?.toISOString() ?? null,
+    statusSince: row.updatedAt.toISOString(),
+    statusMinutes: Math.max(0, Math.floor((Date.now() - row.updatedAt.getTime()) / 60000)),
   };
 }
 
@@ -786,6 +792,49 @@ export async function setCategoryStrategy(
     data.targetKeyword = patch.targetKeyword.trim().toLowerCase();
   }
   if (Object.keys(data).length) await prisma.categoryPage.update({ where: { id }, data });
+}
+
+// ── Interrupted-draft recovery ─────────────────────────────────
+
+const STUCK_AFTER_MS = 15 * 60 * 1000;
+
+/**
+ * Drafts run inside the server process, so a redeploy or crash mid-write
+ * leaves a page stuck on DRAFTING forever. Flip any such page back to a
+ * resumable state with a plain note. Called with olderThanMs=0 on server
+ * start (every DRAFTING row is orphaned by definition) and with a 15-minute
+ * cutoff on page loads as a backstop. Returns how many were recovered.
+ */
+export async function recoverInterruptedCategoryDrafts(olderThanMs = STUCK_AFTER_MS): Promise<number> {
+  if (!hasDatabase) return 0;
+  const cutoff = new Date(Date.now() - olderThanMs);
+  const rows = await prisma.categoryPage.findMany({
+    where: { status: "DRAFTING", updatedAt: { lte: cutoff } },
+    select: { id: true, bodyHtml: true, handle: true },
+  });
+  for (const r of rows) {
+    await prisma.categoryPage.update({
+      where: { id: r.id },
+      data: {
+        status: r.bodyHtml ? "NEEDS_FIX" : "NOT_STARTED",
+        gradeNotes: "Draft failed: the write was interrupted (the server restarted mid-draft). Press Try again.",
+      },
+    });
+    console.warn(`[category] recovered interrupted draft: ${r.handle}`);
+  }
+  return rows.length;
+}
+
+/** Operator hit "Restart" on a page that looks stuck: release it, then draft again. */
+export async function restartCategoryDraft(id: string): Promise<void> {
+  requireDb();
+  const row = await prisma.categoryPage.findUnique({ where: { id }, select: { bodyHtml: true } });
+  if (!row) return;
+  await prisma.categoryPage.update({
+    where: { id },
+    data: { status: row.bodyHtml ? "NEEDS_FIX" : "NOT_STARTED" },
+  });
+  await draftCategoryPage(id);
 }
 
 // ── Refresh tracking ───────────────────────────────────────────

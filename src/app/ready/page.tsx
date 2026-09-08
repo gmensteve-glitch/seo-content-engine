@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { PageHeader } from "@/components/ui";
 import { getReadyForReview, getBusiness } from "@/lib/data/repo";
-import { restoreFailedPublishes } from "@/lib/pipeline/service";
+import { restoreFailedPublishes, promoteQualifyingDrafts } from "@/lib/pipeline/service";
 import type { PolishDraftVM } from "@/lib/data/types";
 import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen, RefreshCw } from "lucide-react";
 
@@ -89,7 +89,10 @@ export default async function ReadyPage() {
   // Self-heal: pieces a failed publish wrongly marked "published" (never reached
   // the CMS) are put back into Ready before we list them.
   await restoreFailedPublishes().catch(() => {});
-  const [drafts, business] = await Promise.all([getReadyForReview(), getBusiness()]);
+  const business = await getBusiness();
+  // Near-misses that clear the current bar fill the morning stack (to capacity).
+  await promoteQualifyingDrafts(business.id).catch(() => 0);
+  const drafts = await getReadyForReview();
   const localTarget = Math.round((TOTAL_TARGET * business.localRatio) / 100);
   const local = drafts.filter((d) => d.kind === "LOCAL");
   const evergreen = drafts.filter((d) => d.kind === "EVERGREEN");

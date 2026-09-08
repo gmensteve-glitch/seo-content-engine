@@ -14,6 +14,7 @@ import {
   fixCategoryPage,
   fixCategoryPassage,
   saveCategoryEdits,
+  restartCategoryDraft,
   markCategoryLive,
   markCategoryNeedsRefresh,
   markCategoryNotLive,
@@ -48,6 +49,17 @@ export async function draftCategoryAction(formData: FormData): Promise<void> {
   refresh(id);
   // From the queue, take the operator straight to the page so they watch it write.
   if (formData.get("go") === "1") redirect(`/categories/${id}`);
+}
+
+/** A page that looks stuck on "Writing": release it and draft again. */
+export async function restartCategoryDraftAction(formData: FormData): Promise<void> {
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  void restartCategoryDraft(id).catch((e) =>
+    console.error("[categories] restart failed:", e instanceof Error ? e.message : e),
+  );
+  await settle();
+  refresh(id);
 }
 
 export async function draftTierAction(formData: FormData): Promise<void> {

@@ -26,6 +26,7 @@ import {
   fixCategoryAction,
   fixPassageCategoryAction,
   saveCategoryEditsAction,
+  restartCategoryDraftAction,
   markCategoryNotLiveAction,
   markCategoryRefreshAction,
   setCategoryStrategyAction,
@@ -187,6 +188,7 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
 
   const hasDraft = Boolean(p.bodyHtml);
   const drafting = p.status === "DRAFTING";
+  const draftingMin = drafting ? p.statusMinutes : 0;
   const issueCount = p.factIssues.length + (p.overall != null && p.overall < p.threshold ? 1 : 0);
   const btn = "flex h-[46px] items-center gap-2 rounded-full px-6 text-[14px] font-semibold";
   const quiet = "flex h-[44px] items-center gap-1.5 text-[13px] text-[var(--muted)] hover:text-[var(--text)]";
@@ -224,9 +226,23 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
 
           {/* Status line */}
           {drafting && (
-            <div className="flex items-center gap-2.5 text-[13px] text-[var(--muted)]">
-              <Loader2 size={16} className="animate-spin text-[var(--accent)]" />
-              Writing — live catalog, plan, draft, editor pass, fact-check, grade. Usually 2–4 minutes. This page updates itself.
+            <div className={`rounded-xl border px-5 py-4 ${draftingMin >= 10 ? "border-[var(--warn)] bg-[var(--warn-bg)]" : "border-[var(--border)] bg-[var(--surface-1)]"}`}>
+              <div className="flex items-center gap-2.5 text-[13px]">
+                <Loader2 size={16} className="animate-spin text-[var(--accent)]" />
+                <span className="font-medium">Writing for {draftingMin < 1 ? "under a minute" : `${draftingMin} min`}</span>
+                <span className="text-[var(--muted)]">· live catalog → plan → draft → editor pass → fact-check → grade. A hub usually takes 4–8 minutes. This page updates itself.</span>
+              </div>
+              {draftingMin >= 10 && (
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-[13px] text-[var(--warn)]">
+                  <span>Longer than usual — that almost always means the server restarted mid-draft. Nothing is lost.</span>
+                  <form action={restartCategoryDraftAction}>
+                    <input type="hidden" name="id" value={p.id} />
+                    <SubmitButton icon={<Sparkles size={13} />} pendingLabel="Restarting…" className="flex h-9 items-center gap-1.5 rounded-full bg-[var(--warn)] px-3.5 text-[12.5px] font-semibold text-white hover:brightness-110">
+                      Restart the draft
+                    </SubmitButton>
+                  </form>
+                </div>
+              )}
             </div>
           )}
           {!drafting && p.status === "NOT_STARTED" && <div className="text-[13px] text-[var(--muted)]">Nothing written yet.</div>}
@@ -382,7 +398,7 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
 
           {/* EDIT */}
           {hasDraft && tab === "edit" && p.draft && (
-            <form action={editAction} className="flex flex-col gap-5 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-6 py-6">
+            <form key={p.draftedAt ?? "edit"} action={editAction} className="flex flex-col gap-5 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-6 py-6">
               <input type="hidden" name="id" value={p.id} />
               <input type="hidden" name="sectionCount" value={p.draft.sections.length} />
               <input type="hidden" name="faqCount" value={p.draft.faqs.length} />

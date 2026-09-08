@@ -4,7 +4,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { CategoryPoll } from "@/components/category-poll";
 import { CategoryGroups, type Group } from "@/components/category-groups";
 import { getBusiness } from "@/lib/data/repo";
-import { listCategoryPages, flagCategoryRefreshes, nextUp } from "@/lib/categories/service";
+import { listCategoryPages, flagCategoryRefreshes, nextUp, recoverInterruptedCategoryDrafts } from "@/lib/categories/service";
 import { rescanCategoriesAction, draftCategoryAction, autoFixCategoryAction } from "@/app/categories/actions";
 import { Layers, RefreshCw, Sparkles, ArrowRight, Loader2, Wand2 } from "lucide-react";
 
@@ -21,7 +21,7 @@ function tierName(t: 1 | 2 | 3): string {
 }
 
 export default async function CategoriesQueuePage() {
-  await flagCategoryRefreshes().catch(() => 0);
+  await Promise.all([flagCategoryRefreshes().catch(() => 0), recoverInterruptedCategoryDrafts().catch(() => 0)]);
   const [biz, pages] = await Promise.all([getBusiness(), listCategoryPages()]);
   const active = pages.filter((p) => !p.removed);
   const next = nextUp(pages);
@@ -147,7 +147,7 @@ export default async function CategoriesQueuePage() {
             {next.status === "DRAFTING" && (
               <>
                 <p className="max-w-[420px] text-[14px] leading-relaxed text-[var(--muted)]">
-                  Writing now — usually 2–4 minutes. This page updates itself.
+                  Writing now — a hub usually takes 4–8 minutes. This page updates itself.
                 </p>
                 <div className="flex h-[46px] items-center gap-2 rounded-full border border-[var(--accent)] px-[26px] text-[14px] font-semibold text-[var(--accent)]">
                   <Loader2 size={15} className="animate-spin" /> Writing…

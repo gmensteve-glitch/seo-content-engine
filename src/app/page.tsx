@@ -37,12 +37,17 @@ import {
   Bot,
 } from "lucide-react";
 
+import { promoteQualifyingDrafts } from "@/lib/pipeline/service";
+
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
-  const [biz, onboarding, kpis, pipeline, connectors, health, goal, cost, seo, movers, geo] =
+  const biz = await getBusiness();
+  // Fill the morning stack from qualifying near-misses (to capacity) BEFORE
+  // reading the goal, so "N ready" here equals what the Ready list shows.
+  await promoteQualifyingDrafts(biz.id).catch(() => 0);
+  const [onboarding, kpis, pipeline, connectors, health, goal, cost, seo, movers, geo] =
     await Promise.all([
-      getBusiness(),
       getOnboardingStatus(),
       getKpis(),
       getPipeline(),

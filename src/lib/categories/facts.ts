@@ -117,14 +117,19 @@ export async function fetchCatalogFacts(domain: string, handle: string): Promise
   const products: ShopifyProduct[] = [];
   for (let page = 1; page <= 4; page++) {
     let raw: string;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
     try {
       const res = await fetch(`${base}/collections/${handle}/products.json?limit=250&page=${page}`, {
         headers: { "User-Agent": UA, Accept: "application/json" },
+        signal: ctrl.signal,
       });
       if (!res.ok) break;
       raw = await res.text();
     } catch {
       break;
+    } finally {
+      clearTimeout(timer);
     }
     let data: { products?: ShopifyProduct[] };
     try {
@@ -193,11 +198,15 @@ export async function fetchCatalogFacts(domain: string, handle: string): Promise
 }
 
 async function siteReachable(base: string): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10000);
   try {
-    const res = await fetch(base, { method: "HEAD", headers: { "User-Agent": UA } });
+    const res = await fetch(base, { method: "HEAD", headers: { "User-Agent": UA }, signal: ctrl.signal });
     return res.ok;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

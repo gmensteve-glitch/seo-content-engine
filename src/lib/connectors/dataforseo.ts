@@ -12,13 +12,21 @@ function authHeader(): string {
 }
 
 async function post<T>(path: string, task: Record<string, unknown>): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    method: "POST",
-    headers: { Authorization: authHeader(), "Content-Type": "application/json" },
-    body: JSON.stringify([task]), // DataForSEO takes an array of tasks
-  });
-  if (!res.ok) throw new Error(`DataForSEO ${path} → HTTP ${res.status}`);
-  return (await res.json()) as T;
+  // Bounded: a hung upstream must fail the enrichment, never stall a draft.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 30000);
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method: "POST",
+      headers: { Authorization: authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify([task]), // DataForSEO takes an array of tasks
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`DataForSEO ${path} → HTTP ${res.status}`);
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface SerpResult {

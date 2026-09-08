@@ -2,12 +2,13 @@ import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { CategoryPoll } from "@/components/category-poll";
 import { CategoryReview } from "@/components/category-review";
-import { getCategoryPage } from "@/lib/categories/service";
+import { getCategoryPage, recoverInterruptedCategoryDrafts } from "@/lib/categories/service";
 
 export const dynamic = "force-dynamic";
 
 export default async function CategoryReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  await recoverInterruptedCategoryDrafts().catch(() => 0);
   const page = await getCategoryPage(id);
   if (!page) {
     return (

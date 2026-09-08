@@ -40,10 +40,13 @@ export async function fetchStorePolicies(domain: string): Promise<string> {
   const parts: string[] = [];
   for (const c of CANDIDATES) {
     if (seen.has(c.label) && c.label !== "Shipping page") continue;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
     try {
       const res = await fetch(`${base}${c.path}`, {
         headers: { "User-Agent": UA, Accept: "text/html" },
         redirect: "follow",
+        signal: ctrl.signal,
       });
       if (!res.ok) continue;
       const text = textOf(await res.text());
@@ -53,6 +56,8 @@ export async function fetchStorePolicies(domain: string): Promise<string> {
       parts.push(`## ${c.label} (${c.path})\n${text.slice(0, 2500)}`);
     } catch {
       /* unreachable page — skip */
+    } finally {
+      clearTimeout(timer);
     }
   }
   return parts.join("\n\n").slice(0, 7000);

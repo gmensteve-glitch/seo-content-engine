@@ -1111,16 +1111,41 @@ export async function promoteQualifyingDrafts(businessId: string): Promise<numbe
   requireDb();
   const business = await prisma.business.findUnique({ where: { id: businessId } });
   const threshold = business?.qualityThreshold ?? 85;
-  const failed = await prisma.draft.findMany({
-    where: { businessId, status: "FAILED", rejectedAt: null },
-    include: { grades: { orderBy: { overall: "desc" }, take: 1 } },
-  });
+  const ratio = business?.localRatio ?? 50;
+
+  // Capacity-aware: Ready is a morning stack of 10 (split by the local ratio),
+  // not a dump. Promote the BEST qualifying near-misses only up to the room
+  // left in each lane; the rest stay in the pool for later mornings.
+  const total = 10;
+  const localTarget = Math.round((total * ratio) / 100);
+  const everTarget = total - localTarget;
+  const [ready, failed] = await Promise.all([
+    prisma.draft.findMany({
+      where: { businessId, status: "PASSED", rejectedAt: null, scheduledFor: null },
+      select: { brief: { select: { idea: { select: { kind: true } } } } },
+    }),
+    prisma.draft.findMany({
+      where: { businessId, status: "FAILED", rejectedAt: null },
+      include: { brief: { select: { idea: { select: { kind: true } } } }, grades: { orderBy: { overall: "desc" }, take: 1 } },
+    }),
+  ]);
+  const isLocal = (d: { brief?: { idea?: { kind?: string } | null } | null }) => d.brief?.idea?.kind === "LOCAL";
+  const room = {
+    local: Math.max(0, localTarget - ready.filter(isLocal).length),
+    ever: Math.max(0, everTarget - ready.filter((d) => !isLocal(d)).length),
+  };
+  const qualifying = failed
+    .map((d) => ({ d, score: d.grades[0]?.overall ?? 0 }))
+    .filter((x) => x.score >= threshold)
+    .sort((a, b) => b.score - a.score);
+
   let promoted = 0;
-  for (const d of failed) {
-    if ((d.grades[0]?.overall ?? 0) >= threshold) {
-      await prisma.draft.update({ where: { id: d.id }, data: { status: "PASSED" } });
-      promoted++;
-    }
+  for (const { d } of qualifying) {
+    const lane = isLocal(d) ? "local" : "ever";
+    if (room[lane] <= 0) continue;
+    await prisma.draft.update({ where: { id: d.id }, data: { status: "PASSED" } });
+    room[lane] -= 1;
+    promoted++;
   }
   return promoted;
 }
