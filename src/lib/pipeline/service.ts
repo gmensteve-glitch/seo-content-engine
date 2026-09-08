@@ -40,6 +40,7 @@ import { scrapeMany } from "@/lib/connectors/firecrawl";
 import { fetchGscRows, strikingDistance, decayingPages, gscQuery } from "@/lib/connectors/gsc";
 import { askAnswerEngine } from "@/lib/connectors/perplexity";
 import { postRecommendationToSlack } from "@/lib/connectors/slack";
+import { clientCredentialsToken } from "@/lib/connectors/shopify-oauth";
 import { dataforseoEnabled, firecrawlEnabled, gscEnabled, geoEnabled, aiEnabled } from "@/lib/env";
 import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
@@ -898,6 +899,55 @@ export async function saveConnector(
   });
 }
 
+/**
+ * Connect a Shopify store using the app's own credentials (client-credentials
+ * grant). This is the path for a Dev Dashboard app that's installed on the
+ * merchant's store — no browser OAuth redirect. Stores the short-lived token
+ * plus the mode so freshCmsConfig() can refresh it transparently before expiry.
+ * saveConnector health-checks the token, so success means it actually works.
+ */
+export async function connectShopifyWithAppCredentials(
+  businessId: string,
+  shop: string,
+): Promise<void> {
+  const { accessToken, expiresAt } = await clientCredentialsToken(shop);
+  await saveConnector(businessId, "SHOPIFY", {
+    storeDomain: shop,
+    adminAccessToken: accessToken,
+    authMode: "client_credentials",
+    tokenExpiresAt: expiresAt,
+  });
+}
+
+/**
+ * Decrypt a CMS connector's config for API use. For a client-credentials Shopify
+ * connection the token only lives ~24h, so refresh it when it's within 10 min of
+ * expiry (or already expired) and persist the new one — callers always get a
+ * working token without knowing how it was obtained.
+ */
+async function freshCmsConfig(connector: {
+  id: string;
+  type: ConnectorType;
+  configEnc: string;
+}): Promise<Record<string, unknown>> {
+  const config = decryptJson(connector.configEnc) as Record<string, unknown>;
+  if (connector.type !== "SHOPIFY" || config.authMode !== "client_credentials") return config;
+
+  const expiresAt = typeof config.tokenExpiresAt === "number" ? config.tokenExpiresAt : 0;
+  if (Date.now() < expiresAt - 10 * 60 * 1000) return config;
+
+  const shop = String(config.storeDomain ?? "");
+  const { accessToken, expiresAt: nextExpiry } = await clientCredentialsToken(shop);
+  const next = { ...config, adminAccessToken: accessToken, tokenExpiresAt: nextExpiry };
+  await prisma.connector
+    .update({
+      where: { id: connector.id },
+      data: { configEnc: encryptJson(next), status: "CONNECTED", lastSyncAt: new Date() },
+    })
+    .catch((e) => console.error("[shopify] failed to persist refreshed token:", e));
+  return next;
+}
+
 /** Remove a connector's stored credentials (Disconnect). Deletes the row so any
  *  env-based fallback resumes. No-op if there's no stored connector. */
 export async function removeConnector(businessId: string, type: ConnectorType): Promise<void> {
@@ -1041,7 +1091,7 @@ export async function listPublishedBlogs(businessId: string): Promise<PublishedB
   });
   if (!connector || connector.status !== "CONNECTED" || !encryptionEnabled()) return [];
   try {
-    const adapter = getCmsAdapter(platform, decryptJson(connector.configEnc));
+    const adapter = getCmsAdapter(platform, await freshCmsConfig(connector));
     const pages = await adapter.list({ limit: 250 });
     return pages
       .map((p) => ({ cmsId: p.cmsId, title: p.title, url: p.url, updatedAt: p.updatedAt }))
@@ -1630,7 +1680,7 @@ export async function fixPublishedPost(draftId: string): Promise<{ updated: bool
     where: { businessId_type: { businessId: draft.businessId, type: cmsConnectorType(platform) } },
   });
   if (!connector || connector.status !== "CONNECTED" || !encryptionEnabled()) return { updated: false };
-  const config = decryptJson(connector.configEnc);
+  const config = await freshCmsConfig(connector);
   const adapter = getCmsAdapter(platform, config);
 
   let html = markdownToHtml(scrubbed);
@@ -2042,7 +2092,7 @@ async function gatherResources(
     });
     if (connector?.status === "CONNECTED") {
       try {
-        const adapter = getCmsAdapter(platform, decryptJson(connector.configEnc));
+        const adapter = getCmsAdapter(platform, await freshCmsConfig(connector));
         const facts = (await adapter.listProductFacts?.(keyword)) ?? [];
         products.push(...facts);
       } catch {
@@ -2435,7 +2485,7 @@ async function productImageLookup(
   });
   if (!connector || connector.status !== "CONNECTED") return undefined;
   try {
-    const config = decryptJson(connector.configEnc);
+    const config = await freshCmsConfig(connector);
     const adapter = getCmsAdapter(platform, config);
     return adapter.sourceProductImage?.bind(adapter);
   } catch {
@@ -2723,7 +2773,7 @@ export async function publishNow(
 
   if (connector && connector.status === "CONNECTED" && encryptionEnabled()) {
     try {
-      const config = decryptJson(connector.configEnc);
+      const config = await freshCmsConfig(connector);
       const adapter = getCmsAdapter(platform, config);
       // Use the hero image chosen on the review page; generate/source one now if
       // the draft doesn't have one yet (headless/auto-publish path).
@@ -3004,7 +3054,7 @@ async function updateCmsBody(businessId: string, cmsId: string, html: string): P
     where: { businessId_type: { businessId, type: cmsConnectorType(platform) } },
   });
   if (!connector || connector.status !== "CONNECTED" || !encryptionEnabled()) return;
-  const config = decryptJson(connector.configEnc);
+  const config = await freshCmsConfig(connector);
   const adapter = getCmsAdapter(platform, config);
   await adapter.update(cmsId, { html });
 }

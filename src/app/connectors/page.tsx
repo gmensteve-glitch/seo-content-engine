@@ -13,12 +13,14 @@ const SHOPIFY_ERROR: Record<string, string> = {
   verify: "Couldn't verify the response from Shopify. Please try connecting again.",
   exchange: "Shopify approved, but the token exchange failed. Try again.",
   not_configured: "Shopify OAuth isn't configured on the server yet (missing app credentials).",
+  credentials:
+    "Shopify rejected the app's credentials. Check that the app is installed on this store and that the Client ID + Secret in Railway are from that same app.",
 };
 
 export default async function ConnectorsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ connected?: string; shopify_error?: string }>;
+  searchParams: Promise<{ connected?: string; shopify_error?: string; detail?: string }>;
 }) {
   const sp = await searchParams;
   const [connectors, biz] = await Promise.all([getConnectors(), getBusiness()]);
@@ -39,7 +41,13 @@ export default async function ConnectorsPage({
       )}
       {sp.shopify_error && (
         <div className="mb-4 flex items-center gap-2 rounded-xl border border-[var(--danger)] bg-[var(--danger-bg)] px-4 py-2.5 text-[13px] text-[var(--danger)]">
-          <AlertTriangle size={16} /> {SHOPIFY_ERROR[sp.shopify_error] ?? "Shopify connection failed."}
+          <AlertTriangle size={16} className="shrink-0" />
+          <span>
+            {SHOPIFY_ERROR[sp.shopify_error] ?? "Shopify connection failed."}
+            {sp.detail && (
+              <span className="mt-1 block font-mono text-[11px] opacity-80">{sp.detail}</span>
+            )}
+          </span>
         </div>
       )}
 

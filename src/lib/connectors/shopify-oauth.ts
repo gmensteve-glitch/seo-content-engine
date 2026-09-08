@@ -79,6 +79,37 @@ export function verifyHmac(params: URLSearchParams): boolean {
   }
 }
 
+/**
+ * Shopify's client-credentials grant — the token path for a Dev Dashboard app
+ * that is already installed on the merchant's own store. The app proves itself
+ * with its Client ID + Secret and gets a short-lived (~24h) Admin API token,
+ * with NO browser redirect/consent screen (which Dev Dashboard apps reject with
+ * "Unauthorized Access"). The token is refreshed automatically before it expires.
+ */
+export async function clientCredentialsToken(
+  shop: string,
+): Promise<{ accessToken: string; expiresAt: number }> {
+  const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      client_id: shopifyClientId(),
+      client_secret: shopifyClientSecret(),
+      grant_type: "client_credentials",
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `Shopify rejected the app credentials — HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`,
+    );
+  }
+  const data = (await res.json()) as { access_token?: string; expires_in?: number };
+  if (!data.access_token) throw new Error("Shopify returned no access_token for the app credentials");
+  const ttl = typeof data.expires_in === "number" && data.expires_in > 0 ? data.expires_in : 86400;
+  return { accessToken: data.access_token, expiresAt: Date.now() + ttl * 1000 };
+}
+
 /** Exchange the authorization code for a long-lived (offline) Admin API token. */
 export async function exchangeToken(shop: string, code: string): Promise<string> {
   const res = await fetch(`https://${shop}/admin/oauth/access_token`, {

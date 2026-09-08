@@ -4,6 +4,7 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { activeBizId } from "@/lib/active-business";
+import { connectShopifyWithAppCredentials } from "@/lib/pipeline/service";
 import {
   shopifyOAuthEnabled,
   normalizeShop,
@@ -26,6 +27,25 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   const businessId = await activeBizId();
+
+  // Preferred path: the client-credentials grant. A Dev Dashboard app that's
+  // installed on the store gets its token directly from the app's Client ID +
+  // Secret — no consent screen (which Dev Dashboard apps reject with
+  // "Unauthorized Access"). The token is validated before it's stored.
+  if (url.searchParams.get("legacy") !== "1") {
+    try {
+      await connectShopifyWithAppCredentials(businessId, shop);
+      return NextResponse.redirect(new URL(`${back}?connected=shopify`, url.origin));
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      console.error("[shopify] app-credentials connect failed:", detail);
+      const q = new URLSearchParams({ shopify_error: "credentials", detail: detail.slice(0, 300) });
+      return NextResponse.redirect(new URL(`${back}?${q.toString()}`, url.origin));
+    }
+  }
+
+  // Legacy path (?legacy=1): the browser OAuth consent flow, for apps that
+  // support it.
   const state = crypto.randomUUID();
   const redirectUri = callbackUrl(req);
 
