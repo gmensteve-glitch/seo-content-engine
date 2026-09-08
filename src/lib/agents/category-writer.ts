@@ -38,7 +38,16 @@ export interface CategoryContext {
   };
   facts: CatalogFacts | null;
   links: LinkTarget[]; // the ONLY internal links the writer may use
+  /** Store shipping/returns/FAQ policy text — the only source for such claims. */
+  policies: string;
 }
+
+/** The only external links a category page may carry — real, stable, authoritative. */
+export const AUTHORITY_LINKS: { title: string; url: string }[] = [
+  { title: "The FTC Funeral Rule (consumer guide)", url: "https://consumer.ftc.gov/articles/ftc-funeral-rule" },
+  { title: "Complying with the Funeral Rule (FTC)", url: "https://www.ftc.gov/business-guidance/resources/complying-funeral-rule" },
+  { title: "National Funeral Directors Association", url: "https://nfda.org" },
+];
 
 export interface CategoryBrief {
   primaryKeyword: string;
@@ -322,15 +331,21 @@ function guidance(ctx: CategoryContext): string {
   return `RULES — these are hard requirements:
 - LENGTH: ${spec.words[0]}–${spec.words[1]} words across the sections + FAQ + "why us". Do not exceed the upper bound.
 - FACTS: every price, gauge, width, material and product name must appear in the LIVE CATALOG FACTS. State the price range as it is given there. You MAY reference typical funeral-home / industry pricing as context, but only in a sentence that clearly says it is funeral-home or industry pricing (e.g. "Funeral homes commonly list a comparable casket at $X–$Y"), framed as "commonly" / "typically" — never as our price.
+- PRICES IN PROSE are whole dollars: "$1,299", "from $999", "$999–$4,999". Never ".99" in running text (the table may show exact prices).
 - NO PLACEHOLDERS: this is delivered as finished text. No brackets like [price], no TODOs, no "add …" notes.
 - NO IMAGES: text, lists, one table at most. Never reference or embed an image.
-- INTERNAL LINKS: you may link ONLY to URLs in the INTERNAL PAGES list, using the exact URL given, with natural anchor text (a keyword variant, never "click here"). Aim for ${spec.links[0]}–${spec.links[1]} internal links spread across sections. Do not invent any other internal URL. External links: at most 1, to https://www.ftc.gov (the Funeral Rule) if you cite the rule.
-- FTC FUNERAL RULE (federal, real): funeral homes must accept a casket bought elsewhere and may not charge a handling fee for it. State it exactly that way; no other legal claims.
-- OUR OPERATIONS: do not invent how ${name} ships, packs or schedules. "Delivered overnight to any funeral home in the country" is the promise; say timing is confirmed at order.
+- SAY EACH THING ONCE. The intro is the only summary on the page; the first section must NOT restate it. No "quick answer" or recap paragraph anywhere in the sections. The Funeral Rule is explained in full exactly once (in a "your rights" section) and may be mentioned in passing at most once more, in a few words. No repeated price ranges, delivery promises, or "factory-direct" lines across sections.
+- INTERNAL LINKS: you may link ONLY to URLs in the INTERNAL PAGES list, using the exact URL given, with natural anchor text (a keyword variant, never "click here"). Aim for ${spec.links[0]}–${spec.links[1]} internal links spread across sections. Do not invent any other internal URL.
+- AUTHORITY LINKS: include 2–3 external links, chosen ONLY from this list, inline where the claim is made:
+${AUTHORITY_LINKS.map((l) => `  · ${l.title} — ${l.url}`).join("\n")}
+  No other external URLs, ever.
+- FTC FUNERAL RULE (federal, real): funeral homes must accept a casket bought elsewhere and may not charge a handling fee for it. State it exactly that way, linked to the FTC; no other legal claims.
+- E-E-A-T WITHOUT INVENTION: never claim reviewers, advisors, licensed staff, credentials, "years in the industry", or that anyone "verifies" or "cross-checks" the content unless the BUSINESS CONTEXT says so. Authority comes from the real catalog facts, the linked standards, and plain practitioner-grade explanation. Write in the brand's voice as the store, not as a named person.
+- SHIPPING / RETURNS / GUARANTEES: state ONLY what appears in STORE POLICY below (quote its terms faithfully — e.g. if it says free standard shipping, you may say that). If STORE POLICY is empty or silent on a point, say the detail is confirmed when you order. Never invent delivery times, carriers, packing steps, or return terms. "Delivered overnight to any funeral home in the country" is the brand promise and may be stated.
 - ANSWER-FIRST: the intro's first two sentences answer the search directly (what this is, the real price range, the delivery promise). Every section's first sentence answers that section's question on its own, quotable out of context.
 - H1: ≤ 70 characters, leads with the primary keyword, then the ${name} promise. It replaces the store's current H1.
 - INTRO: 60–90 words, plain prose (no markdown, no links), for ABOVE the product grid.
-- SECTIONS: ${spec.sections[0]}–${spec.sections[1]} H2 sections for BELOW the grid, following the brief's plan. Body is Markdown (paragraphs, short lists; links in [text](url) form using only allowed URLs). Include a "prices" section using the live range and a "delivery & funeral-home acceptance" section.
+- SECTIONS: ${spec.sections[0]}–${spec.sections[1]} H2 sections for BELOW the grid, following the brief's plan. Body is Markdown (paragraphs, short lists; links in [text](url) form using only allowed URLs). Include a "prices" section using the live range, a "shipping & delivery" section (from STORE POLICY), and a "your rights" section on the Funeral Rule.
 - COMPARISON TABLE: ${spec.table ? "include ONE table (e.g. gauges/materials/sizes compared), 3–5 columns, 3–6 rows, only facts from the catalog." : "set to null for this tier."}
 - FAQ: ${spec.faqs[0]}–${spec.faqs[1]} real buyer questions from the brief, each answered in 2–4 self-contained sentences (prime AI-answer material). Plain text answers, no links.
 - WHY US: 90–160 words on ${name} — factory-direct, the delivery promise, the tone from the brand voice. No hype.
@@ -420,12 +435,55 @@ ${brief.competitorsCover.length ? `Competitors cover: ${brief.competitorsCover.j
 LIVE CATALOG FACTS (the only source of numbers and product names):
 ${ctx.facts ? factsForPrompt(ctx.facts) : "(catalog not readable — state NO prices or product names)"}
 
+STORE POLICY (the only source for shipping / returns / guarantee claims):
+${ctx.policies || "(none readable — say details are confirmed at order)"}
+
 INTERNAL PAGES (the only internal URLs you may link):
 ${linksForPrompt(ctx.links)}
 
 ${guidance(ctx)}
 
 Write the page now as the JSON blocks.`,
+  });
+}
+
+/**
+ * Editor pass — the same model reads the draft as a demanding editor and
+ * tightens it: removes every repeated fact or promise, the recap paragraphs,
+ * the second and third statements of the Funeral Rule, hedging and filler;
+ * brings it to the target length. It may not add facts, prices or links.
+ */
+export async function tightenCategoryDraft(ctx: CategoryContext, brief: CategoryBrief, draft: CategoryDraftJson): Promise<CategoryDraftJson> {
+  if (!aiEnabled()) return draft;
+  const spec = tierSpec(ctx.collection.tier);
+  return structured<CategoryDraftJson>({
+    model: MODELS.writer,
+    effort: "medium",
+    maxTokens: 16000,
+    system: `You are a demanding editor for e-commerce category pages. You cut repetition and filler ruthlessly and keep every concrete fact. You never add a fact, number, product, link or claim that isn't already in the draft.`,
+    schema: DRAFT_SCHEMA,
+    prompt: `Edit this category-page draft. Target ${spec.words[0]}–${spec.words[1]} words total (sections + FAQ + why-us).
+
+DO:
+- Remove every repeated fact, price range, delivery promise or "factory-direct" line — each appears ONCE, in its best place.
+- Remove any recap / "quick answer" / summary paragraph in the sections (the intro is the only summary).
+- Keep the full Funeral Rule explanation in ONE section only; elsewhere at most a few-word mention.
+- Cut hedging ("generally", "typically" where not needed), throat-clearing, and filler sentences that carry no fact.
+- Keep the intro at 60–90 words, plain prose, no links.
+- Keep every internal and authority link that's there (do not add any).
+- Whole-dollar prices in prose.
+- Keep headings, the table, and the FAQ questions unless a FAQ answer merely repeats another.
+
+DON'T:
+- Add facts, prices, products, claims or links.
+- Change the meaning of any sentence.
+
+Primary keyword: ${brief.primaryKeyword}
+
+CURRENT DRAFT (JSON):
+${JSON.stringify(draft)}
+
+Return the tightened draft as the same JSON shape.`,
   });
 }
 
@@ -450,6 +508,9 @@ ${issues.map((i) => `- ${i}`).join("\n")}
 
 LIVE CATALOG FACTS (the only source of numbers and product names):
 ${ctx.facts ? factsForPrompt(ctx.facts) : "(catalog not readable — state NO prices or product names)"}
+
+STORE POLICY (the only source for shipping / returns / guarantee claims):
+${ctx.policies || "(none readable — say details are confirmed at order)"}
 
 INTERNAL PAGES (the only internal URLs you may link):
 ${linksForPrompt(ctx.links)}

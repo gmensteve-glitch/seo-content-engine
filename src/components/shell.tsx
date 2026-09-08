@@ -39,14 +39,21 @@ const NAV_GROUPS: {
   {
     // The engine runs idea → brief → write → grade automatically; you pick ideas
     // to build and review what lands in Ready. The sidebar reads how work flows.
-    header: "Workflow",
+    header: "Blog",
     items: [
       { href: "/ideas", label: "Ideas", icon: Lightbulb },
       { href: "/ready", label: "Ready to publish", icon: CheckCircle2 },
       { href: "/refresh", label: "Needs refresh", icon: RefreshCw },
-      // Category (collection) pages: the engine writes paste-ready blocks;
-      // a person pastes them into Shopify. Deliberately manual.
-      { href: "/categories", label: "Category pages", icon: Layers },
+    ],
+  },
+  {
+    // Category (collection) pages are a separate, manual project: the engine
+    // writes paste-ready blocks; a person pastes them into Shopify. Their own
+    // section so they never comingle with the blog's queues and counts.
+    header: "Category pages",
+    items: [
+      { href: "/categories", label: "Queue", icon: Layers },
+      { href: "/categories/live", label: "Live pages", icon: CheckCircle2 },
     ],
   },
   {
@@ -112,7 +119,11 @@ export function Shell({ children }: { children: ReactNode }) {
               )}
               {group.items.map((item) => {
                 const active =
-                  item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+                  item.href === "/"
+                    ? pathname === "/"
+                    : item.href === "/categories"
+                      ? pathname.startsWith("/categories") && !pathname.startsWith("/categories/live")
+                      : pathname.startsWith(item.href);
                 const Icon = item.icon;
                 return (
                   <Link

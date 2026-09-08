@@ -4,7 +4,7 @@
 
 import crypto from "node:crypto";
 import { markdownToHtml } from "@/lib/cms/markdown";
-import type { CategoryDraftJson, LinkTarget } from "@/lib/agents/category-writer";
+import { AUTHORITY_LINKS, type CategoryDraftJson, type LinkTarget } from "@/lib/agents/category-writer";
 import type { CatalogFacts } from "@/lib/categories/facts";
 
 export function escapeHtml(s: string): string {
@@ -164,13 +164,38 @@ export function factCheck(
     if (ours.length && !bad.size) issues.push("prices stated but the catalog could not be read — remove them");
   }
 
-  // Internal links
+  // Links: internal only from the allowed list; external only to the authority set.
   const allowedSet = new Set(allowed.map((l) => l.url.replace(/\/+$/, "")));
+  const authorityHosts = AUTHORITY_LINKS.map((l) => new URL(l.url).hostname.replace(/^www\./, ""));
   const ours = domain.replace(/^www\./, "");
   for (const m of bodyHtml.matchAll(/href="([^"]+)"/g)) {
     const href = m[1].replace(/\/+$/, "");
     const internal = href.startsWith("/") || href.includes(ours);
-    if (internal && !allowedSet.has(href)) issues.push(`internal link to a page not in the allowed list: ${href}`);
+    if (internal) {
+      if (!allowedSet.has(href)) issues.push(`internal link to a page not in the allowed list: ${href}`);
+      continue;
+    }
+    if (/^https?:\/\//i.test(href)) {
+      let host = "";
+      try {
+        host = new URL(href).hostname.replace(/^www\./, "");
+      } catch {
+        host = "";
+      }
+      if (!authorityHosts.some((h) => host === h || host.endsWith(`.${h}`))) {
+        issues.push(`external link outside the approved authority sources: ${href}`);
+      }
+    }
+  }
+
+  // Whole-dollar prices in prose (tables may keep cents).
+  const prose = [draft.intro, ...draft.sections.map((s) => s.bodyMarkdown), draft.whyUs, ...draft.faqs.map((f) => f.answer)].join("\n");
+  const cents = [...prose.matchAll(/\$[\d,]+\.\d{2}\b/g)].map((m) => m[0]);
+  if (cents.length) issues.push(`prices in prose should be whole dollars (found ${[...new Set(cents)].slice(0, 4).join(", ")})`);
+
+  // Invented expertise claims.
+  if (/\b(cross-?checks?|reviewed by (our|a) |our (licensed|certified) |years? (of|in) (the )?(funeral|industry)|funeral[- ]service advisor)\b/i.test(prose)) {
+    issues.push("an unsupported expertise/reviewer claim — remove it; authority comes from linked standards and catalog facts");
   }
 
   // Block sizes
@@ -187,6 +212,19 @@ export function factCheck(
 
 export function wordCount(draft: CategoryDraftJson): number {
   return draftAsMarkdown(draft, "").split(/\s+/).filter(Boolean).length;
+}
+
+/** Internal + authority link counts in the assembled body. */
+export function linkCounts(bodyHtml: string, domain: string): { internal: number; external: number } {
+  const ours = domain.replace(/^www\./, "");
+  let internal = 0;
+  let external = 0;
+  for (const m of bodyHtml.matchAll(/href="([^"]+)"/g)) {
+    const href = m[1];
+    if (href.startsWith("/") || href.includes(ours)) internal += 1;
+    else if (/^https?:\/\//i.test(href)) external += 1;
+  }
+  return { internal, external };
 }
 
 /** Fingerprint of the paste-ready blocks, to detect drift after "mark live". */

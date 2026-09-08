@@ -1,16 +1,19 @@
-// Category-page service — discovery → facts → brief → draft → fact-check →
-// grade, plus the manual-publish bookkeeping. Deliberately has NO function that
-// writes to a collection page: the deliverable is paste-ready blocks, and a
-// person marks a page live after pasting.
+// Category-page service — discovery → facts → brief → draft → editor pass →
+// fact-check → grade (with revision loops), plus the manual-publish
+// bookkeeping. Deliberately has NO function that writes to a collection page:
+// the deliverable is paste-ready blocks, and a person marks a page live after
+// pasting.
 
 import { prisma, hasDatabase } from "@/lib/db";
 import { activeBizId } from "@/lib/active-business";
 import { discoverCollections, localityFor } from "@/lib/categories/discover";
 import { fetchCatalogFacts, type CatalogFacts } from "@/lib/categories/facts";
+import { fetchStorePolicies } from "@/lib/categories/policies";
 import {
   buildCategoryBrief,
   writeCategoryDraft,
   reviseCategoryDraft,
+  tightenCategoryDraft,
   tierSpec,
   type CategoryBrief,
   type CategoryContext,
@@ -24,12 +27,16 @@ import {
   draftAsMarkdown,
   snapshotHash,
   wordCount,
+  linkCounts,
 } from "@/lib/categories/assemble";
 import { gradeDraft } from "@/lib/agents/grader";
+import { RUBRIC, type GradeResult } from "@/lib/grader/rubric";
 import { buildContentGuidance } from "@/lib/pipeline/service";
 import type { CategoryStatus } from "@prisma/client";
 
 const REFRESH_DAYS = 90;
+const POLICY_TTL_DAYS = 7;
+const MAX_REVISE_LOOPS = 2;
 
 function requireDb(): void {
   if (!hasDatabase) throw new Error("DATABASE_URL is not set");
@@ -47,16 +54,26 @@ export interface CategoryPageVM {
   liveHasContent: boolean;
   removed: boolean;
   tier: 1 | 2 | 3;
+  locality: string | null;
   targetKeyword: string | null;
   secondaryKeywords: string[];
   status: CategoryStatus;
   overall: number | null;
   factIssues: string[];
   words: number | null;
+  links: { internal: number; external: number } | null;
   draftedAt: string | null;
   liveAt: string | null;
   refreshDueAt: string | null;
   lastCrawledAt: string | null;
+}
+
+export interface GradeDimensionVM {
+  key: string;
+  label: string;
+  score: number;
+  max: number;
+  note: string;
 }
 
 export interface CategoryPageDetailVM extends CategoryPageVM {
@@ -67,9 +84,11 @@ export interface CategoryPageDetailVM extends CategoryPageVM {
   metaDescription: string | null;
   faqJsonLd: string | null;
   gradeNotes: string | null;
+  gradeDimensions: GradeDimensionVM[];
   fixNotes: string[];
   facts: CatalogFacts | null;
   brief: CategoryBrief | null;
+  hasPolicies: boolean;
   threshold: number;
   drifted: boolean; // blocks changed since they were marked live
 }
@@ -82,7 +101,11 @@ function words(row: Row): number | null {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
-function toVM(row: Row): CategoryPageVM {
+function tierOf(row: Row): 1 | 2 | 3 {
+  return (row.tier === 1 || row.tier === 3 ? row.tier : 2) as 1 | 2 | 3;
+}
+
+function toVM(row: Row, domain: string): CategoryPageVM {
   return {
     id: row.id,
     handle: row.handle,
@@ -92,18 +115,25 @@ function toVM(row: Row): CategoryPageVM {
     productCount: row.productCount,
     liveHasContent: row.liveHasContent,
     removed: row.removedAt != null,
-    tier: (row.tier === 1 || row.tier === 3 ? row.tier : 2) as 1 | 2 | 3,
+    tier: tierOf(row),
+    locality: localityFor(row.handle),
     targetKeyword: row.targetKeyword,
     secondaryKeywords: row.secondaryKeywords,
     status: row.status,
     overall: row.overall,
     factIssues: row.factIssues,
     words: words(row),
+    links: row.bodyHtml ? linkCounts(row.bodyHtml, domain) : null,
     draftedAt: row.draftedAt?.toISOString() ?? null,
     liveAt: row.liveAt?.toISOString() ?? null,
     refreshDueAt: row.refreshDueAt?.toISOString() ?? null,
     lastCrawledAt: row.lastCrawledAt?.toISOString() ?? null,
   };
+}
+
+async function domainOf(businessId: string): Promise<string> {
+  const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { domain: true } });
+  return biz?.domain ?? "";
 }
 
 // ── Discovery ──────────────────────────────────────────────────
@@ -177,11 +207,45 @@ export async function rescanCategoryPages(
 export async function listCategoryPages(bizId?: string): Promise<CategoryPageVM[]> {
   if (!hasDatabase) return [];
   const businessId = bizId ?? (await activeBizId());
-  const rows = await prisma.categoryPage.findMany({
-    where: { businessId },
-    orderBy: [{ tier: "asc" }, { handle: "asc" }],
-  });
-  return rows.map(toVM);
+  const [rows, domain] = await Promise.all([
+    prisma.categoryPage.findMany({ where: { businessId }, orderBy: [{ tier: "asc" }, { handle: "asc" }] }),
+    domainOf(businessId),
+  ]);
+  return rows.map((r) => toVM(r, domain));
+}
+
+/** Priority for the human's next action: things to review first, then the
+ *  most valuable page to draft. Within a status, hubs first, then more products. */
+const STATUS_RANK: Record<CategoryStatus, number> = {
+  DRAFT_READY: 0,
+  NEEDS_FIX: 1,
+  NEEDS_REFRESH: 2,
+  NOT_STARTED: 3,
+  DRAFTING: 4,
+  LIVE: 5,
+};
+
+export function sortByPriority(pages: CategoryPageVM[]): CategoryPageVM[] {
+  return [...pages].sort(
+    (a, b) =>
+      STATUS_RANK[a.status] - STATUS_RANK[b.status] ||
+      a.tier - b.tier ||
+      (b.productCount ?? 0) - (a.productCount ?? 0) ||
+      a.handle.localeCompare(b.handle),
+  );
+}
+
+/** The one page the operator should look at next, or null when everything's live. */
+export function nextUp(pages: CategoryPageVM[]): CategoryPageVM | null {
+  const live = pages.filter((p) => !p.removed && p.status !== "LIVE");
+  return sortByPriority(live)[0] ?? null;
+}
+
+export async function listLiveCategoryPages(bizId?: string): Promise<CategoryPageVM[]> {
+  const all = await listCategoryPages(bizId);
+  return all
+    .filter((p) => p.status === "LIVE" || p.status === "NEEDS_REFRESH")
+    .sort((a, b) => (a.status === "NEEDS_REFRESH" ? -1 : 1) - (b.status === "NEEDS_REFRESH" ? -1 : 1) || (b.liveAt ?? "").localeCompare(a.liveAt ?? ""));
 }
 
 export async function getCategoryPage(id: string): Promise<CategoryPageDetailVM | null> {
@@ -189,21 +253,26 @@ export async function getCategoryPage(id: string): Promise<CategoryPageDetailVM 
   const row = await prisma.categoryPage.findUnique({ where: { id } });
   if (!row) return null;
   const biz = await prisma.business.findUnique({ where: { id: row.businessId } });
-  let facts: CatalogFacts | null = null;
-  let brief: CategoryBrief | null = null;
-  try {
-    facts = row.factsJson ? (JSON.parse(row.factsJson) as CatalogFacts) : null;
-  } catch {
-    facts = null;
-  }
-  try {
-    brief = row.briefJson ? (JSON.parse(row.briefJson) as CategoryBrief) : null;
-  } catch {
-    brief = null;
-  }
-  const current = snapshotHash(row);
+  const parse = <T,>(s: string | null): T | null => {
+    if (!s) return null;
+    try {
+      return JSON.parse(s) as T;
+    } catch {
+      return null;
+    }
+  };
+  const facts = parse<CatalogFacts>(row.factsJson);
+  const brief = parse<CategoryBrief>(row.briefJson);
+  const grade = parse<{ dimensions?: Record<string, { score: number; max: number; note: string }> }>(row.gradeJson);
+  const gradeDimensions: GradeDimensionVM[] = RUBRIC.map((d) => ({
+    key: d.key,
+    label: d.label,
+    score: grade?.dimensions?.[d.key]?.score ?? 0,
+    max: d.max,
+    note: grade?.dimensions?.[d.key]?.note ?? "",
+  }));
   return {
-    ...toVM(row),
+    ...toVM(row, biz?.domain ?? ""),
     h1: row.h1,
     intro: row.intro,
     bodyHtml: row.bodyHtml,
@@ -211,15 +280,35 @@ export async function getCategoryPage(id: string): Promise<CategoryPageDetailVM 
     metaDescription: row.metaDescription,
     faqJsonLd: row.faqJsonLd,
     gradeNotes: row.gradeNotes,
+    gradeDimensions: grade ? gradeDimensions : [],
     fixNotes: row.fixNotes,
     facts,
     brief,
+    hasPolicies: Boolean(biz?.policyMd),
     threshold: biz?.qualityThreshold ?? 85,
-    drifted: row.liveSnapshot != null && row.liveSnapshot !== current,
+    drifted: row.liveSnapshot != null && row.liveSnapshot !== snapshotHash(row),
   };
 }
 
 // ── Drafting ───────────────────────────────────────────────────
+
+/** Store policy text, refreshed weekly from the public site. */
+async function storePolicies(businessId: string, domain: string): Promise<string> {
+  const biz = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { policyMd: true, policyFetchedAt: true },
+  });
+  const fresh = biz?.policyFetchedAt && Date.now() - biz.policyFetchedAt.getTime() < POLICY_TTL_DAYS * 86400000;
+  if (biz?.policyMd && fresh) return biz.policyMd;
+  const text = await fetchStorePolicies(domain).catch(() => "");
+  if (text) {
+    await prisma.business
+      .update({ where: { id: businessId }, data: { policyMd: text, policyFetchedAt: new Date() } })
+      .catch(() => {});
+    return text;
+  }
+  return biz?.policyMd ?? "";
+}
 
 /** Internal pages the writer may link: sibling collections (hubs first), the
  *  business's live blog posts, and this collection's own products. */
@@ -263,10 +352,12 @@ async function contextFor(row: Row, note?: string): Promise<CategoryContext> {
       facts = null;
     }
   }
-  const links = await linkTargets(biz.id, row, facts);
-  const houseRules = await buildContentGuidance(biz.id).catch(() => "");
+  const [links, houseRules, policies] = await Promise.all([
+    linkTargets(biz.id, row, facts),
+    buildContentGuidance(biz.id).catch(() => ""),
+    storePolicies(biz.id, biz.domain),
+  ]);
   const fixNotes = [...row.fixNotes, ...(note?.trim() ? [note.trim()] : [])];
-  const tier = (row.tier === 1 || row.tier === 3 ? row.tier : 2) as 1 | 2 | 3;
   return {
     businessName: biz.name,
     domain: biz.domain,
@@ -278,12 +369,13 @@ async function contextFor(row: Row, note?: string): Promise<CategoryContext> {
       title: row.liveTitle ?? row.handle,
       handle: row.handle,
       url: row.url,
-      tier,
+      tier: tierOf(row),
       keywordSeed: row.targetKeyword ?? row.handle.replace(/-/g, " "),
       locality: localityFor(row.handle),
     },
     facts,
     links,
+    policies,
   };
 }
 
@@ -291,8 +383,7 @@ interface Assembled {
   draft: CategoryDraftJson;
   bodyHtml: string;
   issues: string[];
-  overall: number;
-  feedback: string;
+  grade: GradeResult;
 }
 
 async function assembleAndCheck(
@@ -307,23 +398,25 @@ async function assembleAndCheck(
   const grade = await gradeDraft(
     draftAsMarkdown(draft, ctx.businessName),
     JSON.stringify({
+      pageType: "e-commerce CATEGORY page (commercial intent — the shopper is choosing what to buy from the product grid above this copy)",
+      gradingNotes:
+        "Judge as a category page, not a blog: intentMatch = does it help a buyer decide and find the right products; eeat = real catalog facts, linked standards (FTC/NFDA), no invented experts or credentials — do not penalize the absence of a named author; aeo = answer-first intro and self-contained FAQ answers; linking = internal hub-and-spoke links plus 2–3 authority links; conversion = a clear path back to the grid; readability = no repetition (the intro is the only summary).",
       targetKeyword: brief.primaryKeyword,
       angle: brief.angle,
       wordTarget: brief.wordTarget,
       outline: brief.sections.map((s) => s.heading),
       questions: brief.questions,
-      pageType: "e-commerce category page (commercial intent)",
     }),
     threshold,
   );
-  return { draft, bodyHtml, issues, overall: grade.overall, feedback: grade.feedback };
+  return { draft, bodyHtml, issues, grade };
 }
 
 /**
- * Write (or rewrite) the paste-ready content for one collection page. One
- * automatic revision pass if the fact-check or the quality bar fails; if it
- * still fails, the draft is kept and the page is marked NEEDS_FIX with the
- * issues visible so a human can steer it.
+ * Write (or rewrite) the paste-ready content for one collection page:
+ * brief → draft → editor tightening pass → fact-check + grade → up to two
+ * targeted revision loops. If it still fails, the draft is kept and the page
+ * is marked NEEDS_FIX with the issues visible so a human can steer it.
  */
 export async function draftCategoryPage(id: string, opts: { note?: string } = {}): Promise<CategoryPageVM> {
   requireDb();
@@ -331,24 +424,39 @@ export async function draftCategoryPage(id: string, opts: { note?: string } = {}
   if (!row) throw new Error("Category page not found");
   const biz = await prisma.business.findUnique({ where: { id: row.businessId } });
   const threshold = biz?.qualityThreshold ?? 85;
+  const domain = biz?.domain ?? "";
   const hadDraft = Boolean(row.bodyHtml);
 
   await prisma.categoryPage.update({ where: { id }, data: { status: "DRAFTING" } });
   try {
     const ctx = await contextFor(row, opts.note);
     const brief = await buildCategoryBrief(ctx);
-    let result = await assembleAndCheck(ctx, brief, await writeCategoryDraft(ctx, brief), threshold);
+    const first = await writeCategoryDraft(ctx, brief);
+    const tightened = await tightenCategoryDraft(ctx, brief, first).catch((e) => {
+      console.error("[category] editor pass failed, using draft as-is:", e instanceof Error ? e.message : e);
+      return first;
+    });
+    let result = await assembleAndCheck(ctx, brief, tightened, threshold);
 
-    if (result.issues.length || result.overall < threshold) {
+    for (let loop = 0; loop < MAX_REVISE_LOOPS; loop++) {
+      const ok = result.issues.length === 0 && result.grade.overall >= threshold;
+      if (ok) break;
       const toFix = [
         ...result.issues,
-        ...(result.overall < threshold ? [`Grader (${result.overall}/${threshold}): ${result.feedback}`] : []),
+        ...(result.grade.overall < threshold
+          ? [`Grader (${result.grade.overall}/${threshold}): ${result.grade.feedback}`]
+          : []),
       ];
       const revised = await reviseCategoryDraft(ctx, brief, result.draft, toFix);
-      result = await assembleAndCheck(ctx, brief, revised, threshold);
+      const next = await assembleAndCheck(ctx, brief, revised, threshold);
+      // Keep the better of the two — a revision must not make things worse.
+      const better =
+        next.issues.length < result.issues.length ||
+        (next.issues.length === result.issues.length && next.grade.overall >= result.grade.overall);
+      if (better) result = next;
     }
 
-    const ok = result.issues.length === 0 && result.overall >= threshold;
+    const ok = result.issues.length === 0 && result.grade.overall >= threshold;
     const updated = await prisma.categoryPage.update({
       where: { id },
       data: {
@@ -363,28 +471,26 @@ export async function draftCategoryPage(id: string, opts: { note?: string } = {}
         briefJson: JSON.stringify(brief),
         targetKeyword: brief.primaryKeyword || row.targetKeyword,
         secondaryKeywords: brief.secondaryKeywords,
-        overall: result.overall,
-        gradeNotes: result.feedback,
+        overall: result.grade.overall,
+        gradeNotes: result.grade.feedback,
+        gradeJson: JSON.stringify({ overall: result.grade.overall, dimensions: result.grade.dimensions }),
         factIssues: result.issues,
         fixNotes: ctx.fixNotes,
         draftedAt: new Date(),
       },
     });
     console.log(
-      `[category] ${row.handle}: ${ok ? "DRAFT_READY" : "NEEDS_FIX"} — grade ${result.overall}/${threshold}, ${wordCount(result.draft)} words, ${result.issues.length} issue(s)`,
+      `[category] ${row.handle}: ${ok ? "DRAFT_READY" : "NEEDS_FIX"} — grade ${result.grade.overall}/${threshold}, ${wordCount(result.draft)} words, ${result.issues.length} issue(s)`,
     );
-    return toVM(updated);
+    return toVM(updated, domain);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[category] draft failed for ${row.handle}:`, msg);
     const updated = await prisma.categoryPage.update({
       where: { id },
-      data: {
-        status: hadDraft ? "NEEDS_FIX" : "NOT_STARTED",
-        gradeNotes: `Draft failed: ${msg}`,
-      },
+      data: { status: hadDraft ? "NEEDS_FIX" : "NOT_STARTED", gradeNotes: `Draft failed: ${msg}` },
     });
-    return toVM(updated);
+    return toVM(updated, domain);
   }
 }
 
@@ -394,7 +500,7 @@ export async function draftCategoryTier(tier: number, bizId?: string, limit = 12
   const businessId = bizId ?? (await activeBizId());
   const rows = await prisma.categoryPage.findMany({
     where: { businessId, tier, removedAt: null, status: { in: ["NOT_STARTED", "NEEDS_FIX"] } },
-    orderBy: { handle: "asc" },
+    orderBy: [{ productCount: "desc" }, { handle: "asc" }],
     take: limit,
   });
   let n = 0;
@@ -478,24 +584,4 @@ export async function flagCategoryRefreshes(bizId?: string): Promise<number> {
   };
   const res = await prisma.categoryPage.updateMany({ where, data: { status: "NEEDS_REFRESH" } });
   return res.count;
-}
-
-export async function categoryCounts(bizId?: string): Promise<Record<CategoryStatus, number>> {
-  const base: Record<CategoryStatus, number> = {
-    NOT_STARTED: 0,
-    DRAFTING: 0,
-    DRAFT_READY: 0,
-    NEEDS_FIX: 0,
-    LIVE: 0,
-    NEEDS_REFRESH: 0,
-  };
-  if (!hasDatabase) return base;
-  const businessId = bizId ?? (await activeBizId());
-  const groups = await prisma.categoryPage.groupBy({
-    by: ["status"],
-    where: { businessId, removedAt: null },
-    _count: { _all: true },
-  });
-  for (const g of groups) base[g.status] = g._count._all;
-  return base;
 }

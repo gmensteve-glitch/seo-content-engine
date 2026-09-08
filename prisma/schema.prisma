@@ -61,6 +61,10 @@ model Business {
   // Target share of NEW content that is locally-targeted (city/state), 0–100.
   // The rest is evergreen/informational. Drives idea generation + auto-advance.
   localRatio       Int    @default(50)
+  // Store policy text (shipping, returns, FAQ) scraped from the public site —
+  // the ONLY source category copy may cite for shipping/returns claims.
+  policyMd         String?  @db.Text
+  policyFetchedAt  DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -120,6 +124,7 @@ model CategoryPage {
   briefJson     String?  @db.Text
   overall       Int?     // rubric grade 0–100
   gradeNotes    String?  @db.Text
+  gradeJson     String?  @db.Text // per-dimension scores + notes (the Score view)
   factIssues    String[] @default([]) // fact-check failures (empty = passed)
   fixNotes      String[] @default([]) // operator "fix it" notes applied on regeneration
   draftedAt     DateTime?
