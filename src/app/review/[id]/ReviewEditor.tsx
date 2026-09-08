@@ -311,9 +311,13 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
       setNote("Re-graded.");
     });
 
-  const publish = async (publishState: "published" | "draft") => {
+  // Publish (or send as a hidden draft) to the store's CMS. No auto-opened tab —
+  // that just flashed open/closed and hid the outcome. Instead we publish, then
+  // show a clear result: a green box with a real "Open in Shopify" button on
+  // success, or a red banner with the exact reason on failure.
+  const doPublish = async (publishState: "published" | "draft") => {
     if (busy) return;
-    setBusy("publish");
+    setBusy(publishState === "draft" ? "draft" : "publish");
     setNote("");
     setPubError(null);
     try {
@@ -322,10 +326,18 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
         setPubError(data.error ? String(data.error) : "Publish failed — try again.");
         return;
       }
-      const target = (data.url as string) || "";
+      // ok:true but not "live" means the piece never reached a CMS — this store
+      // has no connected Shopify. Say so instead of a misleading success.
+      if (!data.live) {
+        setPubError(
+          "This store isn't connected to Shopify, so nothing was sent to your blog. Connect this store on Connectors, then publish again.",
+        );
+        return;
+      }
+      const target = (data.adminUrl as string) || (data.url as string) || "";
       const external = /^https?:\/\//i.test(target);
       setDone({
-        label: publishState === "draft" ? "Published as a hidden Shopify draft" : "Published live to Shopify",
+        label: publishState === "draft" ? "Sent as a hidden Shopify draft" : "Published live to Shopify",
         // Only link out to a real store URL; a local/demo path would 404.
         href: external ? target : "/performance",
       });
@@ -336,57 +348,8 @@ export function ReviewEditor({ initial }: { initial: PolishDraftVM }) {
     }
   };
 
-  // Send as hidden draft, then jump to the post in Shopify admin in a new tab.
-  // Open the tab synchronously on click so the browser's popup blocker allows it,
-  // then point it at the admin URL once the API returns.
-  const sendAsDraft = async () => {
-    if (busy) return;
-    const win = typeof window !== "undefined" ? window.open("about:blank", "_blank") : null;
-    // Show a friendly loading state in the new tab — publishing (image upload +
-    // link checks) takes a few seconds, so it isn't just a blank page.
-    if (win) {
-      try {
-        win.document.write(
-          '<title>Publishing to Shopify…</title><body style="margin:0;font-family:system-ui,-apple-system,sans-serif;background:#0b0b0d;color:#cbd5e1;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="font-size:16px;font-weight:600">Publishing to Shopify…</div><div style="font-size:13px;color:#64748b;margin-top:8px">This tab opens your post automatically in a few seconds.</div></div></body>',
-        );
-      } catch {
-        /* cross-origin write can fail — ignore */
-      }
-    }
-    setBusy("draft");
-    setNote("");
-    setPubError(null);
-    try {
-      const { ok, data } = await post("/api/review/publish", {
-        draftId: vm.id,
-        publishState: "draft",
-      });
-      if (!ok) {
-        // Publish genuinely failed — close the placeholder tab and show why
-        // right by the button, rather than sending the operator to a dead URL.
-        if (win) win.close();
-        setPubError(data.error ? String(data.error) : "Publish failed — try again.");
-        return;
-      }
-      const target = (data.adminUrl as string) || (data.url as string) || "";
-      const external = /^https?:\/\//i.test(target);
-      if (win) {
-        if (external) win.location.href = target;
-        else win.close();
-      }
-      setDone({
-        label: external
-          ? "Sent as a hidden Shopify draft — opening it in Shopify"
-          : "Saved as a hidden draft.",
-        href: external ? target : "/ready",
-      });
-    } catch {
-      if (win) win.close();
-      setNote("Network error — try again.");
-    } finally {
-      setBusy(null);
-    }
-  };
+  const publish = (publishState: "published" | "draft") => doPublish(publishState);
+  const sendAsDraft = () => doPublish("draft");
 
   const submitFeedback = () => {
     if (!fbMode || !fbText.trim()) return;
