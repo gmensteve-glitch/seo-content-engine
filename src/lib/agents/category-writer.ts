@@ -1,11 +1,14 @@
 // The category-page writer — SEO content for a store's collection pages
-// (/collections/metal-caskets …), delivered as paste-ready blocks. Two LLM
-// stages, both on the BEST tier because this is brainstorming + communication:
+// (/collections/metal-caskets, /collections/upright-headstones …), delivered as
+// paste-ready blocks. Two LLM stages, both on the BEST tier because this is
+// brainstorming + communication:
 //   1. brief  — the angle, keyword targets, section plan (what to say)
 //   2. draft  — the prose itself, as structured JSON blocks (how to say it)
-// Everything factual (prices, products, gauges, widths) comes from the live
+// Everything factual (prices, products, sizes, materials) comes from the live
 // catalog facts handed in; the writer is told it may not state a number that
-// isn't there, and a deterministic fact-check enforces it afterwards.
+// isn't there, and a deterministic fact-check enforces it afterwards. What the
+// writer knows about the LINE OF BUSINESS (the real laws, the real authorities,
+// what a buyer asks) comes from the industry pack in ctx.industry.
 // No images — the product grid is the visual.
 
 import { structured, completeText, MODELS } from "@/lib/ai/claude";
@@ -13,6 +16,7 @@ import { aiEnabled, dataforseoEnabled, firecrawlEnabled } from "@/lib/env";
 import { serpTop, keywordVolumes } from "@/lib/connectors/dataforseo";
 import { scrapeMany } from "@/lib/connectors/firecrawl";
 import { factsForPrompt, type CatalogFacts } from "@/lib/categories/facts";
+import type { IndustryPack } from "@/lib/categories/industry";
 
 export interface LinkTarget {
   title: string;
@@ -40,14 +44,9 @@ export interface CategoryContext {
   links: LinkTarget[]; // the ONLY internal links the writer may use
   /** Store shipping/returns/FAQ policy text — the only source for such claims. */
   policies: string;
+  /** What the engine knows about this line of business (laws, authorities, buyer questions). */
+  industry: IndustryPack;
 }
-
-/** The only external links a category page may carry — real, stable, authoritative. */
-export const AUTHORITY_LINKS: { title: string; url: string }[] = [
-  { title: "The FTC Funeral Rule (consumer guide)", url: "https://consumer.ftc.gov/articles/ftc-funeral-rule" },
-  { title: "Complying with the Funeral Rule (FTC)", url: "https://www.ftc.gov/business-guidance/resources/complying-funeral-rule" },
-  { title: "National Funeral Directors Association", url: "https://nfda.org" },
-];
 
 export interface CategoryBrief {
   primaryKeyword: string;
@@ -121,37 +120,14 @@ function offlineBrief(ctx: CategoryContext): CategoryBrief {
   const spec = tierSpec(ctx.collection.tier);
   const kw = ctx.collection.keywordSeed;
   const name = ctx.collection.title;
-  const sections =
-    ctx.collection.tier === 3
-      ? [
-          { heading: `${name}: what's available`, purpose: "the models and finishes available" },
-          { heading: `${name} prices at ${ctx.businessName}`, purpose: "live price range and value" },
-        ]
-      : [
-          { heading: `Types of ${name.toLowerCase()}`, purpose: "sub-types and what each is for" },
-          { heading: `How to choose`, purpose: "the decisions that matter: material, size, interior" },
-          { heading: `${name} prices at ${ctx.businessName}`, purpose: "live catalog range vs funeral-home pricing" },
-          { heading: `Delivery and funeral-home acceptance`, purpose: "overnight delivery; the FTC Funeral Rule" },
-          ...(ctx.collection.tier === 1 ? [{ heading: `Sizes and options`, purpose: "widths, gauges, interiors" }] : []),
-        ];
   const place = ctx.collection.locality;
-  const questions = [
-    place
-      ? `Do funeral homes in ${place} have to accept a casket I bought online?`
-      : `Does a funeral home have to accept a casket I buy online?`,
-    `How much do ${kw} cost?`,
-    place ? `How fast can a casket be delivered in ${place}?` : `How fast can it be delivered?`,
-    `What sizes are available?`,
-    `Can I choose the interior?`,
-    `What's included in the price?`,
-    `Is a gasketed casket necessary?`,
-    `How do I place an order?`,
-  ].slice(0, Math.max(spec.faqs[0], 3));
+  const sections = ctx.industry.offlineSections(ctx.collection.tier, name, ctx.businessName);
+  const questions = ctx.industry.offlineQuestions(kw, place).slice(0, Math.max(spec.faqs[0], 3));
   return {
     primaryKeyword: kw,
     secondaryKeywords: [`${kw} for sale`, `buy ${kw} online`, `affordable ${kw}`],
     keywordVolumes: [],
-    angle: `Factory-direct ${kw} with real prices, delivered overnight to any funeral home${place ? ` in ${place}` : ""}.`,
+    angle: `${kw} direct from ${ctx.businessName} with real catalog prices${place ? `, for families in ${place}` : ""}.`,
     sections,
     questions,
     wordTarget: Math.round((spec.words[0] + spec.words[1]) / 2),
@@ -202,13 +178,13 @@ export async function buildCategoryBrief(ctx: CategoryContext): Promise<Category
       effort: "high",
       system: BRIEF_SYSTEM,
       schema: BRIEF_SCHEMA,
-      prompt: `STORE: ${ctx.businessName} (${ctx.domain})
+      prompt: `STORE: ${ctx.businessName} (${ctx.domain}) — sells ${ctx.industry.label}
 BUSINESS CONTEXT:
 ${ctx.businessContext.slice(0, 4000)}
-
+${ctx.industry.primer ? `\n${ctx.industry.primer}\n` : ""}
 COLLECTION PAGE: "${ctx.collection.title}" — ${ctx.collection.url}
 Tier: ${ctx.collection.tier} (1 = hub/head term, 2 = sub-collection, 3 = colour/variant/state)
-${ctx.collection.locality ? `LOCAL PAGE: this collection is for families in ${ctx.collection.locality} — plan short, place-specific content (delivery there, the Funeral Rule, local buyer questions) and link to the hub for the general guide.\n` : ""}Seed keyword: ${ctx.collection.keywordSeed}
+${ctx.collection.locality ? `LOCAL PAGE: this collection is for families in ${ctx.collection.locality} — plan short, place-specific content (delivery there, the rules that really apply, local buyer questions) and link to the hub for the general guide.\n` : ""}Seed keyword: ${ctx.collection.keywordSeed}
 Depth for this tier: ${spec.sections[0]}–${spec.sections[1]} sections below the product grid, ${spec.faqs[0]}–${spec.faqs[1]} FAQs, ~${spec.words[0]}–${spec.words[1]} words.
 
 LIVE CATALOG FACTS (the only facts that may be planned around):
@@ -328,42 +304,32 @@ const DRAFT_SYSTEM = `You write the editorial content for e-commerce category pa
 function guidance(ctx: CategoryContext): string {
   const spec = tierSpec(ctx.collection.tier);
   const name = ctx.businessName;
+  const ind = ctx.industry;
   return `RULES — these are hard requirements:
 - LENGTH: ${spec.words[0]}–${spec.words[1]} words across the sections + FAQ + "why us". Do not exceed the upper bound.
-- FACTS: every price, gauge, width, material and product name must appear in the LIVE CATALOG FACTS. State the price range as it is given there. You MAY reference typical funeral-home / industry pricing as context, but only in a sentence that clearly says it is funeral-home or industry pricing (e.g. "Funeral homes commonly list a comparable casket at $X–$Y"), framed as "commonly" / "typically" — never as our price.
+- FACTS: every price, size, material, colour and product name must appear in the LIVE CATALOG FACTS. State the price range as it is given there. You MAY reference typical ${ind.venue} / industry pricing as context, but only in a sentence that clearly says it is ${ind.venue} or industry pricing (e.g. "${ind.venue === "cemetery" ? "Monument dealers" : "Funeral homes"} commonly list a comparable ${ind.productNoun} at $X–$Y"), framed as "commonly" / "typically" — never as our price.
 - PRICES IN PROSE are whole dollars: "$1,299", "from $999", "$999–$4,999". Never ".99" in running text (the table may show exact prices).
 - NO PLACEHOLDERS: this is delivered as finished text. No brackets like [price], no TODOs, no "add …" notes.
 - NO IMAGES: text, lists, one table at most. Never reference or embed an image.
 - NO TABLE OF CONTENTS, no "jump to" list, no in-page anchor links (#…). The headings are the navigation.
-- SAY EACH THING ONCE. The intro is the only summary on the page; the first section must NOT restate it. No "quick answer" or recap paragraph anywhere in the sections. The Funeral Rule is explained in full exactly once (in a "your rights" section) and may be mentioned in passing at most once more, in a few words. No repeated price ranges, delivery promises, or "factory-direct" lines across sections.
+- SAY EACH THING ONCE. The intro is the only summary on the page; the first section must NOT restate it. No "quick answer" or recap paragraph anywhere in the sections. The ${ind.rulesSectionName} explanation appears in full exactly once (in its own section) and may be mentioned in passing at most once more, in a few words. No repeated price ranges, delivery promises, or "factory-direct" lines across sections.
 - INTERNAL LINKS: you may link ONLY to URLs in the INTERNAL PAGES list, using the exact URL given, with natural anchor text (a keyword variant, never "click here"). Aim for ${spec.links[0]}–${spec.links[1]} internal links spread across sections. Do not invent any other internal URL.
-- AUTHORITY LINKS: include 2–3 external links, chosen ONLY from this list, inline where the claim is made:
-${AUTHORITY_LINKS.map((l) => `  · ${l.title} — ${l.url}`).join("\n")}
-  No other external URLs, ever.
-- FTC FUNERAL RULE (federal, real): funeral homes must accept a casket bought elsewhere and may not charge a handling fee for it. State it exactly that way, linked to the FTC; no other legal claims.
+- AUTHORITY LINKS: ${ind.authorityLinks.length ? `include 2–3 external links, chosen ONLY from this list, inline where the claim is made:\n${ind.authorityLinks.map((l) => `  · ${l.title} — ${l.url}`).join("\n")}\n  No other external URLs, ever.` : "none — no external links on this page."}
+- ${ind.legalRule} ${ind.legalDontSay}
 - E-E-A-T WITHOUT INVENTION: never claim reviewers, advisors, licensed staff, credentials, "years in the industry", or that anyone "verifies" or "cross-checks" the content unless the BUSINESS CONTEXT says so. Authority comes from the real catalog facts, the linked standards, and plain practitioner-grade explanation. Write in the brand's voice as the store, not as a named person.
-- SHIPPING / RETURNS / GUARANTEES: state ONLY what appears in STORE POLICY below (quote its terms faithfully — e.g. if it says free standard shipping, you may say that). If STORE POLICY is empty or silent on a point, say the detail is confirmed when you order. Never invent delivery times, carriers, packing steps, or return terms. "Delivered overnight to any funeral home in the country" is the brand promise and may be stated.
-- ANSWER-FIRST: the intro's first two sentences answer the search directly (what this is, the real price range, the delivery promise). Every section's first sentence answers that section's question on its own, quotable out of context.
+- SHIPPING / RETURNS / GUARANTEES: state ONLY what appears in STORE POLICY below (quote its terms faithfully — e.g. if it says free standard shipping, you may say that). If STORE POLICY is empty or silent on a point, say the detail is confirmed when you order. Never invent delivery times, carriers, packing steps, or return terms. ${ind.promiseRule}
+- ANSWER-FIRST: the intro's first two sentences answer the search directly (what this is, the real price range, what happens next). Every section's first sentence answers that section's question on its own, quotable out of context.
 - H1: ≤ 70 characters, leads with the primary keyword, then the ${name} promise. It replaces the store's current H1.
 - INTRO: 60–90 words, plain prose (no markdown, no links), for ABOVE the product grid.
-- SECTIONS: ${spec.sections[0]}–${spec.sections[1]} H2 sections for BELOW the grid, following the brief's plan. Body is Markdown (paragraphs, short lists; links in [text](url) form using only allowed URLs). Include a "prices" section using the live range, a "shipping & delivery" section (from STORE POLICY), and a "your rights" section on the Funeral Rule.
-- COMPARISON TABLE: ${spec.table ? "include ONE table (e.g. gauges/materials/sizes compared), 3–5 columns, 3–6 rows, only facts from the catalog." : "set to null for this tier."}
+- SECTIONS: ${spec.sections[0]}–${spec.sections[1]} H2 sections for BELOW the grid, following the brief's plan. Body is Markdown (paragraphs, short lists; links in [text](url) form using only allowed URLs). Include ${ind.requiredSections}.
+- COMPARISON TABLE: ${spec.table ? `include ONE table (${ind.tableHint}), 3–5 columns, 3–6 rows, only facts from the catalog.` : "set to null for this tier."}
 - FAQ: ${spec.faqs[0]}–${spec.faqs[1]} real buyer questions from the brief, each answered in 2–4 self-contained sentences (prime AI-answer material). Plain text answers, no links.
-- WHY US: 90–160 words on ${name} — factory-direct, the delivery promise, the tone from the brand voice. No hype.
+- WHY US: 90–160 words on ${name} — what the BUSINESS CONTEXT and STORE POLICY actually support (direct pricing, the guarantee, the turnaround, the tone from the brand voice). No hype, no invented claims.
 - RELATED GUIDES: 2–3 items chosen ONLY from the [blog] entries in INTERNAL PAGES (title + exact URL). Empty list if none.
 - SEO TITLE: ≤ 60 characters, keyword first, brand last ("… – ${name}"). META DESCRIPTION: ≤ 155 characters, the answer + the differentiator, written to earn the click.
 - BAN: "in conclusion", "it's important to note", "when it comes to", "navigate", "delve", "in today's world", em-dash overuse, reflexive hedging.
 - TONE: ${ctx.brandVoice ? "the brand voice below" : "compassionate, practical, plainspoken"}.
-${
-  ctx.collection.locality
-    ? `\nTHIS IS A LOCAL PAGE FOR ${ctx.collection.locality.toUpperCase()} — the same catalog, for families there:
-- Name ${ctx.collection.locality} in the H1, the first sentence of the intro, the SEO title and at least two section headings. A reader must instantly see this page is for ${ctx.collection.locality}.
-- Lead with the local answer: families in ${ctx.collection.locality} can buy a casket from ${name} and have it delivered overnight to any funeral home there; under the FTC Funeral Rule the funeral home must accept it and may not charge a handling fee.
-- Keep it SHORT and specific to the place. Do not repeat the hub's general buying guide — link to the hub for that.
-- Never invent ${ctx.collection.locality}-specific statutes, fees, cemeteries or funeral homes. The Funeral Rule is federal and real; for anything state-specific say to confirm with the state funeral board.
-- Include at least two place-named FAQs ("Do funeral homes in ${ctx.collection.locality} have to accept a casket I bought online?").`
-    : ""
-}${ctx.houseRules ? `\nHOUSE RULES (learned from the operator's feedback — obey):\n${ctx.houseRules}` : ""}${
+${ctx.collection.locality ? `\n${ind.localRules(ctx.collection.locality, name)}` : ""}${ctx.houseRules ? `\nHOUSE RULES (learned from the operator's feedback — obey):\n${ctx.houseRules}` : ""}${
     ctx.fixNotes.length ? `\nOPERATOR NOTES FOR THIS PAGE (obey exactly):\n${ctx.fixNotes.map((n) => `- ${n}`).join("\n")}` : ""
   }`;
 }
@@ -379,8 +345,8 @@ function offlineDraft(ctx: CategoryContext, brief: CategoryBrief): CategoryDraft
   const blogs = ctx.links.filter((l) => l.kind === "blog").slice(0, 3);
   const spec = tierSpec(ctx.collection.tier);
   return {
-    h1: `${title} — Factory-Direct, Delivered Overnight`,
-    intro: `${title} from ${name} are sold factory-direct${range ? `, priced from ${range}` : ""}, and delivered overnight to any funeral home in the country. Under the FTC Funeral Rule the funeral home must accept a casket you buy elsewhere and cannot charge a handling fee. Browse the collection below; the guide underneath explains how to choose.`,
+    h1: `${title} — Direct from ${name}`,
+    intro: `${title} from ${name} are sold direct${range ? `, priced from ${range}` : ""}, with every option listed on the product page and the details confirmed when you order. Browse the collection below; the guide underneath explains how to choose, what to confirm with your ${ctx.industry.venue} first, and what happens after you order.`,
     sections: brief.sections.map((s, i) => ({
       heading: s.heading,
       bodyMarkdown:
@@ -391,18 +357,17 @@ function offlineDraft(ctx: CategoryContext, brief: CategoryBrief): CategoryDraft
     comparisonTable: null,
     faqs: brief.questions.slice(0, spec.faqs[1]).map((q) => ({
       question: q,
-      answer: /accept/i.test(q)
-        ? `Yes. Under the FTC Funeral Rule, a funeral home must accept a casket you bought elsewhere and may not charge a handling fee for it.`
-        : /cost|price/i.test(q) && range
-          ? `${title} at ${name} currently range from ${range}, sold factory-direct.`
-          : /deliver|fast/i.test(q)
-            ? `Timing is confirmed when you order; ${name} delivers overnight to any funeral home in the country.`
+      answer:
+        /cost|price/i.test(q) && range
+          ? `${title} at ${name} currently range from ${range}, sold direct.`
+          : /deliver|fast|long/i.test(q)
+            ? `Timing is confirmed when you order; ${name} states its shipping terms on its policy pages.`
             : `Every option is listed on the product page, and a real person at ${name} confirms the details when you order.`,
     })),
-    whyUs: `${name} sells factory-direct and delivers overnight to any funeral home in the country, so families pay the maker's price instead of a funeral-home markup. Every order is handled with care and confirmed by a real person.`,
+    whyUs: `${name} sells direct, so families pay the maker's price instead of a middleman's markup. Every order is handled with care and confirmed by a real person.`,
     relatedGuides: blogs.map((b) => ({ title: b.title, url: b.url })),
     seoTitle: `${title} for Sale – ${name}`.slice(0, 60),
-    metaDescription: `Shop ${kw} factory-direct${range ? ` from ${range}` : ""}. Delivered overnight to any funeral home — they must accept it under the FTC Funeral Rule.`.slice(0, 155),
+    metaDescription: `Shop ${kw} direct from ${name}${range ? ` from ${range}` : ""}. Real catalog prices, every option listed, details confirmed when you order.`.slice(0, 155),
   };
 }
 
@@ -414,13 +379,13 @@ export async function writeCategoryDraft(ctx: CategoryContext, brief: CategoryBr
     maxTokens: 28000,
     system: DRAFT_SYSTEM,
     schema: DRAFT_SCHEMA,
-    prompt: `STORE: ${ctx.businessName} (${ctx.domain})
+    prompt: `STORE: ${ctx.businessName} (${ctx.domain}) — sells ${ctx.industry.label}
 BRAND VOICE:
 ${ctx.brandVoice || "(none provided)"}
 
 BUSINESS CONTEXT:
 ${ctx.businessContext.slice(0, 3000)}
-
+${ctx.industry.primer ? `\n${ctx.industry.primer}\n` : ""}
 COLLECTION PAGE: "${ctx.collection.title}" — ${ctx.collection.url} (tier ${ctx.collection.tier})
 
 BRIEF:
@@ -509,7 +474,7 @@ ${ctx.policies || "(none readable — say details are confirmed at order)"}
 INTERNAL PAGES (the only internal URLs you may link):
 ${linksForPrompt(ctx.links)}
 
-Rules that still apply: whole-dollar prices in prose; no placeholders; no images; no table of contents; no invented reviewers or credentials; the Funeral Rule stated accurately. Return ONLY the replacement passage — no preamble, no quotes, no code fences.`,
+Rules that still apply: whole-dollar prices in prose; no placeholders; no images; no table of contents; no invented reviewers or credentials. ${ctx.industry.legalRule} ${ctx.industry.legalDontSay} Return ONLY the replacement passage — no preamble, no quotes, no code fences.`,
   });
   return out.replace(/^```[a-z]*\n?|```$/g, "").trim();
 }
@@ -534,7 +499,7 @@ export async function tightenCategoryDraft(ctx: CategoryContext, brief: Category
 DO:
 - Remove every repeated fact, price range, delivery promise or "factory-direct" line — each appears ONCE, in its best place.
 - Remove any recap / "quick answer" / summary paragraph in the sections (the intro is the only summary).
-- Keep the full Funeral Rule explanation in ONE section only; elsewhere at most a few-word mention.
+- Keep the full "${ctx.industry.rulesSectionName}" explanation in ONE section only; elsewhere at most a few-word mention.
 - Cut hedging ("generally", "typically" where not needed), throat-clearing, and filler sentences that carry no fact.
 - Keep the intro at 60–90 words, plain prose, no links.
 - Keep every internal and authority link that's there (do not add any).

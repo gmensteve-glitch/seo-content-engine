@@ -52,6 +52,12 @@ export async function fetchStorePolicies(domain: string): Promise<string> {
       const text = textOf(await res.text());
       // A policy page has real body text; a 200 that's just chrome is skipped.
       if (text.length < 200) continue;
+      // Shopify's stock FAQ template ships with a fake phone number and
+      // boilerplate refund terms. Never let that masquerade as store policy.
+      if (/555-1234|lorem ipsum|\[insert|your company name/i.test(text)) {
+        console.warn(`[policies] ${c.path} looks like unedited template text — skipped`);
+        continue;
+      }
       seen.add(c.label);
       parts.push(`## ${c.label} (${c.path})\n${text.slice(0, 2500)}`);
     } catch {

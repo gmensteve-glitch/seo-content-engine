@@ -1,9 +1,12 @@
 // Catalog facts for a collection — the ONLY source of prices, product names,
-// gauges, widths and materials the category writer may state. Pulled from the
+// sizes, materials and colours the category writer may state. Pulled from the
 // store's public /collections/<handle>/products.json, so it's always the live
-// catalog and never a guess. Everything here is deterministic (no LLM).
+// catalog and never a guess. Everything here is deterministic (no LLM). Which
+// attributes are worth mining (steel gauges for caskets, W x D x H sizes and
+// base widths for headstones) comes from the industry pack.
 
 import { siteBase } from "@/lib/categories/discover";
+import { INDUSTRIES, type IndustryPack } from "@/lib/categories/industry";
 
 export interface CatalogProduct {
   title: string;
@@ -25,10 +28,16 @@ export interface CatalogFacts {
   prices: number[];
   products: CatalogProduct[]; // a representative sample
   /** Attributes mined from titles/tags/descriptions. */
-  gauges: string[]; // "18-gauge", "20-gauge", "16-gauge"
-  materials: string[]; // "stainless steel", "solid oak", ...
-  widths: string[]; // '28"', '32"'
+  gauges: string[]; // caskets: "18-gauge", "20-gauge" (kept for older stored facts)
+  materials: string[]; // "granite", "stainless steel", "solid oak", ...
+  widths: string[]; // caskets: '28"', '32"' (kept for older stored facts)
   colours: string[];
+  /** Industry-specific named attributes, e.g. "Sizes in the catalog" → ['24" x 12" x 4"', …]. */
+  attributes?: { label: string; values: string[] }[];
+  /** Style words present in the catalog (flat, slant, upright, companion …). */
+  styles?: string[];
+  /** Variant option values (e.g. Stone: Black, Grey, Bahama Blue). */
+  options?: { name: string; values: string[] }[];
   fetchedAt: string;
 }
 
@@ -41,63 +50,15 @@ type ShopifyProduct = {
   tags?: string[] | string;
   body_html?: string;
   variants?: Array<{ price?: string; compare_at_price?: string | null }>;
+  options?: Array<{ name?: string; values?: string[] }>;
 };
-
-const MATERIAL_WORDS = [
-  "stainless steel",
-  "steel",
-  "bronze",
-  "copper",
-  "solid oak",
-  "oak",
-  "mahogany",
-  "cherry",
-  "walnut",
-  "maple",
-  "poplar",
-  "pine",
-  "veneer",
-  "bamboo",
-  "willow",
-  "seagrass",
-  "cardboard",
-  "cloth-covered",
-  "fiberglass",
-  "marble",
-  "ceramic",
-  "brass",
-  "aluminum",
-  "wood",
-  "metal",
-];
-
-const COLOUR_WORDS = [
-  "black",
-  "white",
-  "silver",
-  "gold",
-  "blue",
-  "navy",
-  "red",
-  "pink",
-  "purple",
-  "green",
-  "brown",
-  "grey",
-  "gray",
-  "copper",
-  "bronze",
-  "champagne",
-  "orange",
-  "ivory",
-  "natural",
-];
 
 function strip(html: string): string {
   return html
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
+    .replace(/&#8243;|&Prime;/g, "″")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -112,7 +73,11 @@ function uniq(xs: string[]): string[] {
 }
 
 /** Live catalog facts for one collection. Returns null if the site can't be read. */
-export async function fetchCatalogFacts(domain: string, handle: string): Promise<CatalogFacts | null> {
+export async function fetchCatalogFacts(
+  domain: string,
+  handle: string,
+  pack: IndustryPack = INDUSTRIES.general,
+): Promise<CatalogFacts | null> {
   const base = siteBase(domain);
   const products: ShopifyProduct[] = [];
   for (let page = 1; page <= 4; page++) {
@@ -138,22 +103,30 @@ export async function fetchCatalogFacts(domain: string, handle: string): Promise
       break;
     }
     const batch = data.products ?? [];
+    if (batch.length === 0) break;
     products.push(...batch);
-    if (batch.length < 250) break;
   }
   if (products.length === 0 && !(await siteReachable(base))) return null;
 
   const prices: number[] = [];
   const items: CatalogProduct[] = [];
   const corpus: string[] = [];
+  const optionValues = new Map<string, Set<string>>();
   for (const p of products) {
     const variantPrices = (p.variants ?? []).map((v) => num(v.price)).filter((n): n is number => n != null);
     prices.push(...variantPrices);
     const tags = Array.isArray(p.tags) ? p.tags : String(p.tags ?? "").split(",");
     const blurb = strip(String(p.body_html ?? "")).slice(0, 220);
-    const title = String(p.title ?? "").trim();
+    const title = strip(String(p.title ?? ""));
     const h = String(p.handle ?? "").trim();
-    corpus.push(`${title} ${tags.join(" ")} ${blurb}`.toLowerCase());
+    corpus.push(`${title} ${tags.join(" ")} ${strip(String(p.body_html ?? ""))}`.toLowerCase());
+    for (const o of p.options ?? []) {
+      const name = String(o.name ?? "").trim();
+      if (!name || /^title$/i.test(name)) continue;
+      const set = optionValues.get(name.toLowerCase()) ?? new Set<string>();
+      for (const v of o.values ?? []) if (v && !/^default title$/i.test(v)) set.add(v);
+      optionValues.set(name.toLowerCase(), set);
+    }
     items.push({
       title,
       handle: h,
@@ -167,14 +140,25 @@ export async function fetchCatalogFacts(domain: string, handle: string): Promise
   }
 
   const text = corpus.join(" \n ");
-  const gauges = uniq(
-    [...text.matchAll(/\b(16|18|20|22)\s*-?\s*(?:ga|gauge)\b/g)].map((m) => `${m[1]}-gauge`),
-  ).sort();
-  const materials = MATERIAL_WORDS.filter((w) => text.includes(w));
-  const widths = uniq(
-    [...text.matchAll(/\b(2[4-9]|3\d|4\d|5\d)\s*(?:"|”|-?\s?inch(?:es)?)\b/g)].map((m) => `${m[1]}"`),
-  ).sort((a, b) => parseInt(a) - parseInt(b));
-  const colours = COLOUR_WORDS.filter((w) => new RegExp(`\\b${w}\\b`).test(text));
+  const gauges = uniq([...text.matchAll(/\b(16|18|20|22)\s*-?\s*(?:ga|gauge)\b/g)].map((m) => `${m[1]}-gauge`)).sort();
+  const materials = pack.materialWords.filter((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(text));
+  const widths =
+    pack.key === "caskets"
+      ? uniq([...text.matchAll(/\b(2[4-9]|3\d|4\d|5\d)\s*(?:"|”|-?\s?inch(?:es)?)\b/g)].map((m) => `${m[1]}"`)).sort(
+          (a, b) => parseInt(a) - parseInt(b),
+        )
+      : [];
+  const colours = pack.colourWords.filter((w) => new RegExp(`\\b${w}\\b`).test(text));
+  const styles = pack.styleWords.filter((w) => new RegExp(`\\b${w}\\b`).test(text));
+  const attributes = pack.attributeExtractors
+    .map((ex) => ({
+      label: ex.label,
+      values: uniq([...text.matchAll(new RegExp(ex.regex.source, ex.regex.flags.includes("g") ? ex.regex.flags : `${ex.regex.flags}g`))].map(ex.format)).slice(0, 24),
+    }))
+    .filter((a) => a.values.length);
+  const options = [...optionValues.entries()]
+    .filter(([, v]) => v.size > 0)
+    .map(([name, v]) => ({ name: name.replace(/\b\w/g, (c) => c.toUpperCase()), values: [...v].sort() }));
 
   // Representative sample: spread across the price range, cheapest first.
   const sorted = [...items].filter((i) => i.price != null).sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
@@ -193,6 +177,9 @@ export async function fetchCatalogFacts(domain: string, handle: string): Promise
     materials: uniq(materials),
     widths,
     colours: uniq(colours),
+    attributes,
+    styles: uniq(styles),
+    options,
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -220,6 +207,9 @@ export function factsForPrompt(f: CatalogFacts): string {
     f.materials.length ? `Materials mentioned in the catalog: ${f.materials.join(", ")}` : "",
     f.widths.length ? `Widths mentioned: ${f.widths.join(", ")}` : "",
     f.colours.length ? `Colours/finishes: ${f.colours.join(", ")}` : "",
+    f.styles?.length ? `Styles present: ${f.styles.join(", ")}` : "",
+    ...(f.attributes ?? []).map((a) => `${a.label}: ${a.values.join(", ")}`),
+    ...(f.options ?? []).map((o) => `Option "${o.name}": ${o.values.join(", ")}`),
     "",
     "Representative products (title — price — type):",
     ...f.products.map(

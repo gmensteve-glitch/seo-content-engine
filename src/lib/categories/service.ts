@@ -9,6 +9,7 @@ import { activeBizId } from "@/lib/active-business";
 import { discoverCollections, localityFor } from "@/lib/categories/discover";
 import { fetchCatalogFacts, type CatalogFacts } from "@/lib/categories/facts";
 import { fetchStorePolicies } from "@/lib/categories/policies";
+import { industryFor } from "@/lib/categories/industry";
 import {
   buildCategoryBrief,
   writeCategoryDraft,
@@ -172,7 +173,7 @@ export async function rescanCategoryPages(
   const biz = await prisma.business.findUnique({ where: { id: businessId } });
   if (!biz) throw new Error("Business not found");
 
-  const found = await discoverCollections(biz.domain);
+  const found = await discoverCollections(biz.domain, industryFor(biz));
   if (found.length === 0) return { found: 0, added: 0, removed: 0, readable: false };
 
   const now = new Date();
@@ -366,9 +367,10 @@ async function contextFor(row: Row, note?: string): Promise<CategoryContext> {
   const biz = await prisma.business.findUnique({ where: { id: row.businessId } });
   if (!biz) throw new Error("Business not found");
 
+  const industry = industryFor(biz);
   // Fresh catalog facts every draft — prices must be current. Fall back to the
   // last known facts if the site is momentarily unreadable.
-  let facts = await fetchCatalogFacts(biz.domain, row.handle);
+  let facts = await fetchCatalogFacts(biz.domain, row.handle, industry);
   if (!facts && row.factsJson) {
     try {
       facts = JSON.parse(row.factsJson) as CatalogFacts;
@@ -400,6 +402,7 @@ async function contextFor(row: Row, note?: string): Promise<CategoryContext> {
     facts,
     links,
     policies,
+    industry,
   };
 }
 
@@ -418,13 +421,12 @@ async function assembleAndCheck(
 ): Promise<Assembled> {
   const bodyHtml = assembleBodyHtml(draft, ctx.businessName, ctx.domain);
   const spec = tierSpec(ctx.collection.tier);
-  const issues = factCheck(draft, bodyHtml, ctx.facts, ctx.links, ctx.domain, spec.faqs[0]);
+  const issues = factCheck(draft, bodyHtml, ctx.facts, ctx.links, ctx.domain, spec.faqs[0], ctx.industry.authorityLinks);
   const grade = await gradeDraft(
     draftAsMarkdown(draft, ctx.businessName),
     JSON.stringify({
-      pageType: "e-commerce CATEGORY page (commercial intent — the shopper is choosing what to buy from the product grid above this copy)",
-      gradingNotes:
-        "Judge as a category page, not a blog: intentMatch = does it help a buyer decide and find the right products; eeat = real catalog facts, linked standards (FTC/NFDA), no invented experts or credentials — do not penalize the absence of a named author; aeo = answer-first intro and self-contained FAQ answers; linking = internal hub-and-spoke links plus 2–3 authority links; conversion = a clear path back to the grid; readability = no repetition (the intro is the only summary).",
+      pageType: `e-commerce CATEGORY page for ${ctx.industry.label} (commercial intent — the shopper is choosing what to buy from the product grid above this copy)`,
+      gradingNotes: `Judge as a category page, not a blog: intentMatch = does it help a buyer decide and find the right products; eeat = real catalog facts, linked standards (${ctx.industry.authorityNames}), accurate statements of the rules that really apply (${ctx.industry.legalDontSay}), no invented experts or credentials — do not penalize the absence of a named author; aeo = answer-first intro and self-contained FAQ answers; linking = internal hub-and-spoke links plus 2–3 authority links; conversion = a clear path back to the grid; readability = no repetition (the intro is the only summary).`,
       targetKeyword: brief.primaryKeyword,
       angle: brief.angle,
       wordTarget: brief.wordTarget,
@@ -451,17 +453,35 @@ export async function draftCategoryPage(id: string, opts: { note?: string } = {}
   const domain = biz?.domain ?? "";
   const hadDraft = Boolean(row.bodyHtml);
 
-  await prisma.categoryPage.update({ where: { id }, data: { status: "DRAFTING" } });
+  // One writer per page. A second click (or a tier batch landing on a page
+  // someone just started) must not run a parallel draft that doubles the cost
+  // and races on the final write. A DRAFTING row that has heartbeated within
+  // the stuck cutoff is live; anything older is an orphan and may be retaken.
+  if (row.status === "DRAFTING" && Date.now() - row.updatedAt.getTime() < STUCK_AFTER_MS) {
+    console.warn(`[category] ${row.handle}: already drafting — ignoring duplicate start`);
+    return toVM(row, domain);
+  }
+
+  // Heartbeat: touch the row between stages so a long (10–20 min) hub draft is
+  // never mistaken for an interrupted one by the recovery sweep.
+  const beat = () =>
+    prisma.categoryPage.update({ where: { id }, data: { status: "DRAFTING" } }).catch(() => undefined);
+
+  await beat();
   try {
     let loops = 0;
     const { result: run, cents } = await withCostScope(async () => {
       const ctx = await contextFor(row, opts.note);
+      await beat();
       const brief = await buildCategoryBrief(ctx);
+      await beat();
       const first = await writeCategoryDraft(ctx, brief);
+      await beat();
       const tightened = await tightenCategoryDraft(ctx, brief, first).catch((e) => {
         console.error("[category] editor pass failed, using draft as-is:", e instanceof Error ? e.message : e);
         return first;
       });
+      await beat();
       let result = await assembleAndCheck(ctx, brief, tightened, threshold);
 
       for (let loop = 0; loop < MAX_REVISE_LOOPS; loop++) {
@@ -474,7 +494,9 @@ export async function draftCategoryPage(id: string, opts: { note?: string } = {}
             ? [`Grader (${result.grade.overall}/${threshold}): ${result.grade.feedback}`]
             : []),
         ];
+        await beat();
         const revised = await reviseCategoryDraft(ctx, brief, result.draft, toFix);
+        await beat();
         const next = await assembleAndCheck(ctx, brief, revised, threshold);
         // Keep the better of the two — a revision must not make things worse.
         const better =
@@ -536,22 +558,35 @@ const stripMd = (s: string) =>
     .replace(/[*_`#>]/g, "")
     .replace(/^\s*([-•]|\d+[.)])\s+/gm, "");
 
-/** Find which block of the draft contains the highlighted text. */
-function locatePassage(draft: CategoryDraftJson, selected: string): PassageTarget | null {
-  const sel = norm(selected);
-  // A long selection may span blocks; match on its opening words.
-  const probe = sel.length > 80 ? sel.slice(0, 80) : sel;
-  if (!probe) return null;
-  const has = (t: string) => norm(stripMd(t)).includes(probe);
-  if (has(draft.h1)) return { kind: "h1" };
-  if (has(draft.intro)) return { kind: "intro" };
-  for (let i = 0; i < draft.sections.length; i++) {
-    if (has(draft.sections[i].heading) || has(draft.sections[i].bodyMarkdown)) return { kind: "section", index: i };
+/**
+ * Find which block of the draft contains the highlighted text. A short
+ * selection ("steel") can appear in several blocks, so the UI also sends the
+ * surrounding paragraph; that longer, near-unique text is tried first, and the
+ * bare selection only as a fallback. Blocks are searched body-first so a word
+ * that also happens to be in the H1 doesn't hijack the H1.
+ */
+function locatePassage(draft: CategoryDraftJson, selected: string, context = ""): PassageTarget | null {
+  const probes = [norm(context), norm(selected)]
+    .map((s) => (s.length > 80 ? s.slice(0, 80) : s))
+    .filter((s) => s.length >= 4);
+  for (const probe of probes) {
+    const has = (t: string) => norm(stripMd(t)).includes(probe);
+    for (let i = 0; i < draft.sections.length; i++) {
+      if (has(draft.sections[i].bodyMarkdown)) return { kind: "section", index: i };
+    }
+    for (let i = 0; i < draft.faqs.length; i++) {
+      if (has(draft.faqs[i].answer)) return { kind: "faq", index: i };
+    }
+    if (has(draft.whyUs)) return { kind: "whyUs" };
+    if (has(draft.intro)) return { kind: "intro" };
+    for (let i = 0; i < draft.sections.length; i++) {
+      if (has(draft.sections[i].heading)) return { kind: "section", index: i };
+    }
+    for (let i = 0; i < draft.faqs.length; i++) {
+      if (has(draft.faqs[i].question)) return { kind: "faq", index: i };
+    }
+    if (has(draft.h1)) return { kind: "h1" };
   }
-  for (let i = 0; i < draft.faqs.length; i++) {
-    if (has(draft.faqs[i].question) || has(draft.faqs[i].answer)) return { kind: "faq", index: i };
-  }
-  if (has(draft.whyUs)) return { kind: "whyUs" };
   return null;
 }
 
@@ -564,6 +599,7 @@ export async function fixCategoryPassage(
   id: string,
   selectedText: string,
   instruction: string,
+  contextText = "",
 ): Promise<{ ok: boolean; message: string }> {
   requireDb();
   const row = await prisma.categoryPage.findUnique({ where: { id } });
@@ -577,7 +613,7 @@ export async function fixCategoryPassage(
   } catch {
     return { ok: false, message: "Couldn't read the stored draft — redraft the page." };
   }
-  const target = locatePassage(draft, selectedText);
+  const target = locatePassage(draft, selectedText, contextText);
   if (!target) {
     return { ok: false, message: "Couldn't find that exact text in the draft. Try highlighting a shorter piece inside one paragraph." };
   }
@@ -719,12 +755,14 @@ export async function saveCategoryEdits(id: string, edits: CategoryEdits): Promi
   };
 }
 
-/** Draft every undrafted page in a tier, one after another (bounded). */
+/** Draft every NOT-STARTED page in a tier, one after another (bounded). Pages
+ *  that already have a draft (even a flagged one) are left alone — someone may
+ *  be editing them. */
 export async function draftCategoryTier(tier: number, bizId?: string, limit = 12): Promise<number> {
   requireDb();
   const businessId = bizId ?? (await activeBizId());
   const rows = await prisma.categoryPage.findMany({
-    where: { businessId, tier, removedAt: null, status: { in: ["NOT_STARTED", "NEEDS_FIX"] } },
+    where: { businessId, tier, removedAt: null, status: "NOT_STARTED" },
     orderBy: [{ productCount: "desc" }, { handle: "asc" }],
     take: limit,
   });

@@ -16,13 +16,33 @@ import {
 
 export const dynamic = "force-dynamic";
 
+/** A second store lives in its own Shopify organization, so it needs its own
+ *  Dev Dashboard app. Those credentials arrive by POST (never in a URL) and
+ *  are stored encrypted with that store's connector. */
+export async function POST(req: Request): Promise<Response> {
+  const form = await req.formData().catch(() => null);
+  const shop = normalizeShop(String(form?.get("shop") ?? ""));
+  const clientId = String(form?.get("client_id") ?? "").trim();
+  const clientSecret = String(form?.get("client_secret") ?? "").trim();
+  return connect(req, shop, clientId && clientSecret ? { clientId, clientSecret } : null, false);
+}
+
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
+  const shop = normalizeShop(url.searchParams.get("shop") ?? "");
+  return connect(req, shop, null, url.searchParams.get("legacy") === "1");
+}
+
+async function connect(
+  req: Request,
+  shop: string | null,
+  creds: { clientId: string; clientSecret: string } | null,
+  legacy: boolean,
+): Promise<Response> {
   const back = "/connectors";
-  if (!shopifyOAuthEnabled()) {
+  if (!shopifyOAuthEnabled() && !creds) {
     return NextResponse.redirect(new URL(`${back}?shopify_error=not_configured`, appBaseUrl(req)));
   }
-  const shop = normalizeShop(url.searchParams.get("shop") ?? "");
   if (!shop) {
     return NextResponse.redirect(new URL(`${back}?shopify_error=domain`, appBaseUrl(req)));
   }
@@ -33,9 +53,9 @@ export async function GET(req: Request): Promise<Response> {
   // installed on the store gets its token directly from the app's Client ID +
   // Secret — no consent screen (which Dev Dashboard apps reject with
   // "Unauthorized Access"). The token is validated before it's stored.
-  if (url.searchParams.get("legacy") !== "1") {
+  if (!legacy) {
     try {
-      await connectShopifyWithAppCredentials(businessId, shop);
+      await connectShopifyWithAppCredentials(businessId, shop, creds);
       return NextResponse.redirect(new URL(`${back}?connected=shopify`, appBaseUrl(req)));
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);

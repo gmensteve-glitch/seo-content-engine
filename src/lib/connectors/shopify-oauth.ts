@@ -86,15 +86,27 @@ export function verifyHmac(params: URLSearchParams): boolean {
  * with NO browser redirect/consent screen (which Dev Dashboard apps reject with
  * "Unauthorized Access"). The token is refreshed automatically before it expires.
  */
+export interface ShopifyAppCreds {
+  clientId: string;
+  clientSecret: string;
+}
+
+/** A Dev Dashboard app is installed on ONE store's organization. A second store
+ *  (a different Shopify org) needs its own app, so its credentials can be stored
+ *  per connector and passed here; otherwise the env-wide app is used. */
 export async function clientCredentialsToken(
   shop: string,
+  creds?: Partial<ShopifyAppCreds> | null,
 ): Promise<{ accessToken: string; expiresAt: number }> {
+  const clientId = creds?.clientId?.trim() || shopifyClientId();
+  const clientSecret = creds?.clientSecret?.trim() || shopifyClientSecret();
+  if (!clientId || !clientSecret) throw new Error("No Shopify app credentials — set SHOPIFY_APP_CLIENT_ID/SECRET or enter this store's app credentials");
   const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({
-      client_id: shopifyClientId(),
-      client_secret: shopifyClientSecret(),
+      client_id: clientId,
+      client_secret: clientSecret,
       grant_type: "client_credentials",
     }),
   });

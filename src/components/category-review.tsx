@@ -261,8 +261,8 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
 
   // Highlight → fix this passage
   const readRef = useRef<HTMLDivElement>(null);
-  const [sel, setSel] = useState<{ text: string; top: number; left: number } | null>(null);
-  const [passage, setPassage] = useState<string | null>(null);
+  const [sel, setSel] = useState<{ text: string; context: string; top: number; left: number } | null>(null);
+  const [passage, setPassage] = useState<{ text: string; context: string } | null>(null);
   const [passageResult, passageAction, passagePending] = useActionState<PassageFixResult, FormData>(
     fixPassageCategoryAction,
     null,
@@ -290,7 +290,15 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
     }
     const rect = range.getBoundingClientRect();
     const host = readRef.current.getBoundingClientRect();
-    setSel({ text, top: rect.top - host.top - 44, left: Math.max(0, rect.left - host.left) });
+    // The paragraph/heading/cell the selection starts in — sent along so a short
+    // highlight ("steel") is matched to the right block, not the first one.
+    const startEl =
+      range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.startContainer as Element)
+        : range.startContainer.parentElement;
+    const block = startEl?.closest("p, li, h1, h2, h3, td, th, blockquote");
+    const context = (block?.textContent ?? "").replace(/\s+/g, " ").trim();
+    setSel({ text, context, top: rect.top - host.top - 44, left: Math.max(0, rect.left - host.left) });
   }
 
   const hasDraft = Boolean(p.bodyHtml);
@@ -437,7 +445,7 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
                   type="button"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
-                    setPassage(sel.text);
+                    setPassage({ text: sel.text, context: sel.context });
                     setSeenResult(passageResult);
                     setSel(null);
                     window.getSelection()?.removeAllRanges();
@@ -464,11 +472,12 @@ export function CategoryReview({ page: p }: { page: CategoryPageDetailVM }) {
                 <Highlighter size={13} /> Fix this passage
               </div>
               <blockquote className="mb-3 max-h-24 overflow-y-auto rounded-lg border-l-2 border-[var(--accent)] bg-[var(--surface-2)] px-3.5 py-2.5 text-[13px] leading-relaxed text-[var(--muted)]">
-                “{passage}”
+                “{passage.text}”
               </blockquote>
               <form action={passageAction} className="flex flex-col gap-3">
                 <input type="hidden" name="id" value={p.id} />
-                <input type="hidden" name="selectedText" value={passage} />
+                <input type="hidden" name="selectedText" value={passage.text} />
+                <input type="hidden" name="contextText" value={passage.context} />
                 <textarea
                   name="instruction"
                   rows={2}

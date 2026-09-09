@@ -3,32 +3,16 @@
 // endpoints (Shopify's storefront /collections.json and the sitemap); needs no
 // Shopify permission and never writes anything.
 
-const UA = "Mozilla/5.0 (compatible; ContentEngineBot/1.0; +https://overnightcaskets.com)";
+import { INDUSTRIES, type IndustryPack } from "@/lib/categories/industry";
+
+const UA = "Mozilla/5.0 (compatible; ContentEngineBot/1.0)";
 
 /** Shopify's default/system collections that aren't real category pages. */
 const SYSTEM_HANDLES = new Set(["all", "frontpage"]);
 
-/** Hub collections — the head-term money pages. Matched by handle. */
-const HUB_HANDLES = new Set([
-  "all-caskets",
-  "caskets",
-  "metal-caskets",
-  "steel-caskets",
-  "wood-caskets",
-  "wooden-caskets",
-  "oversized-caskets",
-  "cremation-urns",
-  "urns",
-]);
-
-/** A colour/finish variant collection (short, focused copy — tier 3). */
-const COLOUR_RE =
-  /\b(black|white|red|blue|navy|gold|golden|silver|pink|purple|green|brown|grey|gray|copper|bronze|champagne|orange|yellow|ivory|cream|natural|light-wood|medium-wood|dark-wood)\b/;
-
 /** State / regional collections ("alabama-caskets", "east-coast-caskets"): the
- *  same catalog filtered by place. These get SHORT, localized copy — name the
- *  place, delivery to funeral homes there, the Funeral Rule — so fifty of them
- *  don't become thin duplicates of the hub. */
+ *  same catalog filtered by place. These get SHORT, localized copy so fifty of
+ *  them don't become thin duplicates of the hub. */
 const STATES: Record<string, string> = {
   alabama: "Alabama", alaska: "Alaska", arizona: "Arizona", arkansas: "Arkansas", california: "California",
   colorado: "Colorado", connecticut: "Connecticut", delaware: "Delaware", florida: "Florida", georgia: "Georgia",
@@ -105,10 +89,36 @@ function stripHtml(html: string): string {
     .trim();
 }
 
-export function tierFor(handle: string): 1 | 2 | 3 {
-  if (HUB_HANDLES.has(handle)) return 1;
-  if (COLOUR_RE.test(handle) || localityFor(handle)) return 3;
+/** A single-size variant collection ("20-x-10-x-16-slant-headstones", "28-inch-caskets"). */
+const SIZE_VARIANT_RE = /^\d{2}-x-\d{1,2}(-x-\d{1,2})?-|^\d{2}-inch-/;
+
+/**
+ * Depth for a collection. Hubs are the industry's named head terms, plus the
+ * store's three biggest general collections (≥ 15 products) — so a store whose
+ * money pages have unusual handles still gets its hubs. State/regional and
+ * single-size variant pages are always tier 3. A colour/finish filter is tier 3
+ * only when it's small; a 50-product "black headstone" page is a real category
+ * and gets full sub-collection depth.
+ */
+export function tierFor(handle: string, productCount: number | null, pack: IndustryPack, bigHandles: Set<string>): 1 | 2 | 3 {
+  const n = productCount ?? 0;
+  if (localityFor(handle) || SIZE_VARIANT_RE.test(handle)) return 3;
+  if (pack.hubHandles.has(handle) || pack.hubPattern.test(handle)) return 1;
+  if (bigHandles.has(handle)) return 1;
+  if (pack.colourPattern.test(handle) && n < 12) return 3;
   return 2;
+}
+
+/** The three biggest general (non-colour, non-local, non-variant) collections with ≥ 15 products. */
+export function biggestHandles(cols: { handle: string; productCount: number | null }[], pack: IndustryPack): Set<string> {
+  return new Set(
+    cols
+      .filter((c) => (c.productCount ?? 0) >= 15)
+      .filter((c) => !localityFor(c.handle) && !SIZE_VARIANT_RE.test(c.handle) && !pack.colourPattern.test(c.handle))
+      .sort((a, b) => (b.productCount ?? 0) - (a.productCount ?? 0) || a.handle.localeCompare(b.handle))
+      .slice(0, 3)
+      .map((c) => c.handle),
+  );
 }
 
 /** "metal-caskets" → "metal caskets"; keeps a short, human title when it reads
@@ -130,9 +140,11 @@ type ShopifyCollection = {
   published_at?: string | null;
 };
 
+type Found = Omit<DiscoveredCollection, "tier">;
+
 /** Shopify storefront: /collections.json (public, paginated). */
-async function fromCollectionsJson(base: string): Promise<DiscoveredCollection[]> {
-  const out: DiscoveredCollection[] = [];
+async function fromCollectionsJson(base: string): Promise<Found[]> {
+  const out: Found[] = [];
   for (let page = 1; page <= 8; page++) {
     const raw = await getText(`${base}/collections.json?limit=250&page=${page}`);
     if (!raw) break;
@@ -143,6 +155,7 @@ async function fromCollectionsJson(base: string): Promise<DiscoveredCollection[]
       break;
     }
     const cols = data.collections ?? [];
+    if (cols.length === 0) break;
     for (const c of cols) {
       const handle = String(c.handle ?? "").trim();
       if (!handle || SYSTEM_HANDLES.has(handle)) continue;
@@ -158,21 +171,19 @@ async function fromCollectionsJson(base: string): Promise<DiscoveredCollection[]
         title,
         productCount: typeof c.products_count === "number" ? c.products_count : null,
         hasContent: desc.length >= 200,
-        tier: tierFor(handle),
         keyword: keywordFor(handle, title),
       });
     }
-    if (cols.length < 250) break;
   }
   return out;
 }
 
 /** Sitemap fallback/supplement: sitemap.xml → sitemap_collections_*.xml → <loc>s. */
-async function fromSitemap(base: string): Promise<DiscoveredCollection[]> {
+async function fromSitemap(base: string): Promise<Found[]> {
   const index = await getText(`${base}/sitemap.xml`);
   if (!index) return [];
-  const subs = [...index.matchAll(/<loc>\s*([^<\s]+sitemap_collections[^<\s]*)\s*<\/loc>/gi)].map(
-    (m) => m[1],
+  const subs = [...index.matchAll(/<loc>\s*([^<\s]+sitemap_collections[^<\s]*)\s*<\/loc>/gi)].map((m) =>
+    m[1].replace(/&amp;/g, "&"),
   );
   const locs: string[] = [];
   for (const sub of subs.slice(0, 5)) {
@@ -183,7 +194,7 @@ async function fromSitemap(base: string): Promise<DiscoveredCollection[]> {
     }
   }
   const seen = new Set<string>();
-  const out: DiscoveredCollection[] = [];
+  const out: Found[] = [];
   for (const loc of locs) {
     const handle = loc.split("/collections/")[1]?.split(/[/?#]/)[0] ?? "";
     if (!handle || SYSTEM_HANDLES.has(handle) || seen.has(handle)) continue;
@@ -195,7 +206,6 @@ async function fromSitemap(base: string): Promise<DiscoveredCollection[]> {
       title,
       productCount: null,
       hasContent: false,
-      tier: tierFor(handle),
       keyword: keywordFor(handle, title),
     });
   }
@@ -205,13 +215,18 @@ async function fromSitemap(base: string): Promise<DiscoveredCollection[]> {
 /**
  * Every published collection on the store. Primary source is /collections.json
  * (gives title, description, product count); the sitemap fills in anything it
- * misses. Returns [] if the site can't be read (offline, password-protected).
+ * misses. Tiers are assigned against the whole roster (so "biggest collections"
+ * means biggest on THIS store). Returns [] if the site can't be read.
  */
-export async function discoverCollections(domain: string): Promise<DiscoveredCollection[]> {
+export async function discoverCollections(domain: string, pack: IndustryPack = INDUSTRIES.general): Promise<DiscoveredCollection[]> {
   const base = siteBase(domain);
   const [primary, extra] = await Promise.all([fromCollectionsJson(base), fromSitemap(base)]);
-  const byHandle = new Map<string, DiscoveredCollection>();
+  const byHandle = new Map<string, Found>();
   for (const c of primary) byHandle.set(c.handle, c);
   for (const c of extra) if (!byHandle.has(c.handle)) byHandle.set(c.handle, c);
-  return [...byHandle.values()].sort((a, b) => a.tier - b.tier || a.handle.localeCompare(b.handle));
+  const all = [...byHandle.values()];
+  const big = biggestHandles(all, pack);
+  return all
+    .map((c) => ({ ...c, tier: tierFor(c.handle, c.productCount, pack, big) }))
+    .sort((a, b) => a.tier - b.tier || a.handle.localeCompare(b.handle));
 }

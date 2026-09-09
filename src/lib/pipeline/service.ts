@@ -41,6 +41,7 @@ import { fetchGscRows, strikingDistance, decayingPages, gscQuery } from "@/lib/c
 import { askAnswerEngine } from "@/lib/connectors/perplexity";
 import { postRecommendationToSlack } from "@/lib/connectors/slack";
 import { clientCredentialsToken } from "@/lib/connectors/shopify-oauth";
+import { industryFor } from "@/lib/categories/industry";
 import { dataforseoEnabled, firecrawlEnabled, gscEnabled, geoEnabled, aiEnabled } from "@/lib/env";
 import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
@@ -909,13 +910,18 @@ export async function saveConnector(
 export async function connectShopifyWithAppCredentials(
   businessId: string,
   shop: string,
+  creds?: { clientId?: string; clientSecret?: string } | null,
 ): Promise<void> {
-  const { accessToken, expiresAt } = await clientCredentialsToken(shop);
+  const own = creds?.clientId?.trim() && creds?.clientSecret?.trim() ? { clientId: creds.clientId.trim(), clientSecret: creds.clientSecret.trim() } : null;
+  const { accessToken, expiresAt } = await clientCredentialsToken(shop, own);
   await saveConnector(businessId, "SHOPIFY", {
     storeDomain: shop,
     adminAccessToken: accessToken,
     authMode: "client_credentials",
     tokenExpiresAt: expiresAt,
+    // This store's own app (a second Shopify org) — kept encrypted with the
+    // connector so the 24h token can be refreshed without the env-wide app.
+    ...(own ? { appClientId: own.clientId, appClientSecret: own.clientSecret } : {}),
   });
 }
 
@@ -937,7 +943,11 @@ async function freshCmsConfig(connector: {
   if (Date.now() < expiresAt - 10 * 60 * 1000) return config;
 
   const shop = String(config.storeDomain ?? "");
-  const { accessToken, expiresAt: nextExpiry } = await clientCredentialsToken(shop);
+  const own =
+    typeof config.appClientId === "string" && typeof config.appClientSecret === "string"
+      ? { clientId: config.appClientId, clientSecret: config.appClientSecret }
+      : null;
+  const { accessToken, expiresAt: nextExpiry } = await clientCredentialsToken(shop, own);
   const next = { ...config, adminAccessToken: accessToken, tokenExpiresAt: nextExpiry };
   await prisma.connector
     .update({
@@ -957,15 +967,8 @@ export async function removeConnector(businessId: string, type: ConnectorType): 
 
 // ── Businesses (multi-store) ─────────────────────────────────
 
-const DEFAULT_PILLARS: { name: string; description: string }[] = [
-  { name: "Immediate steps", description: "What to do in the first hours/days after a death." },
-  { name: "Costs", description: "Casket, funeral, cremation and burial pricing." },
-  { name: "Buying guide", description: "How to choose caskets — size, material, value." },
-  { name: "Local resources", description: "City/state funeral homes, benefits, regulations." },
-  { name: "Eco options", description: "Green burial, biodegradable caskets." },
-];
-
-/** Create a new store/business (Shopify) with default pillars. Returns its id. */
+/** Create a new store/business (Shopify) with the default pillars for its line
+ *  of business (caskets, headstones, …). Returns its id. */
 export async function createBusiness(input: { name: string; domain: string }): Promise<string> {
   requireDb();
   const name = input.name.trim();
@@ -978,7 +981,7 @@ export async function createBusiness(input: { name: string; domain: string }): P
       domain,
       cmsPlatform: "SHOPIFY",
       status: "ACTIVE",
-      pillars: { create: DEFAULT_PILLARS },
+      pillars: { create: industryFor({ name, domain }).pillars },
     },
     select: { id: true },
   });
@@ -1445,6 +1448,7 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
   const houseRules = await buildContentGuidance(brief.businessId);
   const rawBody = await writeDraft(spec, brandVoice, houseRules, {
     local: brief.idea.kind === "LOCAL",
+    industry: industryFor(brief.business),
   });
   finalizeCtx.metaDescription = deriveMetaDescription(rawBody, draft.title);
   const body = finalizeDraftBody(rawBody, finalizeCtx);
@@ -1922,34 +1926,37 @@ export async function autoRefreshAll(max = 2): Promise<Record<string, number>> {
 // re-publish updates the same article in place.
 // ─────────────────────────────────────────────────────────────
 
-const RELOCALIZE_NOTE =
-  "Rewrite this LOCAL, geo-targeted article to our strongest local + AEO standard. Identify the specific " +
-  "city/metro and state this page targets and make the page unmistakably about THAT place:\n" +
-  "- Open with a bold, self-contained \"Quick answer\" that NAMES the place and states the rule an AI can quote " +
-  "verbatim. Anchor the legal point in the FTC Funeral Rule (federal, real): families may buy a casket from any " +
-  "retailer, and a funeral home cannot refuse it or charge a handling fee. Do NOT invent state statutes — include " +
-  "state specifics only if accurate, otherwise tell the reader to verify with the state funeral board.\n" +
-  "- Ensure dedicated H2 sections, each answered in a standalone quotable passage: (1) the law — can you buy your " +
-  "own casket in that state?; (2) delivery to that city in GENERAL terms only (never fabricate our exact process or " +
-  "timeline — keep it broad and say to confirm with us); (3) which local funeral homes accept a casket you bought " +
-  "online (the Funeral Rule requires them to) — never assert a specific named home's fees/steps/hours as fact; " +
-  "(4) local considerations (major cemeteries / metro norms, at a general, accurate level).\n" +
-  "- Add or strengthen a place-named FAQ (\"Can I buy my own casket in {City}?\").\n" +
-  "- Keep it strictly accurate, keep existing valid links, and preserve the trailing JSON-LD schema (keep it valid " +
-  "and complete). Do NOT imply we are a physical funeral home or storefront in that city — we ship nationwide.";
+/** The local + AEO rewrite instruction, with the angle that wins for this line of business. */
+function relocalizeNote(biz: { name: string; domain: string; profileMd: string | null }): string {
+  const ind = industryFor(biz);
+  return (
+    "Rewrite this LOCAL, geo-targeted article to our strongest local + AEO standard. Identify the specific " +
+    "city/metro and state this page targets and make the page unmistakably about THAT place:\n" +
+    `${ind.blogLocalGuidance}\n` +
+    `- THE LAW, STATED ACCURATELY: ${ind.legalRule} ${ind.legalDontSay}\n` +
+    "- Keep it strictly accurate, keep existing valid links, and preserve the trailing JSON-LD schema (keep it valid " +
+    "and complete)."
+  );
+}
 
 /** Rebuild ONE local post to the strong local+AEO template, into Ready for review. */
 export async function relocalizePost(draftId: string): Promise<{ rebuilt: boolean }> {
   requireDb();
   const draft = await prisma.draft.findUnique({
     where: { id: draftId },
-    select: { id: true, bodyMd: true, title: true, brief: { select: { idea: { select: { kind: true } } } } },
+    select: {
+      id: true,
+      bodyMd: true,
+      title: true,
+      business: { select: { name: true, domain: true, profileMd: true } },
+      brief: { select: { idea: { select: { kind: true } } } },
+    },
   });
   if (!draft) throw new Error(`Draft ${draftId} not found`);
   if (draft.brief?.idea?.kind !== "LOCAL") return { rebuilt: false };
 
   const revised = await trackDraftCost(draftId, () =>
-    reviseBodyWithInstruction(draft.bodyMd, draft.title, RELOCALIZE_NOTE),
+    reviseBodyWithInstruction(draft.bodyMd, draft.title, relocalizeNote(draft.business)),
   );
   const changed = revised !== draft.bodyMd;
   if (changed) {

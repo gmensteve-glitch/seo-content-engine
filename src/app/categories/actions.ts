@@ -102,12 +102,13 @@ export async function fixPassageCategoryAction(
 ): Promise<PassageFixResult> {
   const id = String(formData.get("id") ?? "");
   const selectedText = String(formData.get("selectedText") ?? "");
+  const contextText = String(formData.get("contextText") ?? "");
   const instruction = String(formData.get("instruction") ?? "");
   if (!id || !selectedText.trim() || !instruction.trim()) {
     return { ok: false, message: "Highlight some text and say what to change." };
   }
   try {
-    const res = await fixCategoryPassage(id, selectedText, instruction);
+    const res = await fixCategoryPassage(id, selectedText, instruction, contextText);
     refresh(id);
     return res;
   } catch (e) {

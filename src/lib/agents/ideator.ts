@@ -11,6 +11,7 @@
 
 import { structured, MODELS } from "@/lib/ai/claude";
 import { aiEnabled } from "@/lib/env";
+import { industryFor, type IndustryPack } from "@/lib/categories/industry";
 
 export interface IdeaProposal {
   title: string;
@@ -39,6 +40,8 @@ export interface IdeationContext {
   /** How many of `count` should be LOCAL (geo-targeted) vs EVERGREEN. */
   targetLocal?: number;
   targetEvergreen?: number;
+  /** The line of business — decides which local angles win. Inferred if absent. */
+  industry?: IndustryPack;
 }
 
 const IDEA_SCHEMA: Record<string, unknown> = {
@@ -65,24 +68,57 @@ const IDEA_SCHEMA: Record<string, unknown> = {
   required: ["ideas"],
 };
 
-const IDEATION_SYSTEM = `You are a senior SEO content strategist. You propose article ideas that build durable topical authority and win qualified organic traffic.
+function ideationSystem(ind: IndustryPack): string {
+  return `You are a senior SEO content strategist. You propose article ideas that build durable topical authority and win qualified organic traffic for a store that sells ${ind.label}.
 
 Rules for every idea:
-- Target a REAL search query a human would type — specific, not generic ("how much does a pine casket cost" not "caskets").
+- Target a REAL search query a human would type — specific, not generic ("how much does a ${ind.productNoun} cost" is too broad; "how much does a pine casket cost" or "how much does a flat granite grave marker cost" is right).
 - Match clear search intent (informational, commercial, or transactional) that fits the business.
 - Do NOT duplicate or lightly reword anything in the existing-content list. Find genuine gaps.
 - Prefer ideas that strengthen an under-served pillar, or that naturally link to/from existing content (topic clusters).
 - Favor buyer-journey coverage and questions with real "People Also Ask" demand.
 - Score 0–100 by opportunity = (search demand + intent fit + ease of ranking + business value). Be honest; reserve 85+ for genuinely strong plays.
 - Ground every idea in the business profile. Never invent facts about the business.
-
+${ind.primer ? `\n${ind.primer}\n` : ""}
 Each idea is either LOCAL or EVERGREEN — set "kind" accordingly:
-- LOCAL = geo-targeted, high commercial intent, tied to a specific US city, metro, or state. FAVOR THE TWO PROVEN-WINNING ANGLES (they rank AND get cited by AI answer engines):
-    1. STATE LAW / DELIVERY: "Casket Delivery & Burial Laws in {State}: What Families Need to Know" — answers "can I buy my own casket in {State}, and will a funeral home accept it?" Anchored in the FTC Funeral Rule (federal, real) plus any state specifics. High trust, very quotable.
-    2. CITY FUNERAL HOMES: "Funeral Homes in {City} That Accept Caskets You Buy Online" — answers the buyer's exact commercial question for that metro.
-  Also fine: "Can you buy your own casket in {City/State}?", delivery speed to a metro, local cemeteries — always with genuine local substance. Never a thin "we ship to [City]" template. AVOID pure dictionary/definition topics (e.g. "what is a mortuary") — we can't out-cite Wikipedia and no buyer searches them.
+- LOCAL = geo-targeted, high commercial intent, tied to a specific US city, metro, or state. FAVOR THE PROVEN-WINNING ANGLES FOR THIS LINE OF BUSINESS (they rank AND get cited by AI answer engines):
+${ind.blogLocalAngles}
+  Never a thin "we ship to [City]" template. AVOID pure dictionary/definition topics (e.g. "what is a mortuary") — we can't out-cite Wikipedia and no buyer searches them.
   PRIORITIZE THE MOST POPULOUS US CITIES/METROS AND STATES FIRST — more people means more search demand. Work down the population list (New York, Los Angeles, Chicago, Houston, Phoenix, Philadelphia, San Antonio, San Diego, Dallas, Austin, San Jose, Fort Worth, Jacksonville, Columbus, Charlotte, Indianapolis, San Francisco, Seattle, Denver, Nashville, Oklahoma City, Boston, Las Vegas, Detroit, Memphis, Atlanta, Miami, and other large metros), always skipping any city/state already in the existing-content list. Only drop to smaller cities once the big ones are covered.
-- EVERGREEN = informational/authority content not tied to a place ("How to choose a casket", "What is a green burial?").`;
+- EVERGREEN = informational/authority content not tied to a place ("How to choose a ${ind.productNoun}", buyer questions from the primer above).`;
+}
+
+/** Offline LOCAL templates per industry — the same two angles the model is told to favor. */
+function localTemplates(ind: IndustryPack): { state: (s: string) => { title: string; kw: string }; city: (c: string) => { title: string; kw: string } } {
+  if (ind.key === "headstones") {
+    return {
+      state: (s) => ({
+        title: `Buying a Headstone Online in ${s}: Cemetery Rules, Fees and What to Confirm First`,
+        kw: `${s.toLowerCase()} headstone cemetery rules`,
+      }),
+      city: (c) => ({
+        title: `Headstone Rules at Cemeteries in ${c}: Sizes, Styles and Setting Fees`,
+        kw: `${c.toLowerCase()} cemetery headstone rules`,
+      }),
+    };
+  }
+  if (ind.key === "caskets") {
+    return {
+      state: (s) => ({
+        title: `Casket Delivery & Burial Laws in ${s}: What Families Need to Know`,
+        kw: `${s.toLowerCase()} casket delivery burial laws`,
+      }),
+      city: (c) => ({
+        title: `Funeral Homes in ${c} That Accept Caskets You Buy Online`,
+        kw: `funeral homes in ${c.toLowerCase()} that accept caskets you buy online`,
+      }),
+    };
+  }
+  return {
+    state: (s) => ({ title: `Buying ${ind.productPlural} online in ${s}: what to know`, kw: `${s.toLowerCase()} ${ind.productPlural}` }),
+    city: (c) => ({ title: `${ind.productPlural} in ${c}: a buyer's guide`, kw: `${c.toLowerCase()} ${ind.productPlural}` }),
+  };
+}
 
 /** Deterministic offline ideas, derived from pillars. Clearly labeled. */
 function offlineIdeas(ctx: IdeationContext): IdeaProposal[] {
@@ -109,21 +145,12 @@ function offlineIdeas(ctx: IdeationContext): IdeaProposal[] {
   ];
   // The two winning local angles — commercial + AEO-quotable. Interleaved so the
   // local mix covers both the state-law question and the city buyer question.
+  const tpl = localTemplates(ctx.industry ?? industryFor({ name: ctx.businessName, profileMd: ctx.profileMd }));
   const localIdeas: { title: string; kw: string }[] = [];
   const n = Math.max(CITIES.length, STATES.length);
   for (let k = 0; k < n; k++) {
-    if (STATES[k]) {
-      localIdeas.push({
-        title: `Casket Delivery & Burial Laws in ${STATES[k]}: What Families Need to Know`,
-        kw: `${STATES[k].toLowerCase()} casket delivery burial laws`,
-      });
-    }
-    if (CITIES[k]) {
-      localIdeas.push({
-        title: `Funeral Homes in ${CITIES[k]} That Accept Caskets You Buy Online`,
-        kw: `funeral homes in ${CITIES[k].toLowerCase()} that accept caskets you buy online`,
-      });
-    }
+    if (STATES[k]) localIdeas.push(tpl.state(STATES[k]));
+    if (CITIES[k]) localIdeas.push(tpl.city(CITIES[k]));
   }
 
   const have = new Set(ctx.existingTitles.map((t) => t.toLowerCase()));
@@ -170,10 +197,11 @@ export async function generateIdeaProposals(ctx: IdeationContext): Promise<IdeaP
     ? ctx.existingTitles.map((t) => `- ${t}`).join("\n")
     : "(none yet)";
 
+  const industry = ctx.industry ?? industryFor({ name: ctx.businessName, profileMd: ctx.profileMd });
   const { ideas } = await structured<{ ideas: IdeaProposal[] }>({
     model: MODELS.ideas,
     cheap: true, // brainstorming stays on Haiku even under a PIPELINE_MODEL override
-    system: IDEATION_SYSTEM,
+    system: ideationSystem(industry),
     schema: IDEA_SCHEMA,
     prompt: `BUSINESS: ${ctx.businessName}
 

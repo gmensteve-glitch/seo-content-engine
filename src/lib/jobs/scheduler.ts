@@ -155,7 +155,9 @@ export function startScheduler(): void {
   // Category drafts run in this process, so every DRAFTING row at boot was
   // orphaned by the restart — recover them immediately, then sweep for
   // anything stuck longer than the cutoff every few minutes.
-  void categoryRecoveryTick(0);
+  // (A 3-minute cutoff, not 0: during a zero-downtime deploy the previous
+  // instance may still be mid-draft and heartbeating the row.)
+  void categoryRecoveryTick(3 * 60 * 1000);
   setInterval(() => void categoryRecoveryTick(), 5 * 60 * 1000);
 
   setTimeout(() => {

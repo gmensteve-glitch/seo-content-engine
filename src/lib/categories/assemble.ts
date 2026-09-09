@@ -4,7 +4,7 @@
 
 import crypto from "node:crypto";
 import { markdownToHtml } from "@/lib/cms/markdown";
-import { AUTHORITY_LINKS, type CategoryDraftJson, type LinkTarget } from "@/lib/agents/category-writer";
+import type { CategoryDraftJson, LinkTarget } from "@/lib/agents/category-writer";
 import type { CatalogFacts } from "@/lib/categories/facts";
 
 export function escapeHtml(s: string): string {
@@ -54,12 +54,21 @@ function stripJumpLists(mdText: string): string {
 /** The below-the-grid HTML: sections, table, FAQ, why-us, related guides. */
 export function assembleBodyHtml(draft: CategoryDraftJson, businessName: string, domain = ""): string {
   const parts: string[] = [];
+  // Heading ids must be unique on the page (two "Prices" headings → prices, prices-2).
+  const used = new Set<string>(["faq", "related-guides"]);
+  const uniqueId = (text: string): string => {
+    const base = headingId(text) || "section";
+    let id = base;
+    for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
+    used.add(id);
+    return id;
+  };
   for (const s of draft.sections) {
     const heading = s.heading.trim();
     const body = md(stripJumpLists(s.bodyMarkdown));
     // A section that was only a table of contents has nothing left — drop it.
     if (!body.replace(/<[^>]+>/g, "").trim()) continue;
-    parts.push(`<h2 id="${headingId(heading)}">${escapeHtml(heading)}</h2>\n${body}`);
+    parts.push(`<h2 id="${uniqueId(heading)}">${escapeHtml(heading)}</h2>\n${body}`);
   }
   const t = draft.comparisonTable;
   if (t && t.headers.length && t.rows.length) {
@@ -67,9 +76,9 @@ export function assembleBodyHtml(draft: CategoryDraftJson, businessName: string,
     const rows = t.rows
       .map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`)
       .join("\n");
-    const cap = t.caption.trim();
+    const cap = t.caption.trim() || "At a glance";
     parts.push(
-      `<h2 id="${headingId(cap)}">${escapeHtml(cap)}</h2>\n<table>\n<thead><tr>${head}</tr></thead>\n<tbody>\n${rows}\n</tbody>\n</table>`,
+      `<h2 id="${uniqueId(cap)}">${escapeHtml(cap)}</h2>\n<table>\n<thead><tr>${head}</tr></thead>\n<tbody>\n${rows}\n</tbody>\n</table>`,
     );
   }
   if (draft.faqs.length) {
@@ -135,7 +144,29 @@ function visibleText(html: string): string {
     .trim();
 }
 
-const MARKET_CUE = /(funeral home|funeral-home|industry|average|typical|commonly|national|median|elsewhere|retail|markup|mortuar)/i;
+const MARKET_CUE =
+  /(funeral home|funeral-home|monument dealer|dealers?|cemeter|industry|average|typical|commonly|national|median|elsewhere|retail|markup|mortuar|setting fee|installation)/i;
+
+/** Is a market-pricing cue within a few words of this position in the sentence? */
+function framedAsMarket(sentence: string, at: number): boolean {
+  const window = sentence.slice(Math.max(0, at - 90), at + 90);
+  return MARKET_CUE.test(window);
+}
+
+/** A comparable form of a URL for allow-list checks: no origin/www, no query, no trailing slash. */
+function pathKey(href: string, ours: string): string {
+  let s = href.trim();
+  try {
+    if (/^https?:\/\//i.test(s)) {
+      const u = new URL(s);
+      const host = u.hostname.replace(/^www\./, "");
+      s = host === ours ? u.pathname : `${host}${u.pathname}`;
+    }
+  } catch {
+    /* keep as-is */
+  }
+  return s.replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase();
+}
 
 /**
  * The hard gate. Returns the list of problems (empty = passed):
@@ -152,6 +183,7 @@ export function factCheck(
   allowed: LinkTarget[],
   domain: string,
   minFaqs: number,
+  authorityLinks: { url: string }[] = [],
 ): string[] {
   const issues: string[] = [];
   const text = [draft.h1, draft.intro, visibleText(bodyHtml), draft.seoTitle, draft.metaDescription].join("\n");
@@ -172,17 +204,17 @@ export function factCheck(
   };
   const bad = new Set<string>();
   for (const s of sentences) {
-    for (const m of s.matchAll(/\$\s?([\d,]+(?:\.\d{1,2})?)/g)) {
-      const n = Number(m[1].replace(/,/g, ""));
+    for (const m of s.matchAll(/\$\s?([\d,]+(?:\.\d{1,2})?)\s*(k\b)?/gi)) {
+      const n = Number(m[1].replace(/,/g, "")) * (m[2] ? 1000 : 1);
       if (!Number.isFinite(n)) continue;
       if (inRange(n)) continue;
-      if (MARKET_CUE.test(s)) continue; // clearly framed as market/funeral-home pricing
-      bad.add(`$${m[1]}`);
+      if (framedAsMarket(s, m.index ?? 0)) continue; // clearly framed as market/industry pricing
+      bad.add(`$${m[1]}${m[2] ?? ""}`);
     }
   }
   if (bad.size) {
     issues.push(
-      `price(s) not in the live catalog and not framed as funeral-home/industry pricing: ${[...bad].join(", ")}${
+      `price(s) not in the live catalog and not framed as industry/market pricing: ${[...bad].join(", ")}${
         facts && facts.priceMin != null ? ` (catalog range is $${facts.priceMin}–$${facts.priceMax})` : " (no catalog data — state no prices)"
       }`,
     );
@@ -194,9 +226,17 @@ export function factCheck(
   }
 
   // Links: internal only from the allowed list; external only to the authority set.
-  const allowedSet = new Set(allowed.map((l) => l.url.replace(/\/+$/, "")));
-  const authorityHosts = AUTHORITY_LINKS.map((l) => new URL(l.url).hostname.replace(/^www\./, ""));
   const ours = domain.replace(/^www\./, "");
+  const allowedSet = new Set(allowed.map((l) => pathKey(l.url, ours)));
+  const authorityHosts = authorityLinks
+    .map((l) => {
+      try {
+        return new URL(l.url).hostname.replace(/^www\./, "");
+      } catch {
+        return "";
+      }
+    })
+    .filter(Boolean);
   const ids = new Set([...bodyHtml.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
   for (const m of bodyHtml.matchAll(/href="([^"]+)"/g)) {
     const href = m[1].replace(/\/+$/, "");
@@ -206,7 +246,7 @@ export function factCheck(
     }
     const internal = href.startsWith("/") || href.includes(ours);
     if (internal) {
-      if (!allowedSet.has(href)) issues.push(`internal link to a page not in the allowed list: ${href}`);
+      if (!allowedSet.has(pathKey(href, ours))) issues.push(`internal link to a page not in the allowed list: ${href}`);
       continue;
     }
     if (/^https?:\/\//i.test(href)) {
