@@ -52,6 +52,13 @@ export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export interface CompleteOpts {
   prompt: string;
   system?: string;
+  /**
+   * Large, stable context blocks (an industry primer, the writing rules, this
+   * page's catalog facts + policies + link list). Sent as cached system blocks
+   * so the 5–7 calls that produce one page pay full price for them once and
+   * ~10% after that. Put the most stable block first; only the prompt varies.
+   */
+  context?: string[];
   model?: string;
   maxTokens?: number;
   /** Cheap, mechanical stage (extraction, structuring): pin to the small model
@@ -62,11 +69,16 @@ export interface CompleteOpts {
   effort?: Effort;
 }
 
-/** Cache the (stable) system prompt so it isn't re-billed at full price on every
- *  call. Behavior-identical — same text, same position — just cached. */
-function cachedSystem(system?: string) {
-  if (!system) return undefined;
-  return [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
+/**
+ * The system prompt as cache-marked blocks: the short role statement, then each
+ * stable context block, each with a breakpoint (max 4). Caching is a prefix
+ * match, so a change to block 2 keeps block 1's cache; the varying request
+ * lives in `messages` after the last breakpoint.
+ */
+function cachedSystem(system?: string, context: string[] = []) {
+  const blocks = [system, ...context].filter((t): t is string => Boolean(t && t.trim()));
+  if (!blocks.length) return undefined;
+  return blocks.slice(0, 4).map((text) => ({ type: "text", text, cache_control: { type: "ephemeral" } }));
 }
 
 /** Resolve the model: cheap stages stay pinned; everything else honors the
@@ -136,7 +148,7 @@ export async function completeText(opts: CompleteOpts): Promise<string> {
     model,
     max_tokens: opts.maxTokens ?? 16000,
     ...reasoningFor(model, opts.effort),
-    system: cachedSystem(opts.system),
+    system: cachedSystem(opts.system, opts.context),
     messages: [{ role: "user", content: opts.prompt }],
   };
   const msg = await send(body);
@@ -159,7 +171,7 @@ export async function structured<T>(opts: StructuredOpts<T>): Promise<T> {
     model,
     max_tokens: opts.maxTokens ?? 16000,
     ...reasoningFor(model, opts.effort),
-    system: cachedSystem(opts.system),
+    system: cachedSystem(opts.system, opts.context),
     messages: [{ role: "user", content: opts.prompt }],
   };
   body = mergeOutputConfig(body, { format: { type: "json_schema", schema: opts.schema } });

@@ -335,14 +335,23 @@ async function storePolicies(businessId: string, domain: string): Promise<string
   return biz?.policyMd ?? "";
 }
 
-/** Internal pages the writer may link: sibling collections (hubs first), the
- *  business's live blog posts, and this collection's own products. */
+/** Internal pages the writer may link: every hub, the sibling collections most
+ *  related to this one (capped — a 141-collection store must not put 141
+ *  lines into every prompt), the business's live blog posts, and this
+ *  collection's own products. */
 async function linkTargets(businessId: string, self: Row, facts: CatalogFacts | null): Promise<LinkTarget[]> {
   const siblings = await prisma.categoryPage.findMany({
     where: { businessId, removedAt: null, NOT: { id: self.id } },
-    orderBy: [{ tier: "asc" }, { handle: "asc" }],
+    orderBy: [{ tier: "asc" }, { productCount: "desc" }, { handle: "asc" }],
   });
-  const out: LinkTarget[] = siblings.map((s) => ({
+  const words = new Set(self.handle.split("-").filter((w) => w.length > 2));
+  const related = (h: string) => h.split("-").filter((w) => words.has(w)).length;
+  const hubs = siblings.filter((s) => s.tier === 1);
+  const rest = siblings
+    .filter((s) => s.tier !== 1)
+    .sort((a, b) => related(b.handle) - related(a.handle) || (b.productCount ?? 0) - (a.productCount ?? 0))
+    .slice(0, 20);
+  const out: LinkTarget[] = [...hubs, ...rest].map((s) => ({
     title: s.h1 ?? s.liveTitle ?? s.handle,
     url: s.url,
     kind: s.tier === 1 ? "hub" : "collection",
@@ -351,7 +360,7 @@ async function linkTargets(businessId: string, self: Row, facts: CatalogFacts | 
     where: { businessId, publishedAt: { not: null }, contentType: "BLOG" },
     include: { draft: { select: { title: true } } },
     orderBy: { publishedAt: "desc" },
-    take: 30,
+    take: 12,
   });
   for (const p of pages) {
     if (!/^https?:\/\//i.test(p.url)) continue;

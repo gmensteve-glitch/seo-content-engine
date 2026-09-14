@@ -177,21 +177,13 @@ export async function buildCategoryBrief(ctx: CategoryContext): Promise<Category
       model: MODELS.research,
       effort: "high",
       system: BRIEF_SYSTEM,
+      context: [businessBlock(ctx), pageBlock(ctx)],
       schema: BRIEF_SCHEMA,
-      prompt: `STORE: ${ctx.businessName} (${ctx.domain}) — sells ${ctx.industry.label}
-BUSINESS CONTEXT:
-${ctx.businessContext.slice(0, 4000)}
-${ctx.industry.primer ? `\n${ctx.industry.primer}\n` : ""}
-COLLECTION PAGE: "${ctx.collection.title}" — ${ctx.collection.url}
+      prompt: `COLLECTION PAGE: "${ctx.collection.title}" — ${ctx.collection.url}
 Tier: ${ctx.collection.tier} (1 = hub/head term, 2 = sub-collection, 3 = colour/variant/state)
 ${ctx.collection.locality ? `LOCAL PAGE: this collection is for families in ${ctx.collection.locality} — plan short, place-specific content (delivery there, the rules that really apply, local buyer questions) and link to the hub for the general guide.\n` : ""}Seed keyword: ${ctx.collection.keywordSeed}
 Depth for this tier: ${spec.sections[0]}–${spec.sections[1]} sections below the product grid, ${spec.faqs[0]}–${spec.faqs[1]} FAQs, ~${spec.words[0]}–${spec.words[1]} words.
-
-LIVE CATALOG FACTS (the only facts that may be planned around):
-${ctx.facts ? factsForPrompt(ctx.facts) : "(catalog not readable — plan generically, no prices)"}
-
-INTERNAL PAGES AVAILABLE TO LINK:
-${linksForPrompt(ctx.links)}
+Plan only around the LIVE CATALOG FACTS and link only to the INTERNAL PAGES given above.
 
 SEARCH LANDSCAPE:
 ${competitorSummary || "(no SERP data — infer from the keyword)"}
@@ -301,6 +293,37 @@ const DRAFT_SCHEMA: Record<string, unknown> = {
 
 const DRAFT_SYSTEM = `You write the editorial content for e-commerce category pages: the copy above and below a product grid that helps a buyer decide and helps the page rank for its commercial keyword. You write like an experienced, plainspoken practitioner talking to a family under stress — warm, specific, never salesy. You never invent a product, price, measurement, guarantee or delivery timeline: every number you state comes from the catalog facts you are given.`;
 
+// ── Cached context blocks ──────────────────────────────────────
+// One page takes 5–7 model calls (brief, draft, editor pass, up to two
+// revisions, passage fixes). The blocks below are identical across those
+// calls, so they go in as cached system blocks and are billed at ~10% after
+// the first call instead of full price every time. Most-stable first:
+// the business block is the same for every page of the store; the page block
+// changes per collection.
+
+/** Who the store is + what the engine knows about the line of business. */
+function businessBlock(ctx: CategoryContext): string {
+  return `STORE: ${ctx.businessName} (${ctx.domain}) — sells ${ctx.industry.label}
+BRAND VOICE:
+${ctx.brandVoice || "(none provided)"}
+
+BUSINESS CONTEXT:
+${ctx.businessContext.slice(0, 3000)}
+${ctx.industry.primer ? `\n${ctx.industry.primer}` : ""}`;
+}
+
+/** This collection's facts: the catalog, the policy pages, the allowed links. */
+function pageBlock(ctx: CategoryContext): string {
+  return `LIVE CATALOG FACTS (the only source of numbers and product names):
+${ctx.facts ? factsForPrompt(ctx.facts) : "(catalog not readable — state NO prices or product names)"}
+
+STORE POLICY (the only source for shipping / returns / guarantee claims):
+${ctx.policies || "(none readable — say details are confirmed at order)"}
+
+INTERNAL PAGES (the only internal URLs you may link):
+${linksForPrompt(ctx.links)}`;
+}
+
 function guidance(ctx: CategoryContext): string {
   const spec = tierSpec(ctx.collection.tier);
   const name = ctx.businessName;
@@ -378,15 +401,9 @@ export async function writeCategoryDraft(ctx: CategoryContext, brief: CategoryBr
     effort: "high",
     maxTokens: 28000,
     system: DRAFT_SYSTEM,
+    context: [`${businessBlock(ctx)}\n\n${guidance(ctx)}`, pageBlock(ctx)],
     schema: DRAFT_SCHEMA,
-    prompt: `STORE: ${ctx.businessName} (${ctx.domain}) — sells ${ctx.industry.label}
-BRAND VOICE:
-${ctx.brandVoice || "(none provided)"}
-
-BUSINESS CONTEXT:
-${ctx.businessContext.slice(0, 3000)}
-${ctx.industry.primer ? `\n${ctx.industry.primer}\n` : ""}
-COLLECTION PAGE: "${ctx.collection.title}" — ${ctx.collection.url} (tier ${ctx.collection.tier})
+    prompt: `COLLECTION PAGE: "${ctx.collection.title}" — ${ctx.collection.url} (tier ${ctx.collection.tier})
 
 BRIEF:
 Primary keyword: ${brief.primaryKeyword}
@@ -398,18 +415,7 @@ Buyer questions for the FAQ:
 ${brief.questions.map((q) => `- ${q}`).join("\n")}
 ${brief.competitorsCover.length ? `Competitors cover: ${brief.competitorsCover.join("; ")}` : ""}
 
-LIVE CATALOG FACTS (the only source of numbers and product names):
-${ctx.facts ? factsForPrompt(ctx.facts) : "(catalog not readable — state NO prices or product names)"}
-
-STORE POLICY (the only source for shipping / returns / guarantee claims):
-${ctx.policies || "(none readable — say details are confirmed at order)"}
-
-INTERNAL PAGES (the only internal URLs you may link):
-${linksForPrompt(ctx.links)}
-
-${guidance(ctx)}
-
-Write the page now as the JSON blocks.`,
+Follow the RULES, use only the LIVE CATALOG FACTS, STORE POLICY and INTERNAL PAGES given above. Write the page now as the JSON blocks.`,
   });
 }
 
@@ -454,6 +460,7 @@ export async function rewriteCategoryPassage(
     effort: "medium",
     maxTokens: 6000,
     system: DRAFT_SYSTEM,
+    context: [businessBlock(ctx), pageBlock(ctx)],
     prompt: `The operator highlighted a passage in a category page and asked for a change. Rewrite ONLY this passage. Keep everything they didn't mention exactly as it is — same facts, same links, same length unless the instruction says otherwise.
 
 INSTRUCTION FROM THE OPERATOR:
@@ -465,16 +472,7 @@ HIGHLIGHTED TEXT (the part they mean):
 THE FULL PASSAGE THIS TEXT IS IN (return a replacement for ALL of it, in ${format}):
 ${current}
 
-LIVE CATALOG FACTS (the only source of numbers and product names):
-${ctx.facts ? factsForPrompt(ctx.facts) : "(catalog not readable — state NO prices or product names)"}
-
-STORE POLICY (the only source for shipping / returns / guarantee claims):
-${ctx.policies || "(none readable — say details are confirmed at order)"}
-
-INTERNAL PAGES (the only internal URLs you may link):
-${linksForPrompt(ctx.links)}
-
-Rules that still apply: whole-dollar prices in prose; no placeholders; no images; no table of contents; no invented reviewers or credentials. ${ctx.industry.legalRule} ${ctx.industry.legalDontSay} Return ONLY the replacement passage — no preamble, no quotes, no code fences.`,
+Rules that still apply: numbers and product names only from the LIVE CATALOG FACTS above; shipping/returns only from STORE POLICY; links only from INTERNAL PAGES; whole-dollar prices in prose; no placeholders; no images; no table of contents; no invented reviewers or credentials. ${ctx.industry.legalRule} ${ctx.industry.legalDontSay} Return ONLY the replacement passage — no preamble, no quotes, no code fences.`,
   });
   return out.replace(/^```[a-z]*\n?|```$/g, "").trim();
 }
@@ -532,22 +530,12 @@ export async function reviseCategoryDraft(
     effort: "medium",
     maxTokens: 28000,
     system: DRAFT_SYSTEM,
+    context: [`${businessBlock(ctx)}\n\n${guidance(ctx)}`, pageBlock(ctx)],
     schema: DRAFT_SCHEMA,
-    prompt: `Revise this category-page draft to fix EVERY issue listed. Keep everything that isn't flagged. Return the complete corrected JSON.
+    prompt: `Revise this category-page draft to fix EVERY issue listed. Keep everything that isn't flagged. The RULES, LIVE CATALOG FACTS, STORE POLICY and INTERNAL PAGES above still apply. Return the complete corrected JSON.
 
 ISSUES TO FIX:
 ${issues.map((i) => `- ${i}`).join("\n")}
-
-LIVE CATALOG FACTS (the only source of numbers and product names):
-${ctx.facts ? factsForPrompt(ctx.facts) : "(catalog not readable — state NO prices or product names)"}
-
-STORE POLICY (the only source for shipping / returns / guarantee claims):
-${ctx.policies || "(none readable — say details are confirmed at order)"}
-
-INTERNAL PAGES (the only internal URLs you may link):
-${linksForPrompt(ctx.links)}
-
-${guidance(ctx)}
 
 CURRENT DRAFT (JSON):
 ${JSON.stringify(draft)}`,

@@ -15,17 +15,24 @@ export interface TokenUsage {
   cache_creation_input_tokens?: number | null;
 }
 
-// $ per 1,000,000 tokens. APPROXIMATE list prices — edit to your exact rates (or
-// override per model via env, e.g. PRICE_CLAUDE_SONNET_5="3,15").
+// $ per 1,000,000 tokens — Anthropic list prices (Sept 2026). Override per model
+// via env if your rates differ, e.g. PRICE_CLAUDE_SONNET_5="2,10".
 const PRICE: Record<string, { in: number; out: number }> = {
-  "claude-opus-5": { in: 15, out: 75 },
-  "claude-sonnet-5": { in: 3, out: 15 },
-  "claude-haiku-4-5": { in: 0.8, out: 4 },
+  "claude-opus-5": { in: 5, out: 25 },
+  "claude-sonnet-5": { in: 2, out: 10 },
+  "claude-haiku-4-5": { in: 1, out: 5 },
 };
 
 function priceFor(model: string): { in: number; out: number } {
   for (const key of Object.keys(PRICE)) {
-    if (model.startsWith(key)) return PRICE[key];
+    if (model.startsWith(key)) {
+      const env = process.env[`PRICE_${key.toUpperCase().replace(/-/g, "_")}`];
+      if (env) {
+        const [i, o] = env.split(",").map(Number);
+        if (Number.isFinite(i) && Number.isFinite(o)) return { in: i, out: o };
+      }
+      return PRICE[key];
+    }
   }
   return PRICE["claude-sonnet-5"]; // sensible default
 }
@@ -45,11 +52,17 @@ export function centsForUsage(model: string, u: TokenUsage): number {
 
 const als = new AsyncLocalStorage<{ cents: number }>();
 
-/** Called by the Claude wrapper after each API call. Adds to the active scope. */
+/** Called by the Claude wrapper after each API call. Adds to the active scope
+ *  and logs one line per call so cache hits are visible in the server logs
+ *  ("cached=0" on every call means a prompt is being re-billed at full price). */
 export function recordUsage(model: string, usage?: TokenUsage): void {
   if (!usage) return;
+  const cents = centsForUsage(model, usage);
+  console.log(
+    `[claude] ${model} in=${usage.input_tokens ?? 0} cached=${usage.cache_read_input_tokens ?? 0} cacheWrite=${usage.cache_creation_input_tokens ?? 0} out=${usage.output_tokens ?? 0} ≈ $${(cents / 100).toFixed(3)}`,
+  );
   const store = als.getStore();
-  if (store) store.cents += centsForUsage(model, usage);
+  if (store) store.cents += cents;
 }
 
 /** Run `fn` in a fresh cost scope; return its result plus the cents it spent. */
