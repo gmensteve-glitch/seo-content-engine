@@ -1,36 +1,87 @@
-# RESUME — read this first when opening on a new machine
+# RESUME — read this first in every new session
 
-> Paste this to Claude Code on the new Mac: **"Read docs/RESUME.md, docs/BUILD-PLAN.md, and docs/ARCHITECTURE.md, then continue building the SEO content engine."**
+> New operator or new Claude session: paste **"Read docs/RESUME.md and docs/OPERATING-SOP.md, then tell me the current state and wait for instructions."** Do not start changing code until you have read both.
 
-## What this project is
-An autonomous, multi-business SEO content engine (dashboard + agents). Full vision in `README.md`, `docs/ARCHITECTURE.md`, `docs/AGENT-PIPELINE.md`. Plain-English guide: `docs/SEO-Content-Engine-Guide.pdf`.
+Last updated: 2026-10-01. Keep this file current: when you ship something that changes how the system works, update the section it belongs to in the same commit.
 
-## Where we are (as of this commit)
-- ✅ Next.js 16 + Tailwind v4 + React 19 app. Dashboard UI complete (shell + business switcher; pages: overview, pipeline board, briefs, quality scorecard, performance, connectors, ideas, strategy, geo).
-- ✅ Data layer is **Prisma-backed** (`src/lib/data/repo.ts` → `src/lib/db.ts`). Set `DATABASE_URL` + `npx prisma migrate deploy` + `npm run seed` and the whole dashboard renders from Postgres. With no `DATABASE_URL` it falls back to `src/lib/mock/seed.ts` so `npm run dev` works with zero setup.
-- ✅ **Pipeline runs end-to-end, offline** (`src/lib/pipeline/service.ts`). The human-gate buttons work (server actions in `src/app/actions.ts`); approving a brief writes → grades → publishes a Page, all persisted. Every agent degrades to labeled placeholder output when its key is missing (`src/lib/env.ts` + `src/lib/ai/offline.ts`), so no credentials are needed to exercise the full loop. Manual trigger: `POST /api/dev/pipeline {ideaId}` (needs `ENABLE_DEV_ROUTES=1` in a prod build).
-- ✅ Backend modules complete & type-checked: `src/lib/ai/claude.ts`, connectors (`dataforseo`, `firecrawl`, `gsc`, `maps`), agents (`intake`, `research` gap-map, `writer`+revise, `grader` 0–100 loop), `cms/shopify.ts` (real Admin API), Inngest `jobs/` + `/api/inngest` route, `crypto/secrets.ts`.
-- ✅ `npx tsc --noEmit` clean, `npm run build` passes.
+## What this is
 
-## Run it locally
+A multi-store SEO content engine: a Next.js 16 dashboard plus Claude agents that write, grade and (for blogs) publish content for Shopify stores.
+
+| Store | Domain | Role |
+|---|---|---|
+| Overnight Caskets | overnightcaskets.com (`overnight-casket.myshopify.com`) | The money-maker. Caskets. |
+| Signature Headstones | signatureheadstones.com (`signatureheadstones.myshopify.com`) | Second store. Headstones and grave markers. A different line of business, see "Industry packs". |
+| Trusted Caskets | trustedcaskets.com | Sandbox / seed data. |
+
+- **Live dashboard:** https://seo-content-engine-production-22cc.up.railway.app (logins in `docs/OPERATING-SOP.md` §9)
+- **Repo branch that deploys:** `claude/project-onboarding-w8hlg2`. Railway builds and deploys every push to it. Never push to any other branch.
+- **Hosting:** Railway (web service + Postgres). Migrations run at deploy via `prisma/init-db.mjs`.
+- **Owner:** Steven (steven@overnightcaskets.com). Shopify owner account is Jeffrey Vaynberg.
+
+## Two product areas
+
+### 1. Blog (automated, with one human gate)
+Ideas → brief → human approves → write → grade (0–100, revise loop) → publish as a **hidden** Shopify draft → human flips live → 90-day refresh. Code: `src/lib/pipeline/service.ts`, agents in `src/lib/agents/` (ideator, research, writer, grader, enricher, linker, finalize), scheduler in `src/lib/jobs/scheduler.ts`. Dashboard: Overview, Pipeline, Ideas, Ready to publish, Needs refresh.
+
+### 2. Category pages (fully manual by design)
+SEO editorial copy for every Shopify collection page. The engine writes paste-ready blocks; a person pastes them into Shopify and presses "mark as live". **There is no push-to-Shopify for category pages and there must never be one. No images. No author names or roles.** Code: `src/lib/categories/` (discover, facts, policies, industry, assemble, service), writer in `src/lib/agents/category-writer.ts`, UI in `src/app/categories/` and `src/components/category-*.tsx`. Dashboard: Category pages → Queue / Live pages. Operator SOP: the "Category Pages SOP" artifact (link in "Documents").
+
+Flow per page: scan site (public `/collections.json` + sitemap) → draft = fresh catalog facts (`/collections/<handle>/products.json`) + store policy pages + brief (Opus) + draft (Opus, JSON blocks) + editor pass + deterministic fact-check + rubric grade (Sonnet) + up to 2 revise loops → DRAFT_READY or NEEDS_FIX → human reviews (Read / Edit / Score / HTML / Text tabs; highlight-to-fix; fix with a note) → pastes → marks live → refresh flagged after 90 days.
+
+Tiers: 1 hub (1,500–2,000 words, table, 6–8 FAQs), 2 sub-collection (800–1,200), 3 state/colour/size variant (300–500). Assigned at scan by `tierFor` in `discover.ts`; editable per page in the Details drawer.
+
+## Industry packs (how the engine knows a line of business)
+`src/lib/categories/industry.ts`. One pack per industry (`caskets`, `headstones`, `general`), chosen by `industryFor(business)` from the name/domain/profile. A pack holds: hub handles, colour patterns, the only allowed external authority links, the accurate legal statement the writer may make, required sections, local-page rules, catalog attribute extractors, buyer questions, default blog pillars, and the blog's local angles. Everything downstream reads the pack; nothing assumes caskets any more.
+
+Two facts that must stay correct:
+- **Caskets:** the FTC Funeral Rule (federal) means a funeral home must accept a casket bought elsewhere with no handling fee.
+- **Headstones:** the FTC Funeral Rule does **not** cover cemeteries or monument dealers. Cemeteries generally accept outside memorials that meet their written rules and charge their own setting fee. The VA furnishes a free headstone/marker/medallion for eligible veterans in any cemetery. Never claim a cemetery is forced to accept a stone, never quote a named cemetery's fees, never cite a statute by number.
+
+To add a new store in a new industry: add a pack, done.
+
+## Shopify connection
+Client-credentials grant against a Dev Dashboard app installed on the store (`src/lib/connectors/shopify-oauth.ts`, `connectShopifyWithAppCredentials` in `pipeline/service.ts`). Tokens last ~24h and are refreshed automatically (`freshCmsConfig`). Env `SHOPIFY_APP_CLIENT_ID/SECRET` is Overnight's app. **Signature Headstones is a separate Shopify organization**, so it has its own app; its credentials are stored encrypted on its connector (entered via "This store has its own app" on Connectors). The connection is only needed for blog publishing; category pages read the public storefront.
+
+## Models and spend
+`src/lib/ai/claude.ts`: Opus 5 for ideas, briefs and writing; Sonnet 5 for grading and intake; Haiku 4.5 for extraction (Haiku takes no `thinking`/`effort`). All calls stream. Opus calls use the server-side refusal fallback beta and fall back to a plain call if the beta is rejected. Stable prompt blocks (industry primer, rules, catalog facts, policies, links) are sent as cached system blocks via `context: []`; the Railway log prints one line per call with `cached=` so you can verify hits. Per-page cost is accumulated by `withCostScope` and shown on the Score tab. Price table in `src/lib/ai/cost.ts` (Opus 5 $5/$25, Sonnet 5 $2/$10, Haiku 4.5 $1/$5 per million). A hub page costs roughly $0.35–0.55.
+
+DataForSEO is intentionally **off** (owner decision, Sept 2026). The code degrades cleanly without it. Firecrawl is used only by brand intake when a store is added.
+
+## Deploy and verify
 ```bash
-npm install
-npm run dev   # http://localhost:3000
+npm ci && npx prisma generate
+npx tsc --noEmit
+npx eslint src
+rm -rf .next/types && npm run build     # stale .next/types cause phantom type errors after deleting routes
+git commit && git push -u origin claude/project-onboarding-w8hlg2
 ```
-If `npm`/node is missing, install Node 20+ via nvm first.
+Every push redeploys Railway and **kills any category draft running in-process**. Recovery flips stuck DRAFTING rows back (3-minute cutoff at boot, 15-minute sweep every 5 min, and on page load). Drafts heartbeat between stages so a long hub draft is not mistaken for a stuck one.
 
 ## Gotchas (don't re-learn these)
-- **Prisma is pinned to v6** on purpose — v7 removed the classic `url = env(...)` datasource. Do NOT `npm i prisma@latest`.
-- **Inngest is v4**: `createFunction(options, handler)` with the trigger inside options as `triggers: [{ event }]` — NOT a 3rd argument.
-- `.env` is gitignored (holds secrets). Copy `.env.example` → `.env` and fill keys. There are no real keys committed.
+- Prisma is pinned to v6. Do not upgrade. `npx prisma generate` after any schema change; migrations live in `prisma/migrations/`.
+- Inngest v4 signature: `createFunction(options, handler)` with `triggers` inside options.
+- `react-hooks/set-state-in-effect` and `react-hooks/purity` lint rules are on: derive state, don't set it in effects; no `Date.now()` in render (compute `statusMinutes` server-side).
+- Overnight's Shopify handle is `overnight-casket` (singular, hyphen), not `overnightcaskets`.
+- Shopify's stock FAQ template (fake 555-1234 number, "free returns within 30 days") is skipped by the policy scraper. Signature Headstones still has it live and should replace it.
+- Railway answering `{"status":"error","code":404,"message":"Application not found"}` on every URL means the service is stopped (billing/plan), not a code bug.
+- Fetches to stores and connectors all have timeouts (10–45s). Keep it that way.
 
-## Next steps (BUILD-PLAN.md Step 3 tail) — the "make it live" work
-1. ✅ DB layer wired: `src/lib/db.ts`, `prisma/migrations/`, `prisma/seed.mjs`, and `repo.ts` on Prisma (mock fallback kept). To run against a DB: set `DATABASE_URL`, `npx prisma migrate deploy`, `npm run seed`.
-2. Fill `.env` API keys: `ANTHROPIC_API_KEY`, `DATAFORSEO_LOGIN`/`PASSWORD`, `FIRECRAWL_API_KEY`, Google OAuth (GSC), `GOOGLE_MAPS_API_KEY`, `CONNECTOR_ENCRYPTION_KEY`.
-3. Wire the agents/jobs (`src/lib/agents/*`, `src/lib/jobs/*`) to persist through `src/lib/db.ts` — they're still pure functions today.
-4. Run the intake agent on trustedcaskets.com → real `client.md`; then one brief → draft → grade → publish end-to-end.
-5. Deploy target: **Railway** (persistent worker + Postgres + cron). Portable to Render / Vercel+Supabase.
+## Documents
+- `docs/OPERATING-SOP.md` — the blog side, A to Z, with logins.
+- Category Pages SOP (artifact): https://claude.ai/code/artifact/b17a18b9-105e-4da2-ac2e-1ff9ef1451e5
+- Signature Headstones Brief (artifact): https://claude.ai/code/artifact/a06699e5-e444-420f-ab58-5858d5c11ba1 — what the engine learned about the headstone business, the 26-page plan, the audit.
+- Category Pages Playbook (artifact): https://claude.ai/code/artifact/d73e2fcc-c678-433b-938f-79e7dad69af1
+- Ask the owner to share these from each artifact's share menu; they are private by default.
 
-## Two-machine hygiene
-- Start of session: `git pull`
-- End of session: `git commit` + `git push`
+## Open items (as of 2026-10-01)
+- Signature Headstones: run the first scan and first hub draft (Upright Headstones); fix the FAQ template and the shipping-policy email typo on the live site.
+- Per-store Google Search Console for Overnight is not connected.
+- Auto-publish schedule for blogs: owner said hold off.
+- Rotate the Shopify client secrets that were pasted into chat (both stores) in the Dev Dashboard, then reconnect on Connectors.
+
+## Working rules for any Claude session on this repo
+1. Read this file and `docs/OPERATING-SOP.md` before touching code.
+2. Ship complete work: typecheck, lint, build, commit with a clear message, push to the deploy branch. Never push elsewhere, never open a PR unless asked.
+3. Category pages stay manual, text-only, anonymous. Prices only from the live catalog. Legal claims only as the industry pack states them.
+4. Keep this file current.
