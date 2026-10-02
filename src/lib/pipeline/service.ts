@@ -243,12 +243,12 @@ async function buildGeoOpportunityNote(businessId: string): Promise<string> {
   }
 }
 
-async function buildGscOpportunityNote(existingTitles: string[] = []): Promise<string> {
+async function buildGscOpportunityNote(businessId: string, existingTitles: string[] = []): Promise<string> {
   if (!gscEnabled()) return "";
   try {
     const [rows, decaying] = await Promise.all([
-      fetchGscRows({ days: 28, dimensions: ["query"], rowLimit: 1000 }),
-      decayingPages({ window: 28, minPriorClicks: 20, minDropPct: 30 }),
+      fetchGscRows(businessId, { days: 28, dimensions: ["query"], rowLimit: 1000 }),
+      decayingPages(businessId, { window: 28, minPriorClicks: 20, minDropPct: 30 }),
     ]);
     if (!rows) return "";
 
@@ -290,7 +290,7 @@ async function buildPerformanceNote(
 ): Promise<string> {
   // Live search-demand + AI-citation gaps come first — the strongest steers.
   const [gscRaw, geoNote] = await Promise.all([
-    buildGscOpportunityNote(existingTitles),
+    buildGscOpportunityNote(businessId, existingTitles),
     buildGeoOpportunityNote(businessId),
   ]);
   const gscNote = [gscRaw, geoNote].filter(Boolean).join("\n\n");
@@ -510,7 +510,7 @@ export async function syncGscPerformance(
 
     // Page-level → PagePerformance (only for pages we know about).
     if (pageByUrl.size > 0) {
-      const rows = await gscQuery({ startDate: iso, endDate: iso, dimensions: ["page"], rowLimit: 1000 });
+      const rows = await gscQuery(businessId, { startDate: iso, endDate: iso, dimensions: ["page"], rowLimit: 1000 });
       for (const r of rows ?? []) {
         const pid = pageByUrl.get(normalizeUrl(r.page ?? ""));
         if (!pid) continue;
@@ -524,7 +524,7 @@ export async function syncGscPerformance(
     }
 
     // Query-level → KeywordRank (top queries by impressions, to bound writes).
-    const qRows = await gscQuery({ startDate: iso, endDate: iso, dimensions: ["query"], rowLimit: 1000 });
+    const qRows = await gscQuery(businessId, { startDate: iso, endDate: iso, dimensions: ["query"], rowLimit: 1000 });
     const top = (qRows ?? []).sort((a, b) => b.impressions - a.impressions).slice(0, topKeywords);
     for (const r of top) {
       if (!r.query) continue;
@@ -608,7 +608,7 @@ export async function syncGeoCitations(
   // Search Console FIRST (the money queries), then our own target keywords.
   let gscQueries: string[] = [];
   if (gscEnabled()) {
-    const rows = await fetchGscRows({ days: 28, dimensions: ["query"], rowLimit: 1000 }).catch(() => null);
+    const rows = await fetchGscRows(businessId, { days: 28, dimensions: ["query"], rowLimit: 1000 }).catch(() => null);
     if (rows) {
       gscQueries = rows
         .filter((r) => r.impressions >= 20)
@@ -1854,7 +1854,7 @@ async function refreshCandidates(
 
   let decayUrls = new Set<string>();
   if (gscEnabled()) {
-    const dp = await decayingPages({ window: 28, minPriorClicks: 20, minDropPct: 30 }).catch(() => null);
+    const dp = await decayingPages(businessId, { window: 28, minPriorClicks: 20, minDropPct: 30 }).catch(() => null);
     if (dp) decayUrls = new Set(dp.map((d) => normalizeUrl(d.page)));
   }
   const rank = (u: string | undefined) => (u && decayUrls.has(normalizeUrl(u)) ? 0 : 1);
@@ -2028,7 +2028,7 @@ export async function getStalePosts(businessId: string, max = 12): Promise<Stale
   // GSC decay map (url → drop), best-effort — absent when GSC isn't wired.
   const decayByUrl = new Map<string, { dropPct: number; priorClicks: number }>();
   if (gscEnabled()) {
-    const dp = await decayingPages({ window: 28, minPriorClicks: 20, minDropPct: 25 }).catch(() => null);
+    const dp = await decayingPages(businessId, { window: 28, minPriorClicks: 20, minDropPct: 25 }).catch(() => null);
     if (dp) for (const d of dp) decayByUrl.set(normalizeUrl(d.page), { dropPct: d.dropPct, priorClicks: d.priorClicks });
   }
 

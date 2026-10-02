@@ -30,7 +30,7 @@ import type {
   RecommendationVM,
   OnboardingStatusVM,
 } from "@/lib/data/types";
-import { fetchGscRows, strikingDistance, decayingPages } from "@/lib/connectors/gsc";
+import { fetchGscRows, strikingDistance, decayingPages, gscSiteFor } from "@/lib/connectors/gsc";
 import { isConnectable } from "@/lib/connectors/connect-fields";
 import { activeBizId } from "@/lib/active-business";
 import { gscEnabled, geoEnabled } from "@/lib/env";
@@ -119,7 +119,7 @@ export async function getOnboardingStatus(bizId?: string): Promise<OnboardingSta
     brandVoice: null,
     pillarCount: 0,
     shopifyConnected: false,
-    gscConnected: gscEnabled(),
+    gscConnected: false,
     ideas: 0,
     writing: 0,
     ready: 0,
@@ -131,13 +131,14 @@ export async function getOnboardingStatus(bizId?: string): Promise<OnboardingSta
   if (!biz) return empty("Store", "example.com");
 
   const inflight = ["RESEARCHING", "DRAFTED", "GRADING", "REVISING"] as const;
-  const [connectors, pillarCount, ideas, writing, ready, published] = await Promise.all([
+  const [connectors, pillarCount, ideas, writing, ready, published, gscSite] = await Promise.all([
     prisma.connector.findMany({ where: { businessId: bizId }, select: { type: true, status: true } }),
     prisma.pillar.count({ where: { businessId: bizId } }),
     prisma.idea.count({ where: { businessId: bizId, status: "PROPOSED" } }),
     prisma.draft.count({ where: { businessId: bizId, status: { in: [...inflight] } } }),
     prisma.draft.count({ where: { businessId: bizId, status: "PASSED", scheduledFor: null, rejectedAt: null } }),
     prisma.draft.count({ where: { businessId: bizId, status: "PUBLISHED" } }),
+    gscSiteFor(bizId),
   ]);
   const byType = new Map(connectors.map((c) => [c.type, c.status]));
 
@@ -156,7 +157,7 @@ export async function getOnboardingStatus(bizId?: string): Promise<OnboardingSta
     brandVoice: biz.brandVoice?.trim() || null,
     pillarCount,
     shopifyConnected: byType.get("SHOPIFY") === "CONNECTED",
-    gscConnected: byType.get("GSC") === "CONNECTED" || gscEnabled(),
+    gscConnected: gscSite !== null,
     ideas,
     writing,
     ready,
@@ -447,7 +448,7 @@ export async function getCostSummary(bizId?: string): Promise<CostSummaryVM> {
  * refresh. Returns { connected: false } when GSC isn't wired or returns no data,
  * so the panel can prompt to connect instead of showing an empty state.
  */
-export async function getSeoOpportunities(): Promise<SeoOpportunitiesVM> {
+export async function getSeoOpportunities(bizId?: string): Promise<SeoOpportunitiesVM> {
   const empty: SeoOpportunitiesVM = {
     connected: false,
     totalClicks28d: 0,
@@ -456,10 +457,11 @@ export async function getSeoOpportunities(): Promise<SeoOpportunitiesVM> {
     decaying: [],
   };
   if (!gscEnabled()) return empty;
+  bizId = bizId ?? (await activeBizId());
   try {
     const [rows, decaying] = await Promise.all([
-      fetchGscRows({ days: 28, dimensions: ["query"], rowLimit: 1000 }),
-      decayingPages({ window: 28, minPriorClicks: 20, minDropPct: 30 }),
+      fetchGscRows(bizId, { days: 28, dimensions: ["query"], rowLimit: 1000 }),
+      decayingPages(bizId, { window: 28, minPriorClicks: 20, minDropPct: 30 }),
     ]);
     if (!rows) return empty;
 
