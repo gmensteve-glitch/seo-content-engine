@@ -2,7 +2,7 @@
 
 > New operator or new Claude session: paste **"Read docs/RESUME.md and docs/OPERATING-SOP.md, then tell me the current state and wait for instructions."** Do not start changing code until you have read both.
 
-Last updated: 2026-10-01. Keep this file current: when you ship something that changes how the system works, update the section it belongs to in the same commit.
+Last updated: 2026-10-02. Keep this file current: when you ship something that changes how the system works, update the section it belongs to in the same commit.
 
 ## What this is
 
