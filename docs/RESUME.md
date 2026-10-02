@@ -68,7 +68,9 @@ Every push redeploys Railway and **kills any category draft running in-process**
 - Fetches to stores and connectors all have timeouts (10–45s). Keep it that way.
 
 ## Documents
+- `docs/HOW-IT-WORKS.md` — the whole system end to end: both product areas, industry packs, models and caching, connectors, data model, dashboard routes, where to look for what. Read this second, after this file.
 - `docs/OPERATING-SOP.md` — the blog side, A to Z, with logins.
+- `README.md`, `docs/ARCHITECTURE.md`, `docs/AGENT-PIPELINE.md`, `docs/BUILD-PLAN.md`, `docs/SEO-Strategic-Plan.md` — August 2026, written before category pages and Signature Headstones existed. Background and original intent only; where they disagree with this file or HOW-IT-WORKS.md, this file wins.
 - Category Pages SOP (artifact): https://claude.ai/code/artifact/b17a18b9-105e-4da2-ac2e-1ff9ef1451e5
 - Signature Headstones Brief (artifact): https://claude.ai/code/artifact/a06699e5-e444-420f-ab58-5858d5c11ba1 — what the engine learned about the headstone business, the 26-page plan, the audit.
 - Category Pages Playbook (artifact): https://claude.ai/code/artifact/d73e2fcc-c678-433b-938f-79e7dad69af1
