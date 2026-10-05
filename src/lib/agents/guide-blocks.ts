@@ -1,7 +1,7 @@
 // The two boxes every blog opens with, after its intro:
 //
-//   ## In this guide        — a table of contents: up to 6 short reader-facing
-//                              labels, each a jump link to a real H2/H3
+//   ## In this guide        — a table of contents: up to 6 short, plain,
+//                              numbered section labels (no links)
 //   ## What to know first   — exactly 5 key takeaways, one sentence each,
 //                              at most 15 words, each restating the article
 //
@@ -21,12 +21,9 @@ export const MAX_TOC = 6;
 export const TAKEAWAY_COUNT = 5;
 export const MAX_TAKEAWAY_WORDS = 15;
 
-export interface TocEntry {
-  label: string;
-  anchor: string; // heading id, no "#"
-}
 export interface GuideBlocks {
-  toc: TocEntry[];
+  /** Plain section labels — deliberately not links. */
+  toc: string[];
   takeaways: string[];
 }
 
@@ -107,16 +104,18 @@ export function sectionHeadings(md: string): { level: number; text: string; id: 
 }
 
 /** The blocks as they currently stand in the draft (empty when absent). */
-export function readGuideBlocks(md: string): GuideBlocks & { hasToc: boolean; hasTakeaways: boolean } {
+export function readGuideBlocks(md: string): GuideBlocks & { hasToc: boolean; hasTakeaways: boolean; tocLinked: boolean } {
   const lines = md.split("\n");
-  const res = { toc: [] as TocEntry[], takeaways: [] as string[], hasToc: false, hasTakeaways: false };
+  const res = { toc: [] as string[], takeaways: [] as string[], hasToc: false, hasTakeaways: false, tocLinked: false };
   for (const r of sectionRanges(lines)) {
     const body = lines.slice(r.start + 1, r.end).map((l) => l.trim()).filter(Boolean);
     if (r.kind === "toc") {
       res.hasToc = true;
       for (const l of body) {
-        const m = l.match(/^(?:\d+[.)]|[-*+])\s+\[([^\]]+)\]\(#([^)\s]+)\)/);
-        if (m) res.toc.push({ label: m[1].replace(/^\d+\.\s*/, "").trim(), anchor: m[2] });
+        const m = l.match(/^(?:\d+[.)]|[-*+])\s+(.*)$/);
+        if (!m || !m[1].trim()) continue;
+        if (/\]\([^)]*\)/.test(m[1])) res.tocLinked = true;
+        res.toc.push(plainLabel(m[1]));
       }
     } else if (r.kind === "takeaways") {
       res.hasTakeaways = true;
@@ -175,11 +174,9 @@ export function guideIssues(md: string): string[] {
   const { body } = splitSchema(md);
   const issues: string[] = [];
   const g = readGuideBlocks(body);
-  const ids = new Set(sectionHeadings(body).map((h) => h.id));
   if (!g.hasToc || g.toc.length === 0) issues.push(`missing the "${TOC_TITLE}" table of contents`);
   if (g.toc.length > MAX_TOC) issues.push(`"${TOC_TITLE}" has ${g.toc.length} entries (max ${MAX_TOC})`);
-  const broken = g.toc.filter((e) => !ids.has(e.anchor));
-  if (broken.length) issues.push(`"${TOC_TITLE}" links to missing sections: ${broken.map((b) => b.anchor).join(", ")}`);
+  if (g.tocLinked) issues.push(`"${TOC_TITLE}" entries are links (they should be plain text)`);
   if (g.takeaways.length !== TAKEAWAY_COUNT) {
     issues.push(`"${TAKEAWAYS_TITLE}" has ${g.takeaways.length} takeaways (needs exactly ${TAKEAWAY_COUNT})`);
   }
@@ -191,7 +188,7 @@ export function guideIssues(md: string): string[] {
 }
 
 function renderBlocks(b: GuideBlocks): string {
-  const toc = b.toc.map((e, i) => `${i + 1}. [${e.label}](#${e.anchor})`).join("\n");
+  const toc = b.toc.map((label, i) => `${i + 1}. ${label}`).join("\n");
   const take = b.takeaways.map((t) => `- ${t}`).join("\n");
   return `## ${TOC_TITLE}\n\n${toc}\n\n## ${TAKEAWAYS_TITLE}\n\n${take}\n`;
 }
@@ -215,16 +212,25 @@ export function withGuideBlocks(md: string, blocks: GuideBlocks): string {
   return schema ? `${out}\n\n${schema.replace(/\s+$/, "")}\n` : `${out}\n`;
 }
 
-/** Keep valid TOC entries (real anchors, deduped, max 6). */
-function cleanToc(toc: TocEntry[], ids: Set<string>): TocEntry[] {
+/** A TOC entry as plain text: no numbering, link syntax, bold or trailing period. */
+function plainLabel(s: string): string {
+  return s
+    .replace(/^\d+[.)]\s*/, "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[[\]*_`]/g, "")
+    .replace(/[.;:,]+$/, "")
+    .trim();
+}
+
+/** Plain, deduped TOC labels, max 6. */
+function cleanToc(toc: string[]): string[] {
   const seen = new Set<string>();
-  const out: TocEntry[] = [];
-  for (const e of toc) {
-    const anchor = e.anchor.replace(/^#/, "").trim();
-    const label = e.label.replace(/^\d+[.)]\s*/, "").replace(/[[\]]/g, "").trim();
-    if (!label || !ids.has(anchor) || seen.has(anchor)) continue;
-    seen.add(anchor);
-    out.push({ label, anchor });
+  const out: string[] = [];
+  for (const raw of toc) {
+    const label = plainLabel(raw);
+    if (!label || seen.has(label.toLowerCase())) continue;
+    seen.add(label.toLowerCase());
+    out.push(label);
     if (out.length === MAX_TOC) break;
   }
   return out;
@@ -240,15 +246,7 @@ const SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
   properties: {
-    toc: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: { label: { type: "string" }, anchor: { type: "string" } },
-        required: ["label", "anchor"],
-      },
-    },
+    toc: { type: "array", items: { type: "string" } },
     takeaways: { type: "array", items: { type: "string" } },
   },
   required: ["toc", "takeaways"],
@@ -265,11 +263,11 @@ async function generateBlocks(title: string, body: string, retryNote = ""): Prom
       "You write the two navigation boxes at the top of a blog article: a table of contents and the key takeaways. You only restate what the article says.",
     prompt: `ARTICLE TITLE: ${title}
 
-SECTION HEADINGS (anchor → heading):
-${heads.map((h) => `${h.id} → ${h.text}${h.level === 3 ? " (sub-section)" : ""}`).join("\n")}
+SECTION HEADINGS:
+${heads.map((h) => `- ${h.text}${h.level === 3 ? " (sub-section)" : ""}`).join("\n")}
 
 Return:
-1. "toc": ${Math.min(MAX_TOC, Math.max(3, heads.filter((h) => h.level === 2).length))} entries at most ${MAX_TOC}, in article order, covering the main sections a reader would jump to. "anchor" MUST be copied exactly from the list above. "label" is a short, plain, reader-friendly name for the section (it need not match the heading word for word; Title Case; no numbering, no trailing punctuation).
+1. "toc": ${Math.min(MAX_TOC, Math.max(3, heads.filter((h) => h.level === 2).length))} entries at most ${MAX_TOC}, in article order, covering the main sections of the article. Each is a short, plain, reader-friendly name for a section (it need not match the heading word for word; Title Case; plain text only: no links, no numbering, no trailing punctuation).
 2. "takeaways": EXACTLY ${TAKEAWAY_COUNT} key takeaways. Each is ONE complete plain sentence of 8 to ${MAX_TAKEAWAY_WORDS} words (never more than ${MAX_TAKEAWAY_WORDS}), ending with a period. Each states one concrete, useful point the article itself makes (no new facts, numbers, laws or claims that are not in the article). No bold, no links, no bullet characters, no "Quick answer". Vary the openings; do not start two takeaways with the same word. Warm, plain language for a family planning a memorial.
 ${retryNote ? `\nYOUR LAST ATTEMPT WAS REJECTED: ${retryNote}. Fix exactly that.\n` : ""}
 ARTICLE:
@@ -292,7 +290,7 @@ function offlineBlocks(body: string): GuideBlocks {
     const w = s.split(/\s+/).slice(0, MAX_TAKEAWAY_WORDS).join(" ").replace(/[,;:]$/, "");
     return /[.!?]$/.test(w) ? w : `${w}.`;
   });
-  return { toc: heads.map((h) => ({ label: h.text, anchor: h.id })), takeaways };
+  return { toc: heads.map((h) => h.text), takeaways };
 }
 
 /**
@@ -307,7 +305,7 @@ export async function ensureGuideBlocks(md: string, opts: { title: string }): Pr
   if (ids.size === 0) return md; // nothing to navigate (malformed draft) — leave it
 
   const current = readGuideBlocks(body);
-  const toc = cleanToc(current.toc, ids);
+  const toc = cleanToc(current.toc);
   const takeaways = current.takeaways.map(cleanTakeaway);
   const takeawaysOk =
     takeaways.length === TAKEAWAY_COUNT && takeaways.every((t) => wordCount(t) <= MAX_TAKEAWAY_WORDS);
@@ -322,14 +320,14 @@ export async function ensureGuideBlocks(md: string, opts: { title: string }): Pr
   let note = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     const g = await generateBlocks(opts.title, body, note);
-    const t = cleanToc(g.toc, ids);
+    const t = cleanToc(g.toc);
     const k = g.takeaways.map(cleanTakeaway).filter(Boolean);
     const long = k.filter((s) => wordCount(s) > MAX_TAKEAWAY_WORDS);
     const candidate = { toc: t, takeaways: k };
     if (t.length > 0 && k.length === TAKEAWAY_COUNT && long.length === 0) return withGuideBlocks(md, candidate);
     best = candidate;
     note = [
-      t.length === 0 ? "no table-of-contents entry used a valid anchor from the list" : "",
+      t.length === 0 ? "the table of contents was empty" : "",
       k.length !== TAKEAWAY_COUNT ? `you returned ${k.length} takeaways, not ${TAKEAWAY_COUNT}` : "",
       long.length ? `these takeaways are over ${MAX_TAKEAWAY_WORDS} words: ${long.map((s) => `"${s}"`).join("; ")}` : "",
     ]

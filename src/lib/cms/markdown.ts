@@ -94,10 +94,9 @@ function renderTocBox(items: string[]): string {
   const lis = items
     .map((it, n) => {
       const border = n === items.length - 1 ? "" : `border-bottom:1px solid ${BOX_RULE};`;
-      const m = it.match(/^\[([^\]]+)\]\(([^)\s]+)\)\s*$/);
-      const label = `${n + 1}. ${inline(escapeHtml(m ? m[1] : it))}`;
-      const inner = m ? `<a href="${m[2]}" style="color:${BOX_INK};text-decoration:none;">${label}</a>` : label;
-      return `<li style="margin:0;padding:12px 0;${border}">${inner}</li>`;
+      // Plain text by design (no jump links), even if an old entry carries one.
+      const text = it.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+      return `<li style="margin:0;padding:12px 0;${border}">${n + 1}. ${inline(escapeHtml(text))}</li>`;
     })
     .join("");
   return (

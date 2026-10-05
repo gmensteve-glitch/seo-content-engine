@@ -17,8 +17,8 @@ STRUCTURE:
 
 ## In this guide
 
-1. [Short Reader-Friendly Label](#heading-anchor)
-(up to 6 entries, in article order; each points at one of your own H2/H3 headings by its anchor — the heading lowercased, punctuation removed, spaces as hyphens; the label is a short plain name for the section and need not repeat the heading word for word)
+1. Short Reader-Friendly Label
+(up to 6 numbered entries, in article order, one per main section; plain text only, NO links; each is a short plain name for the section and need not repeat the heading word for word)
 
 ## What to know first
 
@@ -28,7 +28,7 @@ STRUCTURE:
 - Self-contained passages of ~130–170 words under key headings so AI answer engines can quote them verbatim.
 - An FAQ section near the end (each answer self-contained, ~40–70 words).
 - 2–4 links to authoritative EXTERNAL sources (prefer .gov / recognized institutions), placed inline where a claim needs backing. Only link to a real URL you are confident exists.
-- Do NOT invent internal links to the site's own pages — never write a relative link like [text](/caskets/pricing-guide) or guess the site's URL structure. Internal links to real published pages are added automatically by the system. The ONLY internal links you may write are the in-page jump links in "In this guide" that point to your own H2/H3 headings (e.g. [Oversized Caskets](#oversized-caskets)).
+- Do NOT invent internal links to the site's own pages — never write a relative link like [text](/caskets/pricing-guide) or guess the site's URL structure. Internal links to real published pages are added automatically by the system. Do not write in-page jump links either ("In this guide" is plain text).
 - Soft calls-to-action at the top and bottom (never pushy).
 - End with a fenced \`\`\`json block of valid JSON-LD for the required schema types, with complete fields (datePublished/author where applicable). The JSON-LD MUST be complete and valid — never truncate it. If you're running low on room, shorten the prose, never the schema.
 
@@ -99,7 +99,7 @@ Rules:
 - Make surgical edits that directly address the feedback. Keep everything that already works.
 - NEVER add length to fix a problem — improve quality by cutting, not padding.
 - If the feedback flags length, bloat, or padding: CUT AGGRESSIVELY toward the target — delete whole redundant passages, merge overlapping sections, remove filler and hedging. A shorter, tighter version that keeps the substance is the goal.
-- Preserve the structure, the "In this guide" and "What to know first" sections (keep their links pointing at real headings; exactly 5 takeaways of at most 15 words), the FAQ, and the JSON-LD block (keep it COMPLETE and valid — never truncate the schema).
+- Preserve the structure, the "In this guide" and "What to know first" sections (plain-text entries with no links, at most 6; exactly 5 takeaways of at most 15 words), the FAQ, and the JSON-LD block (keep it COMPLETE and valid — never truncate the schema).
 - The piece must be complete and publishable as-is: remove any leftover placeholder callouts, bracketed TODOs, or "> **Add your experience:**" markers.
 - Do not introduce AI-slop tells (em-dash spam, "in conclusion", "it's important to note", reflexive hedging).
 - Return the full revised Markdown (not a diff).

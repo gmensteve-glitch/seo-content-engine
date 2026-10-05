@@ -53,7 +53,7 @@ Before proposing, the ideator sees every idea, every draft, and every post alrea
 
 ## Blog layout: "In this guide" + "What to know first" (no Quick answer)
 Every blog opens with its intro (plain prose that answers the title's question; there is deliberately **no** bold "Quick answer" block), then two boxes, matching the posts the old tool (airpos) made:
-- **In this guide**: up to 6 numbered jump links to real H2/H3s, with short reader-friendly labels (need not match the heading).
+- **In this guide**: up to 6 numbered, **plain-text** section labels (short, reader-friendly, need not match the heading). Deliberately **no jump links** (owner decision 2026-10-05); an entry that is a link is flagged and converted to plain text, no AI call.
 - **What to know first**: exactly 5 takeaways, one sentence each, **at most 15 words**, each restating something the article says.
 
 `src/lib/agents/guide-blocks.ts` owns it: `guideIssues` checks a draft, `ensureGuideBlocks` keeps valid blocks or rebuilds them with one small Sonnet call (one retry), and folds any old Quick answer back into intro prose and drops an old "Table of contents". It runs after writing and after each revise in `runPipelineForBrief`, and `sweepGuideBlocks` (scheduler, every 2 min, 4 drafts per tick) fixes every PASSED/FAILED, unrejected, unpublished draft, so Ready/review pieces written before this change, and anything a boost/refresh/edit left off-spec, get them too. `markdownToHtml` renders the two sections as inline-styled boxes (off-white, plum accent, theme heading font). The linker never links inside them; the meta description ignores them; the grader's AEO criterion expects them and no longer asks for a Quick answer.
