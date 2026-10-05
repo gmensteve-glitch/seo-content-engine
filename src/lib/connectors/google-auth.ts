@@ -95,3 +95,8 @@ export async function getGoogleAccessToken(scope: string): Promise<string | null
 
 /** Read-only Search Console scope. */
 export const GSC_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
+
+/** The service account's email — the user to add on a Search Console property. */
+export function googleServiceAccountEmail(): string | null {
+  return loadKey()?.client_email ?? null;
+}

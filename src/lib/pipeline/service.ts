@@ -37,11 +37,14 @@ async function trackDraftCost<T>(draftId: string, fn: () => Promise<T>): Promise
 }
 import { serpTop } from "@/lib/connectors/dataforseo";
 import { scrapeMany } from "@/lib/connectors/firecrawl";
-import { fetchGscRows, strikingDistance, decayingPages, gscQuery } from "@/lib/connectors/gsc";
+import { fetchGscRows, strikingDistance, decayingPages, gscQuery, searchAnalytics } from "@/lib/connectors/gsc";
 import { askAnswerEngine } from "@/lib/connectors/perplexity";
 import { postRecommendationToSlack } from "@/lib/connectors/slack";
 import { clientCredentialsToken } from "@/lib/connectors/shopify-oauth";
 import { industryFor } from "@/lib/categories/industry";
+import { fetchSitePosts } from "@/lib/connectors/site-posts";
+import { findDuplicate } from "@/lib/pipeline/dedupe";
+import { getGoogleAccessToken, GSC_SCOPE, googleServiceAccountEmail } from "@/lib/connectors/google-auth";
 import { dataforseoEnabled, firecrawlEnabled, gscEnabled, geoEnabled, aiEnabled } from "@/lib/env";
 import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
@@ -359,14 +362,19 @@ export async function generateIdeas(
   if (!business) throw new Error(`Business ${businessId} not found`);
 
   const pillarNames = business.pillars.map((p) => p.name);
+  const industry = industryFor(business);
 
-  // Everything we already have a title for — ideas (any status), drafts, pages.
-  const [ideas, drafts] = await Promise.all([
+  // Everything we already have a title for — ideas (any status), drafts, and the
+  // posts already live on the store's blog (read from its public sitemap).
+  const [ideas, drafts, livePosts] = await Promise.all([
     prisma.idea.findMany({ where: { businessId }, select: { title: true } }),
     prisma.draft.findMany({ where: { businessId }, select: { title: true } }),
+    fetchSitePosts(business.domain),
   ]);
+  const liveTitles = livePosts.map((p) => p.title);
   const existingTitles = [...ideas.map((i) => i.title), ...drafts.map((d) => d.title)];
-  const seen = new Set(existingTitles.map(normTitle));
+  const seen = new Set([...existingTitles, ...liveTitles].map(normTitle));
+  const taken = [...existingTitles, ...liveTitles];
 
   const performanceNote = await buildPerformanceNote(businessId, pillarNames, existingTitles);
 
@@ -381,10 +389,12 @@ export async function generateIdeas(
     brandVoice: business.brandVoice ?? undefined,
     pillars: pillarNames,
     existingTitles,
+    liveTitles,
     performanceNote,
     count: total,
     targetLocal,
     targetEvergreen,
+    industry,
   };
 
   const proposals = await generateIdeaProposals(ctx);
@@ -396,7 +406,12 @@ export async function generateIdeas(
   for (const p of proposals) {
     const key = normTitle(p.title);
     if (!key || seen.has(key)) continue; // skip dupes within-batch and vs existing
+    // A different line of business (a casket idea on a headstone store) never lands.
+    if (industry.offTopic && (industry.offTopic.test(p.title) || industry.offTopic.test(p.targetKeyword))) continue;
+    // Same topic as something live, in flight or already proposed, reworded.
+    if (findDuplicate(p.title, taken)) continue;
     seen.add(key);
+    taken.push(p.title);
     await prisma.idea.create({
       data: {
         businessId,
@@ -421,6 +436,9 @@ export async function generateIdeas(
  */
 export async function replenishIdeas(businessId: string, floorPerKind = 6): Promise<number> {
   requireDb();
+  await tidyBlogPipeline(businessId).catch((e) => {
+    console.error("[tidy] failed:", e instanceof Error ? e.message : e);
+  });
   const [local, evergreen] = await Promise.all([
     prisma.idea.count({ where: { businessId, status: "PROPOSED", kind: "LOCAL" } }),
     prisma.idea.count({ where: { businessId, status: "PROPOSED", kind: "EVERGREEN" } }),
@@ -705,14 +723,15 @@ function isBriefReady(brief: { targetKeyword: string | null; outline: unknown })
   return Boolean(brief.targetKeyword && brief.targetKeyword.trim().length > 2 && outline.length >= 3);
 }
 
-/** Buffer: skip an idea whose exact topic already has a draft (don't repeat work). */
+/** Buffer: skip an idea whose topic already has a draft or a live post (don't repeat work). */
 async function isDuplicateIdea(businessId: string, title: string): Promise<boolean> {
   if (!slugify(title)) return true;
-  const existing = await prisma.draft.findFirst({
-    where: { businessId, title: { equals: title, mode: "insensitive" } },
-    select: { id: true },
-  });
-  return Boolean(existing);
+  const [business, drafts] = await Promise.all([
+    prisma.business.findUnique({ where: { id: businessId }, select: { domain: true } }),
+    prisma.draft.findMany({ where: { businessId }, select: { title: true } }),
+  ]);
+  const live = business ? await fetchSitePosts(business.domain) : [];
+  return Boolean(findDuplicate(title, [...drafts.map((d) => d.title), ...live.map((p) => p.title)]));
 }
 
 /** Per-category Ready targets for a business (LOCAL + EVERGREEN sum to the total). */
@@ -756,6 +775,86 @@ async function readyCapacity(businessId: string): Promise<{ LOCAL: number; EVERG
 }
 
 /**
+ * Keep a store's blog pipeline on its own line of business and free of repeats.
+ * Removes, for a store whose industry pack names off-topic subjects (casket
+ * pieces on a headstone store): proposed ideas, pending briefs, and every
+ * draft that isn't published (in progress, in Ready, or scheduled). Then
+ * dismisses proposed ideas that repeat a post already live on the store, a
+ * piece already written, or a higher-scored idea in the box. Published posts
+ * are never touched. Idempotent; runs before every auto-advance and replenish.
+ */
+export async function tidyBlogPipeline(businessId: string): Promise<{ ideas: number; briefs: number; drafts: number; repeats: number }> {
+  requireDb();
+  const out = { ideas: 0, briefs: 0, drafts: 0, repeats: 0 };
+  const business = await prisma.business.findUnique({ where: { id: businessId } });
+  if (!business) return out;
+  const off = industryFor(business).offTopic;
+
+  if (off) {
+    const ideas = await prisma.idea.findMany({
+      where: { businessId, status: "PROPOSED" },
+      select: { id: true, title: true },
+    });
+    const offIdeas = ideas.filter((i) => off.test(i.title)).map((i) => i.id);
+    if (offIdeas.length) {
+      out.ideas = (await prisma.idea.updateMany({ where: { id: { in: offIdeas } }, data: { status: "DISMISSED" } })).count;
+    }
+
+    const briefs = await prisma.brief.findMany({
+      where: { businessId, status: { not: "REJECTED" } },
+      select: {
+        id: true,
+        ideaId: true,
+        targetKeyword: true,
+        idea: { select: { title: true } },
+        draft: { select: { id: true, title: true, status: true, page: { select: { id: true } } } },
+      },
+    });
+    for (const b of briefs) {
+      const isOff = off.test(b.idea.title) || off.test(b.targetKeyword) || (b.draft ? off.test(b.draft.title) : false);
+      if (!isOff) continue;
+      if (b.draft && (b.draft.status === "PUBLISHED" || b.draft.page)) continue; // live content is the owner's call
+      if (b.draft) {
+        await prisma.draft.deleteMany({ where: { id: b.draft.id } });
+        out.drafts++;
+      } else {
+        out.briefs++;
+      }
+      await prisma.brief.update({ where: { id: b.id }, data: { status: "REJECTED" } });
+      await prisma.idea.update({ where: { id: b.ideaId }, data: { status: "DISMISSED" } });
+    }
+  }
+
+  // Repeats: an idea whose topic is already live, already written, or already
+  // proposed with a higher score.
+  const [proposed, drafts, livePosts] = await Promise.all([
+    prisma.idea.findMany({
+      where: { businessId, status: "PROPOSED" },
+      select: { id: true, title: true },
+      orderBy: [{ score: "desc" }, { createdAt: "asc" }],
+    }),
+    prisma.draft.findMany({ where: { businessId }, select: { title: true } }),
+    fetchSitePosts(business.domain),
+  ]);
+  const taken = [...livePosts.map((p) => p.title), ...drafts.map((d) => d.title)];
+  const repeatIds: string[] = [];
+  for (const idea of proposed) {
+    if (findDuplicate(idea.title, taken)) repeatIds.push(idea.id);
+    else taken.push(idea.title);
+  }
+  if (repeatIds.length) {
+    out.repeats = (await prisma.idea.updateMany({ where: { id: { in: repeatIds } }, data: { status: "DISMISSED" } })).count;
+  }
+
+  if (out.ideas + out.briefs + out.drafts + out.repeats > 0) {
+    console.log(
+      `[tidy] ${business.name}: off-topic ideas ${out.ideas}, briefs ${out.briefs}, drafts ${out.drafts}; repeat ideas ${out.repeats}`,
+    );
+  }
+  return out;
+}
+
+/**
  * Auto-advance one business so each category (LOCAL/EVERGREEN) fills to its
  * target in Ready. Counts already-ready + in-flight per kind, and only builds
  * the kind that's short — so you wake up to ~5 local + ~5 evergreen. Returns how
@@ -763,6 +862,9 @@ async function readyCapacity(businessId: string): Promise<{ LOCAL: number; EVERG
  */
 export async function autoAdvanceBusiness(businessId: string): Promise<number> {
   requireDb();
+  await tidyBlogPipeline(businessId).catch((e) => {
+    console.error("[tidy] failed:", e instanceof Error ? e.message : e);
+  });
 
   const targets = await readyTargets(businessId);
 
@@ -890,6 +992,26 @@ export async function saveConnector(
         `Those ${type[0]}${type.slice(1).toLowerCase()} credentials didn't work: ${health.message ?? "authentication failed"}. Nothing was saved.`,
       );
     }
+  }
+
+  // Search Console: prove the service account can read this property, so a
+  // connected GSC always means real data for THIS store.
+  if (type === "GSC") {
+    const siteUrl = typeof config.siteUrl === "string" ? config.siteUrl.trim() : "";
+    if (!siteUrl) throw new Error("Enter the Search Console property, e.g. sc-domain:example.com.");
+    const accessToken = await getGoogleAccessToken(GSC_SCOPE).catch(() => null);
+    if (!accessToken) throw new Error("The Google service account isn't configured on the server (GOOGLE_SERVICE_ACCOUNT_JSON). Nothing was saved.");
+    const day = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+    try {
+      await searchAnalytics({ siteUrl, accessToken, startDate: day(8), endDate: day(1), dimensions: ["query"], rowLimit: 1 });
+    } catch (e) {
+      const who = googleServiceAccountEmail();
+      throw new Error(
+        `Search Console refused ${siteUrl} (${e instanceof Error ? e.message : "error"}). ` +
+          `In Search Console → Settings → Users and permissions, add ${who ?? "the service account"} as a user, then try again. Nothing was saved.`,
+      );
+    }
+    config = { ...config, siteUrl };
   }
 
   const configEnc = encryptJson(config);

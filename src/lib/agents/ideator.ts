@@ -30,6 +30,8 @@ export interface IdeationContext {
   pillars: string[];
   /** Titles already published or in-flight — so we never duplicate. */
   existingTitles: string[];
+  /** Posts already live on the store's blog (from its sitemap) — never repeat these. */
+  liveTitles?: string[];
   /**
    * Feedback signal from live content: which pillars are already well covered,
    * which are thin, and (when GSC is connected) what's winning vs decaying.
@@ -153,7 +155,7 @@ function offlineIdeas(ctx: IdeationContext): IdeaProposal[] {
     if (CITIES[k]) localIdeas.push(tpl.city(CITIES[k]));
   }
 
-  const have = new Set(ctx.existingTitles.map((t) => t.toLowerCase()));
+  const have = new Set([...ctx.existingTitles, ...(ctx.liveTitles ?? [])].map((t) => t.toLowerCase()));
   const out: IdeaProposal[] = [];
   const wantLocal = ctx.targetLocal ?? 0;
 
@@ -213,7 +215,10 @@ BRAND VOICE: ${ctx.brandVoice ?? "(not set)"}
 CONTENT PILLARS (assign each idea to the best-fitting one):
 ${ctx.pillars.map((p) => `- ${p}`).join("\n") || "- General"}
 
-ALREADY PUBLISHED OR IN-FLIGHT (do NOT duplicate these):
+ALREADY ON THE STORE'S LIVE BLOG (do NOT write another article on any of these topics, even reworded or narrowed; a different city or state is fine):
+${ctx.liveTitles?.length ? ctx.liveTitles.map((t) => `- ${t}`).join("\n") : "(none found)"}
+
+ALREADY IN THE ENGINE — proposed, in progress or written (do NOT duplicate these):
 ${existing}
 
 PERFORMANCE / COVERAGE SIGNAL:

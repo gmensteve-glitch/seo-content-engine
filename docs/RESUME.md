@@ -2,7 +2,7 @@
 
 > New operator or new Claude session: paste **"Read docs/RESUME.md and docs/OPERATING-SOP.md, then tell me the current state and wait for instructions."** Do not start changing code until you have read both.
 
-Last updated: 2026-10-02. Keep this file current: when you ship something that changes how the system works, update the section it belongs to in the same commit.
+Last updated: 2026-10-05. Keep this file current: when you ship something that changes how the system works, update the section it belongs to in the same commit.
 
 ## What this is
 
@@ -38,13 +38,18 @@ Two facts that must stay correct:
 - **Caskets:** the FTC Funeral Rule (federal) means a funeral home must accept a casket bought elsewhere with no handling fee.
 - **Headstones:** the FTC Funeral Rule does **not** cover cemeteries or monument dealers. Cemeteries generally accept outside memorials that meet their written rules and charge their own setting fee. The VA furnishes a free headstone/marker/medallion for eligible veterans in any cemetery. Never claim a cemetery is forced to accept a stone, never quote a named cemetery's fees, never cite a statute by number.
 
+A pack can also name `offTopic` subjects (headstones: caskets/coffins). For such a store, `tidyBlogPipeline` (runs before every auto-advance and replenish) deletes matching unpublished drafts (in progress, Ready or scheduled), rejects matching pending briefs and dismisses matching proposed ideas; the ideator drops matching proposals. Published posts are never touched. `industryFor` decides on the store's name and domain first; the profile only breaks a tie.
+
 To add a new store in a new industry: add a pack, done.
 
 ## Shopify connection
 Client-credentials grant against a Dev Dashboard app installed on the store (`src/lib/connectors/shopify-oauth.ts`, `connectShopifyWithAppCredentials` in `pipeline/service.ts`). Tokens last ~24h and are refreshed automatically (`freshCmsConfig`). Env `SHOPIFY_APP_CLIENT_ID/SECRET` is Overnight's app. **Signature Headstones is a separate Shopify organization**, so it has its own app; its credentials are stored encrypted on its connector (entered via "This store has its own app" on Connectors). The connection is only needed for blog publishing; category pages read the public storefront.
 
 ## Search Console (per store)
-One shared Google service account (`GOOGLE_SERVICE_ACCOUNT_JSON`) reads every store's data; the **property is per store** (`gscSiteFor` in `src/lib/connectors/gsc.ts`). The store's own GSC connector (Connectors → Google Search Console, e.g. `sc-domain:signatureheadstones.com`) wins; the legacy `GSC_SITE_URL` env is used only for the store whose domain it names. A store with neither gets no Search Console data, never another store's. For a store to get data, a GSC owner must add the service account's `client_email` as a Restricted user on that property. Saving the connector does not yet test access. (Before 2026-10-02 every store read the one env property, which is why Signature Headstones showed casket keywords; its stored KeywordRank rows were cleared by a migration.)
+One shared Google service account (`GOOGLE_SERVICE_ACCOUNT_JSON`) reads every store's data; the **property is per store** (`gscSiteFor` in `src/lib/connectors/gsc.ts`). The store's own GSC connector (Connectors → Google Search Console, e.g. `sc-domain:signatureheadstones.com`) wins; the legacy `GSC_SITE_URL` env is used only for the store whose domain it names. A store with neither gets no Search Console data, never another store's. For a store to get data, a GSC owner must add the service account's `client_email` as a Restricted user on that property. Saving the connector test-reads the property and, if Search Console refuses, names the service-account email to add. (Before 2026-10-02 every store read the one env property, which is why Signature Headstones showed casket keywords; its stored KeywordRank rows were cleared by a migration.)
+
+## Duplicates (blog side)
+Before proposing, the ideator sees every idea, every draft, and every post already live on the store (`src/lib/connectors/site-posts.ts`: the public `sitemap_blogs` list, all blogs, cached 6h; works without a Shopify connection). Proposals are then filtered by `findDuplicate` (`src/lib/pipeline/dedupe.ts`): topic-word overlap ≥ 0.6, and a different state/city is never a duplicate. `tidyBlogPipeline` also dismisses proposed ideas that repeat a live post, a draft, or a higher-scored idea, and auto-advance re-checks before it builds.
 
 ## Models and spend
 `src/lib/ai/claude.ts`: Opus 5 for ideas, briefs and writing; Sonnet 5 for grading and intake; Haiku 4.5 for extraction (Haiku takes no `thinking`/`effort`). All calls stream. Opus calls use the server-side refusal fallback beta and fall back to a plain call if the beta is rejected. Stable prompt blocks (industry primer, rules, catalog facts, policies, links) are sent as cached system blocks via `context: []`; the Railway log prints one line per call with `cached=` so you can verify hits. Per-page cost is accumulated by `withCostScope` and shown on the Score tab. Price table in `src/lib/ai/cost.ts` (Opus 5 $5/$25, Sonnet 5 $2/$10, Haiku 4.5 $1/$5 per million). A hub page costs roughly $0.35–0.55.
@@ -81,7 +86,7 @@ Every push redeploys Railway and **kills any category draft running in-process**
 
 ## Open items (as of 2026-10-01)
 - Signature Headstones: run the first scan and first hub draft (Upright Headstones); fix the FAQ template and the shipping-policy email typo on the live site.
-- Search Console: Signature Headstones' property is saved on its connector; confirm a GSC owner added the service account to signatureheadstones.com (otherwise its Overview stays empty). Overnight still runs off the `GSC_SITE_URL` env; optionally save its property on its connector too. Signature's existing blog ideas/ready pieces may target casket keywords (the idea generator was fed them); review before publishing.
+- Search Console: Signature Headstones' property is saved on its connector; confirm a GSC owner added the service account to signatureheadstones.com (otherwise its Overview stays empty). Overnight still runs off the `GSC_SITE_URL` env; optionally save its property on its connector too. Casket ideas/briefs/unpublished drafts on Signature are removed automatically by `tidyBlogPipeline` (2026-10-05) and Ready refills with headstone pieces.
 - Auto-publish schedule for blogs: owner said hold off.
 - Rotate the Shopify client secrets that were pasted into chat (both stores) in the Dev Dashboard, then reconnect on Connectors.
 

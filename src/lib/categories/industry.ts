@@ -62,6 +62,9 @@ export interface IndustryPack {
   blogLocalGuidance: string;
   /** Blog writer: the operational things never to invent about THIS business. */
   blogOperationalRule: string;
+  /** Topics that belong to a different line of business. Blog ideas, briefs and
+   *  unpublished drafts whose title matches are removed from this store. */
+  offTopic?: RegExp;
 }
 
 // ── Caskets ────────────────────────────────────────────────────
@@ -301,6 +304,7 @@ const HEADSTONES: IndustryPack = {
 - Link to authoritative sources: the VA's headstones and markers page (cem.va.gov/hmm) and, for the "what the Funeral Rule does not cover" point, the FTC consumer guide.
 - Include an FAQ with place-named questions ("Can I buy a headstone online for a cemetery in {City}?", "Who installs a headstone in {City}?").
 - Reflect the served area accurately (we ship nationwide; we are not a local monument yard or cemetery in that city — never imply a local storefront or installation crew).`,
+  offTopic: /\b(caskets?|coffins?)\b/i,
   blogOperationalRule:
     "our production or shipping PROCESS, turnaround or delivery timelines beyond what our policy pages state, how or when a stone is quarried/cut/carved/crated/handed off, named carriers or freight routes, installation promises, or guarantees. Do NOT invent day-by-day production or shipping schedules or a step-by-step \"how a headstone travels from order to the cemetery\" process.",
 };
@@ -343,17 +347,28 @@ const GENERAL: IndustryPack = {
   blogLocalAngles: `    Local pages must carry genuine local substance (real regional norms, real institutions) — never a thin "we ship to {City}" template.`,
   blogLocalGuidance: `- Name the city and state in the H1 and the Quick answer; keep every local claim general and accurate; we ship nationwide and have no local storefront.`,
   blogOperationalRule: "our fulfilment or shipping PROCESS, timelines, carriers, or guarantees beyond what our policy pages state.",
+  offTopic: undefined,
 };
 
 export const INDUSTRIES: Record<IndustryKey, IndustryPack> = { caskets: CASKETS, headstones: HEADSTONES, general: GENERAL };
 
 /** Which line of business a store is in, from its name, domain and profile. */
 export function industryFor(biz: { name?: string | null; domain?: string | null; profileMd?: string | null }): IndustryPack {
-  const hay = `${biz.name ?? ""} ${biz.domain ?? ""} ${(biz.profileMd ?? "").slice(0, 1500)}`.toLowerCase();
-  const score = (words: string[]) => words.reduce((n, w) => n + (hay.split(w).length - 1), 0);
-  const stones = score(["headstone", "grave marker", "gravestone", "monument", "memorial", "tombstone"]);
-  const boxes = score(["casket", "coffin", "urn"]);
-  if (stones > boxes && stones > 0) return HEADSTONES;
-  if (boxes > 0) return CASKETS;
-  return GENERAL;
+  const STONES = ["headstone", "grave marker", "gravestone", "monument", "memorial", "tombstone"];
+  const BOXES = ["casket", "coffin", "urn"];
+  const pick = (hay: string): IndustryPack | null => {
+    const score = (words: string[]) => words.reduce((n, w) => n + (hay.split(w).length - 1), 0);
+    const stones = score(STONES);
+    const boxes = score(BOXES);
+    if (stones > boxes && stones > 0) return HEADSTONES;
+    if (boxes > stones && boxes > 0) return CASKETS;
+    return null;
+  };
+  // The store's own name and domain decide first; a profile (which may have been
+  // copied from a sister store) only breaks a tie.
+  return (
+    pick(`${biz.name ?? ""} ${biz.domain ?? ""}`.toLowerCase()) ??
+    pick(`${biz.name ?? ""} ${biz.domain ?? ""} ${(biz.profileMd ?? "").slice(0, 1500)}`.toLowerCase()) ??
+    GENERAL
+  );
 }
