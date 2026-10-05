@@ -81,40 +81,17 @@ function liftJsonLd(md: string, sink: string[]): string {
     });
 }
 
-// Guide boxes — inline-styled so they look the same on any theme and in the
-// dashboard preview (the store's own heading font is used when the theme
-// exposes it). Colours follow the existing posts: warm off-white boxes, a muted
-// plum accent.
-const BOX_INK = "#1f1d1b";
-const BOX_ACCENT = "#8c6a80";
-const BOX_RULE = "#dcd8d0";
-const BOX_TITLE_STYLE = `margin:0 0 14px;font-family:var(--font-heading-family, Georgia, 'Times New Roman', serif);font-size:1.7em;line-height:1.2;color:${BOX_INK};`;
-
+// The two guide sections render as plain text: a heading and a simple list.
+// "In this guide" entries are plain labels (never jump links, even if an old
+// entry carries one).
 function renderTocBox(items: string[]): string {
-  const lis = items
-    .map((it, n) => {
-      const border = n === items.length - 1 ? "" : `border-bottom:1px solid ${BOX_RULE};`;
-      // Plain text by design (no jump links), even if an old entry carries one.
-      const text = it.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
-      return `<li style="margin:0;padding:12px 0;${border}">${n + 1}. ${inline(escapeHtml(text))}</li>`;
-    })
-    .join("");
-  return (
-    `<div class="guide-toc" style="background:#fbfaf6;border:1px solid ${BOX_RULE};border-radius:14px;padding:24px 28px;margin:28px 0;color:${BOX_INK};">` +
-    `<p style="${BOX_TITLE_STYLE}"><span style="color:${BOX_ACCENT};margin-right:12px;" aria-hidden="true">&#10087;</span>In This Guide</p>` +
-    `<ol style="list-style:none;margin:0;padding:0;">${lis}</ol></div>`
-  );
+  const lis = items.map((it) => `<li>${inline(escapeHtml(it.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")))}</li>`).join("");
+  return `<h2 id="in-this-guide">In This Guide</h2>\n<ol>${lis}</ol>`;
 }
 
 function renderTakeawaysBox(items: string[]): string {
-  const ps = items
-    .map((it) => `<p style="margin:0 0 12px 34px;color:${BOX_INK};">${inline(escapeHtml(it))}</p>`)
-    .join("");
-  return (
-    `<div class="guide-takeaways" style="background:#f7f4f1;border:1px solid ${BOX_RULE};border-left:4px solid ${BOX_ACCENT};border-radius:14px;padding:24px 28px 14px;margin:28px 0;color:${BOX_INK};">` +
-    `<p style="${BOX_TITLE_STYLE}"><span style="color:${BOX_ACCENT};margin-right:12px;" aria-hidden="true">&#10023;</span>What To Know First</p>` +
-    `${ps}</div>`
-  );
+  const lis = items.map((it) => `<li>${inline(escapeHtml(it))}</li>`).join("");
+  return `<h2 id="what-to-know-first">What To Know First</h2>\n<ul>${lis}</ul>`;
 }
 
 /** Render the writer's Markdown to clean HTML for a CMS body_html field. */
@@ -173,8 +150,8 @@ export function markdownToHtml(md: string): string {
       continue;
     }
 
-    // The two guide boxes ("In this guide" / "What to know first"): render the
-    // heading + its list as one styled box instead of a bare H2 and list.
+    // The two guide sections ("In this guide" / "What to know first"): a plain
+    // heading + list, with "In this guide" entries never rendered as links.
     const box = trimmed.match(/^##\s+(in this guide|what to know first)\s*$/i);
     if (box) {
       flushParagraph(para);

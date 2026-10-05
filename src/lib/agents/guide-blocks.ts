@@ -267,7 +267,7 @@ SECTION HEADINGS:
 ${heads.map((h) => `- ${h.text}${h.level === 3 ? " (sub-section)" : ""}`).join("\n")}
 
 Return:
-1. "toc": ${Math.min(MAX_TOC, Math.max(3, heads.filter((h) => h.level === 2).length))} entries at most ${MAX_TOC}, in article order, covering the main sections of the article. Each is a short, plain, reader-friendly name for a section (it need not match the heading word for word; Title Case; plain text only: no links, no numbering, no trailing punctuation).
+1. "toc": ${Math.min(MAX_TOC, Math.max(3, heads.filter((h) => h.level === 2).length))} entries at most ${MAX_TOC}, in article order, covering the main content sections of the article (leave out the FAQ, "About the author" and brand/why-choose-us sections). Each is a short, plain, reader-friendly name for a section (it need not match the heading word for word; Title Case; plain text only: no links, no numbering, no trailing punctuation).
 2. "takeaways": EXACTLY ${TAKEAWAY_COUNT} key takeaways. Each is ONE complete plain sentence of 8 to ${MAX_TAKEAWAY_WORDS} words (never more than ${MAX_TAKEAWAY_WORDS}), ending with a period. Each states one concrete, useful point the article itself makes (no new facts, numbers, laws or claims that are not in the article). No bold, no links, no bullet characters, no "Quick answer". Vary the openings; do not start two takeaways with the same word. Warm, plain language for a family planning a memorial.
 ${retryNote ? `\nYOUR LAST ATTEMPT WAS REJECTED: ${retryNote}. Fix exactly that.\n` : ""}
 ARTICLE:

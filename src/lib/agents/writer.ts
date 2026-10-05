@@ -18,7 +18,7 @@ STRUCTURE:
 ## In this guide
 
 1. Short Reader-Friendly Label
-(up to 6 numbered entries, in article order, one per main section; plain text only, NO links; each is a short plain name for the section and need not repeat the heading word for word)
+(up to 6 numbered entries, in article order, one per main content section, leaving out the FAQ, about-the-author and brand sections; plain text only, NO links; each is a short plain name for the section and need not repeat the heading word for word)
 
 ## What to know first
 

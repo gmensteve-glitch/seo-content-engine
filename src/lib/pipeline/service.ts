@@ -1695,9 +1695,26 @@ export async function updateDraftBody(draftId: string, bodyMd: string): Promise<
   await prisma.draft.update({ where: { id: draftId }, data: { bodyMd } });
 }
 
-// Drafts whose guide boxes couldn't be fixed, keyed by id → body length, so the
-// sweep doesn't pay to retry the same unchanged body every tick.
-const guideGaveUp = new Map<string, number>();
+// Drafts whose guide boxes couldn't be fixed: id → { body length, retry after }.
+// An off-spec result waits until the body changes or 30 min pass; an error
+// (API hiccup) waits 10 min. Never a permanent skip.
+const guideBackoff = new Map<string, { len: number; until: number }>();
+
+/** Fix one draft's guide boxes now (no-op when on spec). Throws on AI errors. */
+export async function fixGuideBlocks(draftId: string): Promise<{ changed: boolean; issues: string[] }> {
+  requireDb();
+  const d = await prisma.draft.findUnique({ where: { id: draftId }, select: { id: true, title: true, bodyMd: true } });
+  if (!d) throw new Error(`Draft ${draftId} not found`);
+  const before = guideIssues(d.bodyMd);
+  if (!before.length) return { changed: false, issues: [] };
+  const next = await trackDraftCost(d.id, () => ensureGuideBlocks(d.bodyMd, { title: d.title }));
+  const after = guideIssues(next);
+  if (next === d.bodyMd) return { changed: false, issues: after };
+  // Only write if nobody edited the draft meanwhile.
+  const res = await prisma.draft.updateMany({ where: { id: d.id, bodyMd: d.bodyMd }, data: { bodyMd: next } });
+  if (res.count) console.log(`[guide] fixed boxes on "${d.title}" (${before.join("; ")})${after.length ? ` — still: ${after.join("; ")}` : ""}`);
+  return { changed: res.count > 0, issues: after };
+}
 
 /**
  * Give every blog waiting for a human (Ready, scheduled, or a near-miss in
@@ -1720,27 +1737,25 @@ export async function sweepGuideBlocks(max = 4): Promise<number> {
     orderBy: { updatedAt: "desc" },
     take: 300,
   });
+  const pending = drafts.filter((d) => guideIssues(d.bodyMd).length > 0);
   let fixed = 0;
-  for (const d of drafts) {
-    if (fixed >= max) break;
-    if (guideGaveUp.get(d.id) === d.bodyMd.length) continue;
-    const issues = guideIssues(d.bodyMd);
-    if (!issues.length) continue;
+  let tried = 0;
+  for (const d of pending) {
+    if (tried >= max) break;
+    const b = guideBackoff.get(d.id);
+    if (b && b.len === d.bodyMd.length && Date.now() < b.until) continue;
+    tried++;
     try {
-      const next = await trackDraftCost(d.id, () => ensureGuideBlocks(d.bodyMd, { title: d.title }));
-      if (guideIssues(next).length) guideGaveUp.set(d.id, next.length);
-      if (next === d.bodyMd) continue;
-      // Only write if nobody edited the draft meanwhile.
-      const res = await prisma.draft.updateMany({ where: { id: d.id, bodyMd: d.bodyMd }, data: { bodyMd: next } });
-      if (res.count) {
-        fixed++;
-        console.log(`[guide] added/fixed boxes on "${d.title}" (${issues.join("; ")})`);
-      }
+      const r = await fixGuideBlocks(d.id);
+      if (r.changed) fixed++;
+      if (r.issues.length) guideBackoff.set(d.id, { len: d.bodyMd.length, until: Date.now() + 30 * 60_000 });
+      else guideBackoff.delete(d.id);
     } catch (e) {
-      guideGaveUp.set(d.id, d.bodyMd.length);
+      guideBackoff.set(d.id, { len: d.bodyMd.length, until: Date.now() + 10 * 60_000 });
       console.error(`[guide] failed on "${d.title}":`, e instanceof Error ? e.message : e);
     }
   }
+  if (pending.length) console.log(`[guide] ${pending.length} draft(s) need boxes; fixed ${fixed} this tick`);
   return fixed;
 }
 
@@ -2638,6 +2653,21 @@ export async function renderPublishPreview(draftId: string): Promise<{
     select: { bodyMd: true, title: true },
   });
   if (!draft) throw new Error(`Draft ${draftId} not found`);
+  // Make sure what the operator is looking at has on-spec guide boxes; if the
+  // fix fails, say so in the issues list rather than hiding it.
+  const guideProblems: string[] = [];
+  if (guideIssues(draft.bodyMd).length) {
+    try {
+      const r = await fixGuideBlocks(draftId);
+      if (r.changed) {
+        const fresh = await prisma.draft.findUnique({ where: { id: draftId }, select: { bodyMd: true } });
+        if (fresh) draft.bodyMd = fresh.bodyMd;
+      }
+      guideProblems.push(...r.issues.map((x) => `guide boxes: ${x}`));
+    } catch (e) {
+      guideProblems.push(`guide boxes could not be built: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
   // Self-heal a stored body left with an unterminated ```json fence by an older
   // revise pass, so its markdown source is clean too (not just the render).
   const healed = ensureJsonLdClosed(draft.bodyMd);
@@ -2650,7 +2680,7 @@ export async function renderPublishPreview(draftId: string): Promise<{
     .trim();
   const seoTitle = deriveSeoTitle(draft.title);
   const metaDescription = deriveMetaDescription(draft.bodyMd, draft.title);
-  const issues = [...preflightPublish(html).issues, ...metaIssues(seoTitle, metaDescription)];
+  const issues = [...preflightPublish(html).issues, ...metaIssues(seoTitle, metaDescription), ...guideProblems];
   return {
     html,
     seoTitle,
