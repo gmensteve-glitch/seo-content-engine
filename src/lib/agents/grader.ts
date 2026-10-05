@@ -4,6 +4,7 @@
 import { structured, MODELS } from "@/lib/ai/claude";
 import { aiEnabled } from "@/lib/env";
 import { offlineGrade } from "@/lib/ai/offline";
+import { stripGuideBlocks } from "@/lib/agents/guide-blocks";
 import {
   RUBRIC,
   DEFAULT_THRESHOLD,
@@ -64,9 +65,10 @@ export async function gradeDraft(
 
   // LLMs can't reliably count, so compute length here and hand the grader a
   // concrete overshoot signal to judge concision against.
-  // Count the article only: the trailing JSON-LD block repeats the FAQ and used
-  // to make most drafts look 25–40% over length (a false readability penalty).
-  const wordCount = draftMarkdown
+  // Count the article only: not the trailing JSON-LD block (it repeats the FAQ
+  // and used to make most drafts look 25–40% over length), and not the required
+  // "In this guide" / "What to know first" summaries.
+  const wordCount = stripGuideBlocks(draftMarkdown)
     .replace(/```[\s\S]*?(```|$)/g, " ")
     .trim()
     .split(/\s+/)
@@ -89,7 +91,10 @@ export async function gradeDraft(
           : ` (within a reasonable band).`);
   }
 
-  const prompt = `RUBRIC:\n${rubricText}\n\nBRIEF (the benchmark this draft should satisfy):\n${briefContext}\n\nDRAFT:\n${draftMarkdown}${lengthNote}\n\nScore each dimension and give one paragraph of feedback on the highest-leverage fixes.`;
+  const guideNote =
+    `\n\nNOTE: the "In this guide" and "What to know first" sections near the top are required summaries by design. ` +
+    `They are excluded from the word count above, and restating the article there is NOT redundancy or padding — do not penalize it or ask to cut it.`;
+  const prompt = `RUBRIC:\n${rubricText}\n\nBRIEF (the benchmark this draft should satisfy):\n${briefContext}\n\nDRAFT:\n${draftMarkdown}${lengthNote}${guideNote}\n\nScore each dimension and give one paragraph of feedback on the highest-leverage fixes.`;
 
   // A malformed grade (every dimension 0) is almost always a model hiccup, not a
   // genuine zero — retry once before trusting it, so a blip doesn't burn a
