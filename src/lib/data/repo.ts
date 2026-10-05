@@ -13,6 +13,7 @@ import type {
   ScoreCalibrationVM,
   GoalDiagnosticsVM,
   CostSummaryVM,
+  ShortfallVM,
   PipelineCard,
   IdeaVM,
   BriefVM,
@@ -665,6 +666,64 @@ function pageFlag(
 }
 
 const IN_PROGRESS_STATUSES = ["RESEARCHING", "DRAFTED", "GRADING", "REVISING"] as const;
+
+/**
+ * Why near-misses fall short: averages each rubric dimension over every FAILED
+ * (unrejected) draft's best grade, worst-first by points lost, with one
+ * representative grader note. Plus the queue and anything stuck.
+ */
+export async function getShortfall(bizId?: string): Promise<ShortfallVM | null> {
+  bizId = bizId ?? (await activeBizId());
+  if (!hasDatabase) return null;
+  const biz = await prisma.business.findUnique({ where: { id: bizId }, select: { qualityThreshold: true } });
+  const threshold = biz?.qualityThreshold ?? 85;
+  const [failed, queued, stuck] = await Promise.all([
+    prisma.draft.findMany({
+      where: { businessId: bizId, status: "FAILED", rejectedAt: null },
+      select: { grades: { orderBy: { overall: "desc" }, take: 1, select: { overall: true, dimensions: true } } },
+    }),
+    prisma.draft.count({ where: { businessId: bizId, status: { in: [...IN_PROGRESS_STATUSES] } } }),
+    prisma.draft.count({ where: { businessId: bizId, status: { in: [...IN_PROGRESS_STATUSES] }, attempts: { gte: 5 } } }),
+  ]);
+  const graded = failed.filter((d) => d.grades[0]);
+  const sums = new Map<string, { total: number; n: number; notes: { score: number; note: string }[] }>();
+  for (const d of graded) {
+    const dims = (d.grades[0].dimensions ?? {}) as Record<string, { score?: number; note?: string }>;
+    for (const r of RUBRIC) {
+      const v = dims[r.key];
+      if (!v || typeof v.score !== "number") continue;
+      const e = sums.get(r.key) ?? { total: 0, n: 0, notes: [] };
+      e.total += v.score;
+      e.n++;
+      if (v.note) e.notes.push({ score: v.score, note: v.note });
+      sums.set(r.key, e);
+    }
+  }
+  const dimensions = RUBRIC.map((r) => {
+    const e = sums.get(r.key);
+    const avg = e && e.n ? e.total / e.n : r.max;
+    // The note from the lowest-scoring draft on this dimension is the clearest example.
+    const sample = e?.notes.sort((a, b) => a.score - b.score)[0]?.note ?? "";
+    return { key: r.key, label: r.label, max: r.max, avg: Math.round(avg * 10) / 10, lost: Math.round((r.max - avg) * 10) / 10, sampleNote: sample };
+  }).sort((a, b) => b.lost - a.lost);
+  const scores = graded.map((d) => d.grades[0].overall);
+  const band = (lo: number, hi: number) => scores.filter((s) => s >= lo && s < hi).length;
+  return {
+    threshold,
+    nearMisses: failed.length,
+    avgBest: scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null,
+    bands: [
+      { label: `${threshold - 5}–${threshold - 1}`, count: band(threshold - 5, threshold) },
+      { label: `${threshold - 10}–${threshold - 6}`, count: band(threshold - 10, threshold - 5) },
+      { label: `${threshold - 15}–${threshold - 11}`, count: band(threshold - 15, threshold - 10) },
+      { label: `under ${threshold - 15}`, count: band(0, threshold - 15) },
+    ],
+    noGrade: failed.length - graded.length,
+    queued,
+    stuckOutOfAttempts: stuck,
+    dimensions,
+  };
+}
 
 export async function getPipeline(bizId?: string): Promise<PipelineCard[]> {
   bizId = bizId ?? (await activeBizId());

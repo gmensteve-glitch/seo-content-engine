@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { PageHeader, Pill } from "@/components/ui";
-import { getPipeline, PIPELINE_COLUMNS } from "@/lib/data/repo";
-import type { PipelineCard } from "@/lib/data/types";
+import { getPipeline, getShortfall, PIPELINE_COLUMNS } from "@/lib/data/repo";
+import type { PipelineCard, ShortfallVM } from "@/lib/data/types";
 import { MapPin, Search, Gauge, TrendingUp, PenLine, ArrowUpRight } from "lucide-react";
 
 type FlagMeta = { tone: "success" | "warn" | "accent"; label: string; icon: ReactNode };
@@ -28,7 +28,7 @@ const TONE_BAR: Record<"neutral" | "warn" | "accent" | "success", string> = {
 };
 
 export default async function PipelinePage() {
-  const cards = await getPipeline();
+  const [cards, shortfall] = await Promise.all([getPipeline(), getShortfall()]);
 
   return (
     <Shell>
@@ -96,7 +96,54 @@ export default async function PipelinePage() {
           );
         })}
       </div>
+
+      {shortfall && shortfall.nearMisses > 0 && <ShortfallPanel s={shortfall} />}
     </Shell>
+  );
+}
+
+/** Where the near-misses lose points — real numbers from their best grades. */
+function ShortfallPanel({ s }: { s: ShortfallVM }) {
+  return (
+    <section className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4">
+      <h2 className="text-[14px] font-semibold">Why pieces fall short</h2>
+      <p className="mt-1 text-[12px] text-[var(--muted)]">
+        {s.nearMisses} near-miss{s.nearMisses === 1 ? "" : "es"} below the {s.threshold} bar
+        {s.avgBest !== null ? `, average best score ${s.avgBest}` : ""}.
+        {s.noGrade > 0 ? ` ${s.noGrade} never got a grade (stopped before grading).` : ""}
+        {` ${s.queued} in the writing queue`}
+        {s.stuckOutOfAttempts > 0 ? `, ${s.stuckOutOfAttempts} out of retries` : ""}.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+        {s.bands.map((b) => (
+          <span key={b.label} className="rounded-md border border-[var(--border)] px-2 py-1 text-[var(--muted)]">
+            {b.label}: <span className="font-medium text-[var(--text)]">{b.count}</span>
+          </span>
+        ))}
+      </div>
+      <table className="mt-3 w-full text-left text-[12px]">
+        <thead className="text-[var(--subtle)]">
+          <tr>
+            <th className="py-1 pr-3 font-medium">Dimension</th>
+            <th className="py-1 pr-3 font-medium">Avg</th>
+            <th className="py-1 pr-3 font-medium">Points lost</th>
+            <th className="py-1 font-medium">What the grader says (worst case)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {s.dimensions.map((d) => (
+            <tr key={d.key} className="border-t border-[var(--border)] align-top">
+              <td className="py-1.5 pr-3">{d.label}</td>
+              <td className="py-1.5 pr-3 tabular-nums">
+                {d.avg}/{d.max}
+              </td>
+              <td className="py-1.5 pr-3 tabular-nums">{d.lost}</td>
+              <td className="py-1.5 text-[var(--muted)]">{d.sampleNote.slice(0, 220)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }
 

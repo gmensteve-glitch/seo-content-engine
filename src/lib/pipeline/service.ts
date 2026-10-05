@@ -1430,7 +1430,7 @@ export async function approveBrief(briefId: string): Promise<void> {
 // ─────────────────────────────────────────────────────────────
 
 const WORKER_STALE_MS = 15 * 60 * 1000; // reclaim a draft whose worker died mid-run
-const WORKER_MAX_ATTEMPTS = 3; // give up (→ FAILED) after this many crashes
+const WORKER_MAX_ATTEMPTS = 5; // give up (→ FAILED) after this many crashes (a deploy restart counts as one)
 const IN_PROGRESS: DraftStatus[] = ["RESEARCHING", "DRAFTED", "GRADING", "REVISING"];
 
 // One worker loop per process at a time (the DB claim-lock guards correctness;
@@ -1447,6 +1447,19 @@ type DraftStatus = "RESEARCHING" | "DRAFTED" | "GRADING" | "REVISING" | "PASSED"
 async function claimNextDraft(): Promise<{ id: string; briefId: string } | null> {
   const now = new Date();
   const staleBefore = new Date(now.getTime() - WORKER_STALE_MS);
+
+  // A draft whose worker died on its last allowed attempt is never claimed
+  // again; without this it sat "in progress" forever (and counted against the
+  // Ready capacity). Mark it FAILED so it shows up and frees its slot.
+  const reaped = await prisma.draft.updateMany({
+    where: {
+      status: { in: IN_PROGRESS },
+      attempts: { gte: WORKER_MAX_ATTEMPTS },
+      OR: [{ processingStartedAt: null }, { processingStartedAt: { lt: staleBefore } }],
+    },
+    data: { status: "FAILED", processingStartedAt: null },
+  });
+  if (reaped.count) console.warn(`[worker] ${reaped.count} draft(s) out of attempts → FAILED`);
 
   const candidate = await prisma.draft.findFirst({
     where: {

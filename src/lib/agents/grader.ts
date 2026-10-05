@@ -64,7 +64,13 @@ export async function gradeDraft(
 
   // LLMs can't reliably count, so compute length here and hand the grader a
   // concrete overshoot signal to judge concision against.
-  const wordCount = draftMarkdown.trim().split(/\s+/).filter(Boolean).length;
+  // Count the article only: the trailing JSON-LD block repeats the FAQ and used
+  // to make most drafts look 25–40% over length (a false readability penalty).
+  const wordCount = draftMarkdown
+    .replace(/```[\s\S]*?(```|$)/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
   let target = 0;
   try {
     target = Number((JSON.parse(briefContext) as { wordTarget?: number }).wordTarget) || 0;

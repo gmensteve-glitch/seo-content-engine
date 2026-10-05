@@ -27,6 +27,18 @@ export interface PipelineHealthVM {
   lastActivityLabel: string; // human "12m ago" / "no activity yet"
 }
 
+/** Where near-miss drafts lose points, from each one's best grade. */
+export interface ShortfallVM {
+  threshold: number;
+  nearMisses: number; // FAILED, not rejected
+  avgBest: number | null; // average best score of those
+  bands: { label: string; count: number }[]; // score distribution
+  noGrade: number; // FAILED with no grade at all (died before grading)
+  queued: number; // in progress (waiting or running)
+  stuckOutOfAttempts: number; // in progress but out of worker attempts
+  dimensions: { key: string; label: string; max: number; avg: number; lost: number; sampleNote: string }[];
+}
+
 export interface CostSummaryVM {
   count: number; // pieces with recorded cost
   totalCents: number;
