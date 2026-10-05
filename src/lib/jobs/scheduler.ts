@@ -60,6 +60,17 @@ async function guideTick(): Promise<void> {
   }
 }
 
+// One-time catch-up: re-grade Signature's pre-fix near-misses (see service).
+async function regradeTick(): Promise<void> {
+  try {
+    const { regradeStaleNearMisses } = await import("@/lib/pipeline/service");
+    const n = await regradeStaleNearMisses();
+    if (n) console.log(`[scheduler] re-graded ${n} near-miss(es)`);
+  } catch (e) {
+    console.error("[scheduler] regrade tick failed:", e instanceof Error ? e.message : e);
+  }
+}
+
 async function replenishTick(): Promise<void> {
   try {
     const { replenishAllIdeas } = await import("@/lib/pipeline/service");
@@ -184,6 +195,7 @@ export function startScheduler(): void {
   }, BOOT_DELAY_MS);
 
   setInterval(() => void guideTick(), GUIDE_INTERVAL_MS);
+  setInterval(() => void regradeTick(), GUIDE_INTERVAL_MS);
 
   setInterval(() => void workerTick(), WORKER_INTERVAL_MS);
   setInterval(() => void boostTick(), WORKER_INTERVAL_MS);

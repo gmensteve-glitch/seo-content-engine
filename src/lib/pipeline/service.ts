@@ -2632,6 +2632,53 @@ export async function regradeDraft(draftId: string): Promise<{ overall: number; 
   return { overall: grade.overall, passed: grade.passed };
 }
 
+// One-time catch-up (owner request, 2026-10-05): re-grade Signature Headstones'
+// near-misses whose newest grade predates the honest word count (no JSON-LD,
+// no guide sections). Each is re-graded once: afterwards its newest grade is
+// newer than the cutoff, so it drops out. A few per tick; survives restarts.
+const REGRADE_CUTOFF = new Date("2026-10-05T20:15:00Z");
+let regradeRunning = false;
+
+export async function regradeStaleNearMisses(max = 3): Promise<number> {
+  requireDb();
+  if (regradeRunning) return 0;
+  regradeRunning = true;
+  try {
+    const drafts = await prisma.draft.findMany({
+      where: {
+        status: "FAILED",
+        rejectedAt: null,
+        page: { is: null },
+        processingStartedAt: null,
+        boostRequestedAt: null,
+        business: { domain: { contains: "signatureheadstones.com", mode: "insensitive" } },
+        // Has grades, and none of them is newer than the cutoff.
+        grades: { some: {}, none: { createdAt: { gte: REGRADE_CUTOFF } } },
+      },
+      select: { id: true, title: true, bodyMd: true, businessId: true },
+      orderBy: { updatedAt: "desc" },
+      take: 20,
+    });
+    let done = 0;
+    for (const d of drafts) {
+      if (done >= max) break;
+      if (guideIssues(d.bodyMd).length) continue; // let the guide sweep finish it first
+      try {
+        const r = await trackDraftCost(d.id, () => regradeDraft(d.id));
+        done++;
+        console.log(`[regrade] "${d.title}" → ${r.overall}${r.passed ? " (passed)" : ""}`);
+      } catch (e) {
+        console.error(`[regrade] failed on "${d.title}":`, e instanceof Error ? e.message : e);
+      }
+    }
+    // A re-grade that clears the bar moves the piece into Ready.
+    if (done) await promoteQualifyingDrafts(drafts[0].businessId).catch(() => 0);
+    return done;
+  } finally {
+    regradeRunning = false;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // Content calendar
 // ─────────────────────────────────────────────────────────────
