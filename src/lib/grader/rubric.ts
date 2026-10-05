@@ -36,7 +36,7 @@ export const RUBRIC: RubricDimension[] = [
     label: "AEO / GEO readiness",
     max: 15,
     criteria:
-      "Built to be QUOTED by AI answer engines (ChatGPT, Perplexity, Google AI, Gemini) AND to rank. Requires: (1) a bold 'Quick answer' block right after the H1 that fully answers the title's question in 2–4 self-contained sentences, lead-with-the-fact; (2) every H2 opens with a 1–2 sentence self-contained answer that stands alone when quoted out of context (no 'as above', no dangling pronouns); (3) concrete, standalone, quotable facts (numbers/ranges/named standards) rather than vague prose; (4) a self-contained FAQ; (5) valid required schema (Article + FAQPage) and a TOC. Penalize a buried answer, sections that only make sense in sequence, or prose too vague for an AI to lift verbatim.",
+      "Built to be QUOTED by AI answer engines (ChatGPT, Perplexity, Google AI, Gemini) AND to rank. Requires: (1) the intro's first 1–2 plain sentences fully answer the title's question, lead-with-the-fact (there is deliberately NO bold 'Quick answer' block — do not ask for one), followed by an 'In this guide' table of contents (up to 6 jump links) and a 'What to know first' box of exactly 5 one-sentence takeaways of at most 15 words, each supported by the article; (2) every H2 opens with a 1–2 sentence self-contained answer that stands alone when quoted out of context (no 'as above', no dangling pronouns); (3) concrete, standalone, quotable facts (numbers/ranges/named standards) rather than vague prose; (4) a self-contained FAQ; (5) valid required schema (Article + FAQPage). Penalize a buried answer, sections that only make sense in sequence, or prose too vague for an AI to lift verbatim.",
   },
   {
     key: "originality",

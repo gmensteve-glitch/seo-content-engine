@@ -22,6 +22,7 @@ import { planLinks, applyLinks, type LinkTarget, type PlannedLink } from "@/lib/
 import { generateIdeaProposals, type IdeationContext } from "@/lib/agents/ideator";
 import { enrichDraft, rewritePassage, hasResources, type EnrichResources } from "@/lib/agents/enricher";
 import { finalizeDraftBody } from "@/lib/agents/finalize";
+import { ensureGuideBlocks, guideIssues, stripGuideBlocks } from "@/lib/agents/guide-blocks";
 import { withCostScope } from "@/lib/ai/cost";
 import { completeText, MODELS } from "@/lib/ai/claude";
 
@@ -101,8 +102,9 @@ function deriveMetaDescription(md: string, fallback: string): string {
   const clamp = (s: string) =>
     s.length > 155 ? s.slice(0, 152).replace(/\s+\S*$/, "").trimEnd() + "…" : s;
 
-  // Strip a leading byline/credit line so it never becomes the description.
-  const cleaned = md.replace(/^\s*(#.*\n)?\s*\*\*By [^\n]*\n/i, "");
+  // Strip a leading byline/credit line so it never becomes the description, and
+  // the guide boxes (TOC labels and takeaways are not a description).
+  const cleaned = stripGuideBlocks(md).replace(/^\s*(#.*\n)?\s*\*\*By [^\n]*\n/i, "");
 
   // Prefer the longest bold span (the answer-first summary is bold by design).
   const bolds = [...cleaned.matchAll(/\*\*([^*]+)\*\*/g)]
@@ -1611,7 +1613,9 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
     industry: industryFor(brief.business),
   });
   finalizeCtx.metaDescription = deriveMetaDescription(rawBody, draft.title);
-  const body = finalizeDraftBody(rawBody, finalizeCtx);
+  // Guarantee the "In this guide" + "What to know first" boxes (rebuilt with one
+  // small call if the writer missed the spec) before the grader sees the piece.
+  const body = await ensureGuideBlocks(finalizeDraftBody(rawBody, finalizeCtx), { title: draft.title });
   draft = await prisma.draft.update({
     where: { id: draft.id },
     data: { bodyMd: body, status: "GRADING" },
@@ -1664,9 +1668,9 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
     // Revise the weakest dimensions, then loop back to re-grade. Keep the stored
     // body as the best-so-far; the unproven revision only replaces it if it grades higher.
     const weakest = weakestDimensions(grade.dimensions).slice(0, 3);
-    currentDraft = finalizeDraftBody(
-      await reviseDraft(currentDraft, grade.feedback, weakest),
-      finalizeCtx,
+    currentDraft = await ensureGuideBlocks(
+      finalizeDraftBody(await reviseDraft(currentDraft, grade.feedback, weakest), finalizeCtx),
+      { title: draft.title },
     );
   }
 
@@ -1689,6 +1693,55 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
 export async function updateDraftBody(draftId: string, bodyMd: string): Promise<void> {
   requireDb();
   await prisma.draft.update({ where: { id: draftId }, data: { bodyMd } });
+}
+
+// Drafts whose guide boxes couldn't be fixed, keyed by id → body length, so the
+// sweep doesn't pay to retry the same unchanged body every tick.
+const guideGaveUp = new Map<string, number>();
+
+/**
+ * Give every blog waiting for a human (Ready, scheduled, or a near-miss in
+ * review; not rejected, not published) on-spec "In this guide" + "What to know
+ * first" boxes and no Quick answer block. Checking is free; only a draft that's
+ * off-spec costs a small call. Runs on a scheduler tick, a few drafts at a time,
+ * so it also catches anything a boost, refresh or edit left off-spec.
+ */
+export async function sweepGuideBlocks(max = 4): Promise<number> {
+  requireDb();
+  const drafts = await prisma.draft.findMany({
+    where: {
+      status: { in: ["PASSED", "FAILED"] },
+      rejectedAt: null,
+      page: { is: null },
+      processingStartedAt: null,
+      boostRequestedAt: null,
+    },
+    select: { id: true, title: true, bodyMd: true },
+    orderBy: { updatedAt: "desc" },
+    take: 300,
+  });
+  let fixed = 0;
+  for (const d of drafts) {
+    if (fixed >= max) break;
+    if (guideGaveUp.get(d.id) === d.bodyMd.length) continue;
+    const issues = guideIssues(d.bodyMd);
+    if (!issues.length) continue;
+    try {
+      const next = await trackDraftCost(d.id, () => ensureGuideBlocks(d.bodyMd, { title: d.title }));
+      if (guideIssues(next).length) guideGaveUp.set(d.id, next.length);
+      if (next === d.bodyMd) continue;
+      // Only write if nobody edited the draft meanwhile.
+      const res = await prisma.draft.updateMany({ where: { id: d.id, bodyMd: d.bodyMd }, data: { bodyMd: next } });
+      if (res.count) {
+        fixed++;
+        console.log(`[guide] added/fixed boxes on "${d.title}" (${issues.join("; ")})`);
+      }
+    } catch (e) {
+      guideGaveUp.set(d.id, d.bodyMd.length);
+      console.error(`[guide] failed on "${d.title}":`, e instanceof Error ? e.message : e);
+    }
+  }
+  return fixed;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1951,7 +2004,7 @@ export async function refreshPublishedPost(draftId: string): Promise<{ refreshed
   const year = new Date().getFullYear();
   const note =
     `Refresh this published article for ${year}. Update any dates, prices, statistics, and "as of" ` +
-    `references so they are current and accurate. Strengthen the opening "Quick answer" block and each ` +
+    `references so they are current and accurate. Strengthen the intro's opening answer and each ` +
     `section's first sentence so an AI answer engine can quote it verbatim. Add depth where a competitor ` +
     `would be more complete, and fix anything outdated. Keep it strictly accurate — do NOT fabricate ` +
     `numbers or business-operations details. Preserve the structure, tone, links, and the JSON-LD schema.`;

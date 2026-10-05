@@ -12,18 +12,28 @@ const templateGuidance = (ind: IndustryPack) => `Write the page as Markdown.
 LENGTH — this matters: hit the target word count and DO NOT exceed it by more than ~10%. Tighter is better; cut anything that repeats or pads. A focused page outranks a bloated one.
 
 STRUCTURE:
-- Answer-first intro that satisfies the search intent in the first 1–2 sentences.
-- A short table of contents.
+- Answer-first intro (plain prose, not bold, no "Quick answer" label or box) that satisfies the search intent in the first 1–2 sentences.
+- Right after the intro, these two sections, in this exact format:
+
+## In this guide
+
+1. [Short Reader-Friendly Label](#heading-anchor)
+(up to 6 entries, in article order; each points at one of your own H2/H3 headings by its anchor — the heading lowercased, punctuation removed, spaces as hyphens; the label is a short plain name for the section and need not repeat the heading word for word)
+
+## What to know first
+
+- One plain sentence of at most 15 words.
+(EXACTLY 5 bullets; each a complete sentence of 8–15 words, never more than 15, stating one concrete point the article makes; no bold, no links)
 - Clear H2/H3 sections; a step-by-step "how-to" where the topic calls for it.
 - Self-contained passages of ~130–170 words under key headings so AI answer engines can quote them verbatim.
 - An FAQ section near the end (each answer self-contained, ~40–70 words).
 - 2–4 links to authoritative EXTERNAL sources (prefer .gov / recognized institutions), placed inline where a claim needs backing. Only link to a real URL you are confident exists.
-- Do NOT invent internal links to the site's own pages — never write a relative link like [text](/caskets/pricing-guide) or guess the site's URL structure. Internal links to real published pages are added automatically by the system. The ONLY internal links you may write are in-page jump links in the table of contents that point to your own H2/H3 headings (e.g. [Oversized Caskets](#oversized-caskets)).
+- Do NOT invent internal links to the site's own pages — never write a relative link like [text](/caskets/pricing-guide) or guess the site's URL structure. Internal links to real published pages are added automatically by the system. The ONLY internal links you may write are the in-page jump links in "In this guide" that point to your own H2/H3 headings (e.g. [Oversized Caskets](#oversized-caskets)).
 - Soft calls-to-action at the top and bottom (never pushy).
 - End with a fenced \`\`\`json block of valid JSON-LD for the required schema types, with complete fields (datePublished/author where applicable). The JSON-LD MUST be complete and valid — never truncate it. If you're running low on room, shorten the prose, never the schema.
 
 GEO — BUILT TO BE QUOTED BY AI ANSWER ENGINES (ChatGPT, Perplexity, Google AI Overviews, Gemini). This matters as much as ranking in Google — the goal is for an AI to lift YOUR text as its answer and cite this site:
-- Open with a "Quick answer": the FIRST thing right after the H1, before the table of contents, is a bold 2–4 sentence self-contained answer to the exact question the title asks. Lead with the number/range/verdict, then one sentence of context. An AI must be able to quote it verbatim and have a complete, accurate answer with zero other context.
+- Do NOT write a "Quick answer" block, label or bold answer box. Instead, the intro's first 1–2 sentences answer the exact question the title asks in plain prose: lead with the number/range/verdict, so an AI can quote them as a complete, accurate answer.
 - Under EVERY H2, the first 1–2 sentences must directly and completely answer that section's implied question — no "as mentioned above", no pronouns pointing elsewhere, no setup. Every passage must stand on its own when pulled out of context.
 - State key facts as clean, standalone, attributable sentences with concrete numbers, ranges, or named standards (e.g. ${ind.key === "headstones" ? '"A standard single flat grave marker is 24 inches wide, 12 inches deep and 4 inches thick."' : '"A standard adult casket is about 84 inches long and 28 inches wide."'}). Specific, quotable facts beat vague prose.
 - Mention the brand naturally where it fits so the source is attributable (never spammy).
@@ -51,7 +61,7 @@ Write in the brand voice provided.`;
 // the specifics come from the industry pack.
 const localGuidance = (ind: IndustryPack) => `
 THIS IS A LOCAL (geo-targeted) PAGE — optimize hard for local SEO + AEO:
-- Name the specific city/metro AND its state in the H1, the Quick answer, the first sentence of the intro, and the meta-worthy opening. The reader (and the AI) must instantly know this page is about THAT place.
+- Name the specific city/metro AND its state in the H1, the first sentence of the intro, and the meta-worthy opening. The reader (and the AI) must instantly know this page is about THAT place.
 ${ind.blogLocalGuidance}
 - Use LocalBusiness/Article + FAQPage JSON-LD where the required schema allows.`;
 
@@ -89,7 +99,7 @@ Rules:
 - Make surgical edits that directly address the feedback. Keep everything that already works.
 - NEVER add length to fix a problem — improve quality by cutting, not padding.
 - If the feedback flags length, bloat, or padding: CUT AGGRESSIVELY toward the target — delete whole redundant passages, merge overlapping sections, remove filler and hedging. A shorter, tighter version that keeps the substance is the goal.
-- Preserve the structure, the FAQ, and the JSON-LD block (keep it COMPLETE and valid — never truncate the schema).
+- Preserve the structure, the "In this guide" and "What to know first" sections (keep their links pointing at real headings; exactly 5 takeaways of at most 15 words), the FAQ, and the JSON-LD block (keep it COMPLETE and valid — never truncate the schema).
 - The piece must be complete and publishable as-is: remove any leftover placeholder callouts, bracketed TODOs, or "> **Add your experience:**" markers.
 - Do not introduce AI-slop tells (em-dash spam, "in conclusion", "it's important to note", reflexive hedging).
 - Return the full revised Markdown (not a diff).

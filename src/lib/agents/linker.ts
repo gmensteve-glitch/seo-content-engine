@@ -6,6 +6,7 @@
 
 import { structured, MODELS } from "@/lib/ai/claude";
 import { aiEnabled } from "@/lib/env";
+import { guideRanges } from "@/lib/agents/guide-blocks";
 
 export interface LinkTarget {
   pageId: string;
@@ -135,7 +136,8 @@ function findUnlinkedOccurrence(text: string, anchor: string): number {
     const lineStart = text.lastIndexOf("\n", idx) + 1;
     const isHeading = /^\s{0,3}#{1,6}\s/.test(text.slice(lineStart, idx + anchor.length));
     const alreadyLinked = before === "[" || after === "](";
-    if (!alreadyLinked && !isHeading) return idx;
+    const inGuideBox = guideRanges(text).some(([s, e]) => idx >= s && idx < e);
+    if (!alreadyLinked && !isHeading && !inGuideBox) return idx;
     from = idx + anchor.length;
   }
   return -1;

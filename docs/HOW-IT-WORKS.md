@@ -49,6 +49,7 @@ Ideas ──► Brief ──► [approve] ──► Write ──► Grade ──
 | Brief | `agents/research.ts` | Opus | Angle, outline, questions, gap. SERP + competitor scrape only if DataForSEO/Firecrawl are on (they're off; it degrades). |
 | Write | `agents/writer.ts` | Opus | Markdown draft in the SEO/AEO template: quick answer, H2s, FAQ, JSON-LD. Industry pack supplies the legal rule and what must never be invented about our own operations. |
 | Grade | `agents/grader.ts`, `grader/rubric.ts` | Sonnet | 0–100 across eight dimensions; `writer.reviseDraft` fixes the weakest; loops until it passes the store's `qualityThreshold` or runs out of loops. |
+| Guide boxes | `agents/guide-blocks.ts` | Sonnet (only when off-spec) | "In this guide" (≤6 jump links) + "What to know first" (exactly 5 takeaways, ≤15 words each) after the intro; no Quick answer. Enforced after write/revise and by the `sweepGuideBlocks` tick for everything in Ready/review. |
 | Finalize | `agents/finalize.ts`, `agents/linker.ts` | — | Strips placeholders, guarantees valid JSON-LD, adds internal links to real published pages. |
 | Boost | `boostDraft` in `pipeline/service.ts` | Sonnet/Opus | A near-miss gets real product facts (from Shopify) woven in and is re-graded. |
 | Publish | `publishNow` in `pipeline/service.ts`, `cms/shopify.ts` | — | Creates a **hidden** article in the store's Shopify blog. Throws on failure (never pretends). |

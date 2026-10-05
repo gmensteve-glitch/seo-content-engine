@@ -22,6 +22,7 @@ const REPLENISH_INTERVAL_MS = 6 * 60 * 60 * 1000; // every 6 hours
 const GSC_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // pull Search Console data twice a day
 const GEO_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // check AI-answer citations once a day
 const REFRESH_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000; // refresh a couple stale posts every ~3 days
+const GUIDE_INTERVAL_MS = 2 * 60 * 1000; // guide boxes on Ready/review drafts, a few at a time
 const BOOT_DELAY_MS = 30 * 1000; // let the server settle before the first tick
 
 // Survive module re-evaluation / HMR: stash the singleton on globalThis.
@@ -44,6 +45,18 @@ async function boostTick(): Promise<void> {
     if (n) console.log(`[scheduler] processed ${n} boost request(s)`);
   } catch (e) {
     console.error("[scheduler] boost tick failed:", e instanceof Error ? e.message : e);
+  }
+}
+
+// Guide boxes ("In this guide" / "What to know first") on every blog waiting
+// in Ready or review — a few per tick, only off-spec drafts cost anything.
+async function guideTick(): Promise<void> {
+  try {
+    const { sweepGuideBlocks } = await import("@/lib/pipeline/service");
+    const n = await sweepGuideBlocks();
+    if (n) console.log(`[scheduler] added guide boxes to ${n} draft(s)`);
+  } catch (e) {
+    console.error("[scheduler] guide tick failed:", e instanceof Error ? e.message : e);
   }
 }
 
@@ -167,7 +180,10 @@ export function startScheduler(): void {
     void autoAdvanceTick();
     void gscSyncTick();
     void geoSyncTick();
+    void guideTick();
   }, BOOT_DELAY_MS);
+
+  setInterval(() => void guideTick(), GUIDE_INTERVAL_MS);
 
   setInterval(() => void workerTick(), WORKER_INTERVAL_MS);
   setInterval(() => void boostTick(), WORKER_INTERVAL_MS);
