@@ -3,7 +3,8 @@ import { Shell } from "@/components/shell";
 import { PageHeader, Pill } from "@/components/ui";
 import { getIdeas, getBusiness } from "@/lib/data/repo";
 import type { IdeaVM } from "@/lib/data/types";
-import { buildBriefAction, dismissIdeaAction, generateIdeasAction } from "@/app/actions";
+import { buildBriefAction, dismissIdeaAction } from "@/app/actions";
+import { GenerateIdeasButton } from "@/components/generate-ideas-button";
 import { Sparkles, FileText, X, Tag, MapPin, BookOpen, SlidersHorizontal } from "lucide-react";
 import { SubmitButton } from "@/components/submit-button";
 
@@ -119,11 +120,7 @@ export default async function IdeasPage() {
           title="Idea box"
           subtitle="Scored for opportunity, best first. Click Build blog on any idea and the engine writes it and drops it in Ready. Generating adds a fresh batch — it never replaces what's here."
         />
-        <form action={generateIdeasAction}>
-          <button className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110">
-            <Sparkles size={15} /> Generate ideas
-          </button>
-        </form>
+        <GenerateIdeasButton />
       </div>
 
       {/* Content mix — read-only summary; adjust it (and the quality bar) on Strategy */}

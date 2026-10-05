@@ -354,6 +354,24 @@ export async function generateIdeas(
   count = 6,
   mix?: { local: number; evergreen: number },
 ): Promise<number> {
+  return (await generateIdeasReport(businessId, count, mix)).added;
+}
+
+export interface IdeaGenerationReport {
+  proposed: number;
+  added: number;
+  /** Proposals dropped as repeats: the proposal and what it repeats. */
+  repeats: { title: string; of: string }[];
+  offTopic: number;
+  livePosts: number;
+}
+
+/** generateIdeas, plus what happened to each proposal (for the Generate button). */
+export async function generateIdeasReport(
+  businessId: string,
+  count = 6,
+  mix?: { local: number; evergreen: number },
+): Promise<IdeaGenerationReport> {
   requireDb();
   const business = await prisma.business.findUnique({
     where: { id: businessId },
@@ -402,14 +420,31 @@ export async function generateIdeas(
   // Map returned pillar name → existing pillarId (best-effort, case-insensitive).
   const pillarByName = new Map(business.pillars.map((p) => [p.name.toLowerCase(), p.id]));
 
-  let added = 0;
+  const report: IdeaGenerationReport = {
+    proposed: proposals.length,
+    added: 0,
+    repeats: [],
+    offTopic: 0,
+    livePosts: liveTitles.length,
+  };
   for (const p of proposals) {
     const key = normTitle(p.title);
-    if (!key || seen.has(key)) continue; // skip dupes within-batch and vs existing
+    if (!key) continue;
+    if (seen.has(key)) {
+      report.repeats.push({ title: p.title, of: p.title }); // exact repeat
+      continue;
+    }
     // A different line of business (a casket idea on a headstone store) never lands.
-    if (industry.offTopic && (industry.offTopic.test(p.title) || industry.offTopic.test(p.targetKeyword))) continue;
+    if (industry.offTopic && (industry.offTopic.test(p.title) || industry.offTopic.test(p.targetKeyword))) {
+      report.offTopic++;
+      continue;
+    }
     // Same topic as something live, in flight or already proposed, reworded.
-    if (findDuplicate(p.title, taken)) continue;
+    const dup = findDuplicate(p.title, taken);
+    if (dup) {
+      report.repeats.push({ title: p.title, of: dup });
+      continue;
+    }
     seen.add(key);
     taken.push(p.title);
     await prisma.idea.create({
@@ -423,9 +458,12 @@ export async function generateIdeas(
         status: "PROPOSED",
       },
     });
-    added++;
+    report.added++;
   }
-  return added;
+  console.log(
+    `[ideas] ${business.name}: proposed ${report.proposed}, added ${report.added}, repeats ${report.repeats.length}, off-topic ${report.offTopic}, live posts seen ${report.livePosts}`,
+  );
+  return report;
 }
 
 /**

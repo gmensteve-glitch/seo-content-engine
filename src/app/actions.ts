@@ -14,6 +14,7 @@ import {
   unscheduleDraft,
   publishNow,
   generateIdeas,
+  generateIdeasReport,
   setLocalRatio,
   setQualityThreshold,
   requestBoostAllNearMisses,
@@ -263,14 +264,36 @@ export async function dismissIdeaAction(formData: FormData): Promise<void> {
   revalidatePath("/pipeline");
 }
 
-/** Generate a fresh batch of ideas for the current business (top of the funnel). */
-export async function generateIdeasAction(formData: FormData): Promise<void> {
+export type GenerateIdeasResult = { ok: boolean; message: string; skipped?: string[] } | null;
+
+/** Generate a fresh batch of ideas for the current business (top of the funnel),
+ *  and say what happened — added, or why each proposal was skipped. */
+export async function generateIdeasAction(_prev: GenerateIdeasResult, formData: FormData): Promise<GenerateIdeasResult> {
   const bizFromForm = formData.get("businessId");
   const bizId = bizFromForm ? String(bizFromForm) : (await getBusiness()).id;
-  await generateIdeas(bizId, 6);
-  revalidatePath("/ideas");
-  revalidatePath("/pipeline");
-  revalidatePath("/");
+  try {
+    const r = await generateIdeasReport(bizId, 6);
+    revalidatePath("/ideas");
+    revalidatePath("/pipeline");
+    revalidatePath("/");
+    const why = [
+      r.repeats.length ? `${r.repeats.length} repeated a post on your site or an idea already here` : "",
+      r.offTopic ? `${r.offTopic} off-topic for this store` : "",
+    ].filter(Boolean);
+    const message = r.added
+      ? `Added ${r.added} idea${r.added === 1 ? "" : "s"}.${why.length ? ` Skipped ${why.join(", ")}.` : ""}`
+      : r.proposed
+        ? `No new ideas: the engine proposed ${r.proposed}, but ${why.join(" and ") || "all were skipped"}. Try again for a different batch.`
+        : "The engine returned no ideas. Try again in a minute.";
+    return {
+      ok: r.added > 0,
+      message,
+      skipped: r.repeats.slice(0, 6).map((x) => (x.of === x.title ? x.title : `${x.title} — repeats “${x.of}”`)),
+    };
+  } catch (e) {
+    console.error("[ideas] generate failed:", e instanceof Error ? e.message : e);
+    return { ok: false, message: `Generating failed: ${e instanceof Error ? e.message : "unknown error"}` };
+  }
 }
 
 export async function approveBriefAction(formData: FormData): Promise<void> {

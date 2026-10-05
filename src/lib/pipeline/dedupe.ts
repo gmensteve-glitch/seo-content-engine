@@ -67,7 +67,7 @@ export function topicWords(title: string): Set<string> {
   for (const p of PLACES) t = t.split(` ${p} `).join(" ");
   const words = t
     .split(" ")
-    .filter(Boolean)
+    .filter((w) => w && !STOP.has(w)) // before stemming: "does" must not survive as "doe"
     .map(stem)
     .filter((w) => w.length > 1 && !STOP.has(w));
   return new Set(words);
@@ -92,11 +92,10 @@ export function topicSimilarity(a: string, b: string): number {
   if (!wa.size || !wb.size) return 0;
   let inter = 0;
   for (const w of wa) if (wb.has(w)) inter++;
-  const jaccard = inter / (wa.size + wb.size - inter);
-  // A short title fully contained in a longer one is the same topic
-  // ("headstone cleaning" vs "how to clean a granite headstone safely").
-  const contained = Math.min(wa.size, wb.size) >= 3 ? inter / Math.min(wa.size, wb.size) : 0;
-  return Math.max(jaccard, contained >= 0.9 ? contained : 0);
+  // Jaccard only. A "short title contained in a long one" rule looked tempting but
+  // swallowed every specific idea under a broad live post ("how much does a
+  // headstone cost" ate "upright headstone cost: tablet and base sizes…").
+  return inter / (wa.size + wb.size - inter);
 }
 
 export const DUPLICATE_THRESHOLD = 0.6;
