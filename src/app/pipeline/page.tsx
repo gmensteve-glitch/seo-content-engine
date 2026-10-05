@@ -102,8 +102,22 @@ export default async function PipelinePage() {
 
 function CardItem({ card }: { card: PipelineCard }) {
   const flag = card.flag ? FLAG[card.flag] : null;
+  const body = <CardBody card={card} flag={flag} />;
+  return card.href ? (
+    <Link
+      href={card.href}
+      className="block rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2.5 transition-colors hover:border-[var(--accent)]"
+    >
+      {body}
+    </Link>
+  ) : (
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2.5">{body}</div>
+  );
+}
+
+function CardBody({ card, flag }: { card: PipelineCard; flag: FlagMeta | null }) {
   return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2.5">
+    <>
       <div className="text-[12.5px] leading-snug">{card.title}</div>
       <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-[var(--subtle)]">
         {card.contentType === "geo" && <MapPin size={11} />}
@@ -118,6 +132,6 @@ function CardItem({ card }: { card: PipelineCard }) {
         )}
         {card.meta && <span>{card.meta}</span>}
       </div>
-    </div>
+    </>
   );
 }

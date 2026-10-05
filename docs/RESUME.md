@@ -22,7 +22,7 @@ A multi-store SEO content engine: a Next.js 16 dashboard plus Claude agents that
 ## Two product areas
 
 ### 1. Blog (automated, with one human gate)
-Ideas → brief → human approves → write → grade (0–100, revise loop) → publish as a **hidden** Shopify draft → human flips live → 90-day refresh. Code: `src/lib/pipeline/service.ts`, agents in `src/lib/agents/` (ideator, research, writer, grader, enricher, linker, finalize), scheduler in `src/lib/jobs/scheduler.ts`. Dashboard: Overview, Pipeline, Ideas, Ready to publish, Needs refresh.
+Ideas → brief → human approves → write → grade (0–100, revise loop) → publish as a **hidden** Shopify draft → human flips live → 90-day refresh. Code: `src/lib/pipeline/service.ts`, agents in `src/lib/agents/` (ideator, research, writer, grader, enricher, linker, finalize), scheduler in `src/lib/jobs/scheduler.ts`. Dashboard: Overview, Pipeline, Ideas, Ready to publish, Needs refresh. Every Pipeline card links to its blog's review page (`/review/<draftId>`; ideas link to the Idea box; a draft still being researched has nothing to open yet).
 
 ### 2. Category pages (fully manual by design)
 SEO editorial copy for every Shopify collection page. The engine writes paste-ready blocks; a person pastes them into Shopify and presses "mark as live". **There is no push-to-Shopify for category pages and there must never be one. No images. No author names or roles.** Code: `src/lib/categories/` (discover, facts, policies, industry, assemble, service), writer in `src/lib/agents/category-writer.ts`, UI in `src/app/categories/` and `src/components/category-*.tsx`. Dashboard: Category pages → Queue / Live pages. Operator SOP: the "Category Pages SOP" artifact (link in "Documents").
@@ -92,7 +92,7 @@ Every push redeploys Railway and **kills any category draft running in-process**
 - Ask the owner to share these from each artifact's share menu; they are private by default.
 
 ## Open items (as of 2026-10-01)
-- Signature Headstones: run the first scan and first hub draft (Upright Headstones); fix the FAQ template and the shipping-policy email typo on the live site.
+- Signature Headstones: its category-page drafts were downloaded by the operator and deleted from the Queue at their request (migration `20261005200000_clear_signature_category_pages`, 2026-10-05; LIVE rows kept). "Rescan site" would rediscover them. Fix the FAQ template and the shipping-policy email typo on the live site.
 - Search Console: Signature Headstones' property is saved on its connector; confirm a GSC owner added the service account to signatureheadstones.com (otherwise its Overview stays empty). Overnight still runs off the `GSC_SITE_URL` env; optionally save its property on its connector too. Casket ideas/briefs/unpublished drafts on Signature are removed automatically by `tidyBlogPipeline` (2026-10-05) and Ready refills with headstone pieces.
 - Auto-publish schedule for blogs: owner said hold off.
 - Rotate the Shopify client secrets that were pasted into chat (both stores) in the Dev Dashboard, then reconnect on Connectors.

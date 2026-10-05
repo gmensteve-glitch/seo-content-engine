@@ -164,6 +164,8 @@ export interface PipelineCard {
   score?: number; // quality/idea score
   flag?: "boost" | "rewrite" | "grading" | "researching" | "healthy"; // status accents
   contentType?: "blog" | "landing" | "geo" | "comparison" | "newsletter";
+  /** Where clicking the card goes (the blog's review page, or the Idea box). */
+  href?: string;
 }
 
 export interface IdeaVM {

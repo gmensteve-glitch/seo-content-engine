@@ -679,7 +679,7 @@ export async function getPipeline(bizId?: string): Promise<PipelineCard[]> {
     take: 3,
   });
   for (const i of ideas) {
-    cards.push({ id: i.id, title: i.title, stage: "ideas", score: i.score ?? undefined });
+    cards.push({ id: i.id, title: i.title, stage: "ideas", score: i.score ?? undefined, href: "/ideas" });
   }
 
   // Briefs — pending approval.
@@ -712,6 +712,8 @@ export async function getPipeline(bizId?: string): Promise<PipelineCard[]> {
       flag: researching ? "researching" : "grading",
       score: d.grades[0]?.overall,
       meta: researching ? "researching" : undefined,
+      // Nothing to read until the writer has produced a body.
+      href: d.bodyMd.trim() ? `/review/${d.id}` : undefined,
     });
   }
 
@@ -728,6 +730,7 @@ export async function getPipeline(bizId?: string): Promise<PipelineCard[]> {
       stage: "review",
       score: d.grades[0]?.overall,
       meta: "auto-boosting",
+      href: `/review/${d.id}`,
     });
   }
 
@@ -737,7 +740,7 @@ export async function getPipeline(bizId?: string): Promise<PipelineCard[]> {
     orderBy: { createdAt: "asc" },
   });
   for (const d of scheduled) {
-    cards.push({ id: d.id, title: d.title, stage: "scheduled", meta: "ready" });
+    cards.push({ id: d.id, title: d.title, stage: "scheduled", meta: "ready", href: `/review/${d.id}` });
   }
 
   // Live — published pages.
@@ -760,6 +763,7 @@ export async function getPipeline(bizId?: string): Promise<PipelineCard[]> {
       stage: "live",
       flag,
       meta,
+      href: p.draftId ? `/review/${p.draftId}` : undefined,
     });
   }
 
