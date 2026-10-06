@@ -15,6 +15,23 @@ export function FreeDiskButton() {
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
+  async function call(emergency: boolean) {
+    const res = await fetch("/api/review/reclaim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(emergency ? { emergency: true } : {}),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      diskFull?: boolean;
+      drafts?: number;
+      beforeBytes?: number;
+      afterBytes?: number;
+    };
+    return { ...data, ok: res.ok && data.ok !== false, error: data.error ?? (res.ok ? undefined : `Failed (HTTP ${res.status})`) };
+  }
+
   async function run() {
     if (
       !window.confirm(
@@ -26,14 +43,28 @@ export function FreeDiskButton() {
     setPending(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/review/reclaim", { method: "POST" });
-      const data = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        drafts?: number;
-        beforeBytes?: number;
-        afterBytes?: number;
-      };
-      if (!res.ok) throw new Error(data.error ?? `Failed (HTTP ${res.status})`);
+      let data = await call(false);
+      if (!data.ok && data.diskFull) {
+        // Disk 100% full: the normal clean-up can't write. Offer the emergency
+        // path, which can, at the cost of every alternative picture.
+        if (
+          !window.confirm(
+            "The database disk is completely full, so the normal clean-up can't run.\n\nEmergency option: permanently delete ALL alternative pictures in every blog's image gallery, including blogs still in Ready. Each blog keeps the one picture it uses, and its text. This frees space right away.\n\nDelete all alternative pictures now?",
+          )
+        ) {
+          throw new Error(data.error ?? "Disk is full");
+        }
+        data = await call(true);
+        if (data.ok) {
+          setMessage({
+            ok: true,
+            text: `Emergency clean-up done: database ${mb(data.beforeBytes ?? 0)} → ${mb(data.afterBytes ?? 0)}. Now click "Clear all (downloaded)", then "Free up disk space" again.`,
+          });
+          router.refresh();
+          return;
+        }
+      }
+      if (!data.ok) throw new Error(data.error ?? "Failed");
       setMessage({
         ok: true,
         text: `Done: images removed from ${data.drafts ?? 0} blog(s). Database ${mb(data.beforeBytes ?? 0)} → ${mb(data.afterBytes ?? 0)}.`,

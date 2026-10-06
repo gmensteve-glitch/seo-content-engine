@@ -2842,13 +2842,68 @@ export async function reclaimImageStorage(): Promise<{
   const ids = done.map((d) => d.id);
   await purgeImageData(ids);
   for (const table of ['"DraftImage"', '"Draft"']) {
-    await prisma.$executeRawUnsafe(`VACUUM FULL ${table}`);
+    // VACUUM FULL needs free room for the rewritten table; when there isn't
+    // enough, a plain VACUUM still makes the freed space reusable.
+    await prisma.$executeRawUnsafe(`VACUUM FULL ${table}`).catch(async (e) => {
+      console.error(`[storage] VACUUM FULL ${table} failed, running plain VACUUM:`, e instanceof Error ? e.message : e);
+      await prisma.$executeRawUnsafe(`VACUUM ${table}`);
+    });
   }
   const afterBytes = await size();
   console.log(
     `[storage] purged images of ${ids.length} draft(s); database ${Math.round(beforeBytes / 1e6)} MB -> ${Math.round(afterBytes / 1e6)} MB`,
   );
   return { drafts: ids.length, beforeBytes, afterBytes };
+}
+
+/**
+ * Emergency, for a volume that is 100% full (Postgres 53100): every normal
+ * write fails, and so do TRUNCATE and VACUUM (both need a little room to
+ * create files). DROP TABLE does not: it hands the files back at commit. So
+ * drop "DraftImage" (the gallery) and recreate it empty with the exact DDL of
+ * migration 20260821180000_draft_image_gallery. This deletes every gallery
+ * image, the alternatives of pieces still in Ready included; each draft keeps
+ * its chosen hero (heroImageData/heroImageUrl), and listDraftImages re-creates
+ * a gallery row from it when the draft is opened. Idempotent: rerunning it
+ * after a failed CREATE finishes the job. Operator-triggered only, after a
+ * second confirmation in the UI.
+ */
+export async function emptyImageGallery(): Promise<{ beforeBytes: number; afterBytes: number }> {
+  requireDb();
+  const size = async () => {
+    const rows = await prisma.$queryRawUnsafe<{ bytes: bigint }[]>(
+      "SELECT pg_database_size(current_database()) AS bytes",
+    );
+    return Number(rows[0]?.bytes ?? 0);
+  };
+  const beforeBytes = await size();
+  // Separate statements (no transaction): the DROP must commit to free the
+  // disk before CREATE needs a few pages of it.
+  await prisma.$executeRawUnsafe('DROP TABLE IF EXISTS "DraftImage"');
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "DraftImage" (
+    "id" TEXT NOT NULL,
+    "draftId" TEXT NOT NULL,
+    "source" TEXT NOT NULL,
+    "mime" TEXT,
+    "data" TEXT,
+    "url" TEXT,
+    "alt" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "DraftImage_pkey" PRIMARY KEY ("id")
+  )`);
+  await prisma.$executeRawUnsafe(
+    'CREATE INDEX IF NOT EXISTS "DraftImage_draftId_createdAt_idx" ON "DraftImage"("draftId", "createdAt")',
+  );
+  await prisma.$executeRawUnsafe(`DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'DraftImage_draftId_fkey') THEN
+      ALTER TABLE "DraftImage" ADD CONSTRAINT "DraftImage_draftId_fkey" FOREIGN KEY ("draftId") REFERENCES "Draft"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+    END IF;
+  END $$`);
+  const afterBytes = await size();
+  console.log(
+    `[storage] emergency: emptied image gallery; database ${Math.round(beforeBytes / 1e6)} MB -> ${Math.round(afterBytes / 1e6)} MB`,
+  );
+  return { beforeBytes, afterBytes };
 }
 
 /** Put a passed draft on the calendar for auto-publish at `when`. */
