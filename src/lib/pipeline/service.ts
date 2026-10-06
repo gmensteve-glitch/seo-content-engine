@@ -2808,6 +2808,49 @@ async function purgeImageData(draftIds: string[]): Promise<void> {
   });
 }
 
+/**
+ * Operator-triggered ("Free up disk space"): drop the stored image bytes of
+ * every draft that is finished with them (published, cleared or rejected), then
+ * VACUUM FULL the two tables so Postgres hands the disk back to the volume (a
+ * DELETE alone only marks the space reusable). Pieces still in Ready or in
+ * progress keep their images. VACUUM FULL locks each table while it rewrites
+ * it and needs free room for the rewritten copy, so the volume must not be
+ * 100% full when this runs. Returns the database size before and after.
+ */
+export async function reclaimImageStorage(): Promise<{
+  drafts: number;
+  beforeBytes: number;
+  afterBytes: number;
+}> {
+  requireDb();
+  const size = async () => {
+    const rows = await prisma.$queryRawUnsafe<{ bytes: bigint }[]>(
+      "SELECT pg_database_size(current_database()) AS bytes",
+    );
+    return Number(rows[0]?.bytes ?? 0);
+  };
+  const beforeBytes = await size();
+  const done = await prisma.draft.findMany({
+    where: {
+      AND: [
+        { OR: [{ status: "PUBLISHED" }, { rejectedAt: { not: null } }] },
+        { OR: [{ heroImageData: { not: null } }, { images: { some: {} } }] },
+      ],
+    },
+    select: { id: true },
+  });
+  const ids = done.map((d) => d.id);
+  await purgeImageData(ids);
+  for (const table of ['"DraftImage"', '"Draft"']) {
+    await prisma.$executeRawUnsafe(`VACUUM FULL ${table}`);
+  }
+  const afterBytes = await size();
+  console.log(
+    `[storage] purged images of ${ids.length} draft(s); database ${Math.round(beforeBytes / 1e6)} MB -> ${Math.round(afterBytes / 1e6)} MB`,
+  );
+  return { drafts: ids.length, beforeBytes, afterBytes };
+}
+
 /** Put a passed draft on the calendar for auto-publish at `when`. */
 export async function scheduleDraft(draftId: string, when: Date): Promise<void> {
   requireDb();

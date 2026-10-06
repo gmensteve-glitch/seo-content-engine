@@ -5,6 +5,7 @@ import { getReadyForReview, getBusiness } from "@/lib/data/repo";
 import { restoreFailedPublishes, promoteQualifyingDrafts } from "@/lib/pipeline/service";
 import type { PolishDraftVM } from "@/lib/data/types";
 import { ClearReadyButton } from "@/components/clear-ready-button";
+import { FreeDiskButton } from "@/components/free-disk-button";
 import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen, RefreshCw, X } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -115,6 +116,7 @@ export default async function ReadyPage() {
           subtitle="Your morning stack — finished, quality-checked pieces. Open one to read it and push it to Shopify."
         />
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <FreeDiskButton />
           <span
             className={`rounded-full px-3 py-1 text-[12px] font-medium ${
               drafts.length >= TOTAL_TARGET
