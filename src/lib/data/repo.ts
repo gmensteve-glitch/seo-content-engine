@@ -1035,6 +1035,7 @@ type PolishRow = {
   heroImageData?: string | null;
   heroImageUrl?: string | null;
   heroImageSource?: string | null;
+  selectedImageId?: string | null;
   refreshedAt?: Date | null;
 };
 
@@ -1063,7 +1064,8 @@ function toPolishVM(d: PolishRow, threshold: number): PolishDraftVM {
     loop: g?.version ?? 1,
     experienceNotes: extractExperienceNotes(d.bodyMd),
     costCents: d.costCents ?? 0,
-    hasHeroImage: Boolean(d.heroImageData || d.heroImageUrl),
+    // List queries omit heroImageData; a selected gallery image means one exists.
+    hasHeroImage: Boolean(d.heroImageData || d.heroImageUrl || d.selectedImageId),
     heroImageSource: d.heroImageSource ?? null,
     refreshedAt: d.refreshedAt ? d.refreshedAt.toISOString() : null,
     updatedAt: d.updatedAt.toISOString(),
@@ -1080,6 +1082,9 @@ export async function getReadyForReview(bizId?: string): Promise<PolishDraftVM[]
   const threshold = business?.qualityThreshold ?? 85;
   const drafts = await prisma.draft.findMany({
     where: { businessId: bizId, status: "PASSED", scheduledFor: null, rejectedAt: null },
+    // Never load the base64 hero image in a list: it is megabytes per draft and
+    // a full Ready stack of them crashed the page.
+    omit: { heroImageData: true },
     // Best grade the piece achieved — matches the stored best-version body.
     include: { brief: { include: { idea: { select: { kind: true } } } }, grades: { orderBy: { overall: "desc" }, take: 1 } },
     orderBy: { updatedAt: "desc" },
@@ -1098,6 +1103,7 @@ export async function getNeedsPolish(bizId?: string): Promise<PolishDraftVM[]> {
 
   const drafts = await prisma.draft.findMany({
     where: { businessId: bizId, status: "FAILED", rejectedAt: null },
+    omit: { heroImageData: true }, // megabytes per draft; see getReadyForReview
     include: { brief: { include: { idea: { select: { kind: true } } } }, grades: { orderBy: { overall: "desc" }, take: 1 } },
     orderBy: { updatedAt: "desc" },
   });

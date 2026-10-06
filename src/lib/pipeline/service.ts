@@ -1291,7 +1291,7 @@ export async function promoteQualifyingDrafts(businessId: string): Promise<numbe
     }),
     prisma.draft.findMany({
       where: { businessId, status: "FAILED", rejectedAt: null },
-      include: { brief: { select: { idea: { select: { kind: true } } } }, grades: { orderBy: { overall: "desc" }, take: 1 } },
+      select: { id: true, brief: { select: { idea: { select: { kind: true } } } }, grades: { orderBy: { overall: "desc" }, take: 1 } },
     }),
   ]);
   const isLocal = (d: { brief?: { idea?: { kind?: string } | null } | null }) => d.brief?.idea?.kind === "LOCAL";
