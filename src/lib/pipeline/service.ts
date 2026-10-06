@@ -2791,7 +2791,10 @@ export async function clearReadyDrafts(businessId: string, draftIds?: string[]):
     where: { id: { in: ids } },
     data: { status: "PUBLISHED", reviewedAt: new Date() },
   });
-  await purgeImageData(ids);
+  // The pieces are cleared either way; a failed image purge only costs space.
+  await purgeImageData(ids).catch((e) =>
+    console.error("[clear] image purge failed:", e instanceof Error ? e.message : e),
+  );
   return ids.length;
 }
 

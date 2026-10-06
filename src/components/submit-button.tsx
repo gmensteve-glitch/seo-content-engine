@@ -16,15 +16,12 @@ export function SubmitButton({
   pendingLabel,
   className,
   title,
-  confirm,
 }: {
   children: ReactNode;
   icon?: ReactNode;
   pendingLabel?: string;
   className?: string;
   title?: string;
-  /** Ask before submitting; cancelling stops the action. */
-  confirm?: string;
 }) {
   const { pending } = useFormStatus();
   return (
@@ -33,7 +30,6 @@ export function SubmitButton({
       disabled={pending}
       title={title}
       aria-busy={pending}
-      onClick={confirm ? (e) => { if (!window.confirm(confirm)) e.preventDefault(); } : undefined}
       className={`${className ?? ""} disabled:cursor-not-allowed disabled:opacity-60`}
     >
       {pending ? <Loader2 size={13} className="animate-spin" /> : icon}
