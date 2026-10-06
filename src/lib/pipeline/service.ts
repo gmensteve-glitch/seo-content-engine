@@ -2765,6 +2765,46 @@ export async function recordDraftFeedback(
   }
 }
 
+/**
+ * Clear pieces off the Ready list once the operator has taken them out of the
+ * engine (downloaded, or published to the store by hand). They move to
+ * PUBLISHED with no Page, so they free their Ready slot (the engine builds new
+ * ones) but never enter the refresh loop, which only picks posts with a Page.
+ * Their stored image bytes are dropped too. Pass `draftIds` to clear only those;
+ * omit it to clear the whole Ready list. Returns how many were cleared.
+ */
+export async function clearReadyDrafts(businessId: string, draftIds?: string[]): Promise<number> {
+  requireDb();
+  const ready = await prisma.draft.findMany({
+    where: {
+      businessId,
+      status: "PASSED",
+      scheduledFor: null,
+      rejectedAt: null,
+      ...(draftIds ? { id: { in: draftIds } } : {}),
+    },
+    select: { id: true },
+  });
+  const ids = ready.map((d) => d.id);
+  if (ids.length === 0) return 0;
+  await prisma.draft.updateMany({
+    where: { id: { in: ids } },
+    data: { status: "PUBLISHED", reviewedAt: new Date() },
+  });
+  await purgeImageData(ids);
+  return ids.length;
+}
+
+/** Drop the base64 image bytes (gallery rows + hero copy) for these drafts. */
+async function purgeImageData(draftIds: string[]): Promise<void> {
+  if (draftIds.length === 0) return;
+  await prisma.draftImage.deleteMany({ where: { draftId: { in: draftIds } } });
+  await prisma.draft.updateMany({
+    where: { id: { in: draftIds } },
+    data: { heroImageData: null, selectedImageId: null },
+  });
+}
+
 /** Put a passed draft on the calendar for auto-publish at `when`. */
 export async function scheduleDraft(draftId: string, when: Date): Promise<void> {
   requireDb();
@@ -3180,12 +3220,9 @@ export async function publishNow(
       cmsId = res.cmsId;
       url = res.url;
       live = true;
-      // Shopify now hosts the image — drop the base64 blob to reclaim DB space.
-      if (heroRow?.heroImageData) {
-        await prisma.draft
-          .update({ where: { id: draft.id }, data: { heroImageData: null } })
-          .catch(() => {});
-      }
+      // Shopify now hosts the image — drop the base64 blobs (hero + gallery)
+      // to reclaim DB space.
+      await purgeImageData([draft.id]).catch(() => {});
       // Shopify admin editor URL — where a hidden draft can be reviewed/previewed.
       const storeDomain = (config as Record<string, unknown>).storeDomain;
       if (platform === "shopify" && typeof storeDomain === "string" && cmsId) {

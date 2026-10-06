@@ -13,6 +13,7 @@ import {
   scheduleDraft,
   unscheduleDraft,
   publishNow,
+  clearReadyDrafts,
   generateIdeas,
   generateIdeasReport,
   setLocalRatio,
@@ -339,6 +340,16 @@ export async function scheduleDraftAction(formData: FormData): Promise<void> {
 /** Take a draft back off the calendar (return it to the ready queue). */
 export async function unscheduleDraftAction(formData: FormData): Promise<void> {
   await unscheduleDraft(String(formData.get("draftId")));
+  revalidateCalendar();
+}
+
+/** Take pieces off the Ready list once they've been downloaded or published by
+ *  hand: one piece when the form carries a draftId, otherwise the whole list. */
+export async function clearReadyAction(formData: FormData): Promise<void> {
+  const biz = await getBusiness();
+  const draftId = formData.get("draftId");
+  await clearReadyDrafts(biz.id, draftId ? [String(draftId)] : undefined);
+  revalidatePath("/ready");
   revalidateCalendar();
 }
 

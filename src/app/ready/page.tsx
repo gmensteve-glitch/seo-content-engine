@@ -4,7 +4,9 @@ import { PageHeader } from "@/components/ui";
 import { getReadyForReview, getBusiness } from "@/lib/data/repo";
 import { restoreFailedPublishes, promoteQualifyingDrafts } from "@/lib/pipeline/service";
 import type { PolishDraftVM } from "@/lib/data/types";
-import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen, RefreshCw } from "lucide-react";
+import { clearReadyAction } from "@/app/actions";
+import { SubmitButton } from "@/components/submit-button";
+import { ArrowRight, Tag, CheckCircle2, MapPin, BookOpen, RefreshCw, X } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -12,9 +14,10 @@ const TOTAL_TARGET = 10;
 
 function Row({ d }: { d: PolishDraftVM }) {
   return (
+    <div className="flex items-center gap-1.5">
     <Link
       href={`/review/${d.id}`}
-      className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 hover:bg-[var(--surface-2)]"
+      className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 hover:bg-[var(--surface-2)]"
     >
       <div className="flex w-11 shrink-0 flex-col items-center">
         <span className="text-[20px] font-semibold leading-none text-[var(--success)]">{d.overall}</span>
@@ -40,6 +43,18 @@ function Row({ d }: { d: PolishDraftVM }) {
       </div>
       <ArrowRight size={14} className="shrink-0 text-[var(--accent)]" />
     </Link>
+    <form action={clearReadyAction} className="shrink-0">
+      <input type="hidden" name="draftId" value={d.id} />
+      <SubmitButton
+        icon={<X size={14} />}
+        confirm="Take this piece off Ready? Do this after you have downloaded it."
+        title="Done with this one (downloaded or published by hand): take it off this list"
+        className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
+      >
+        {null}
+      </SubmitButton>
+    </form>
+    </div>
   );
 }
 
@@ -114,6 +129,19 @@ export default async function ReadyPage() {
           >
             {drafts.length} / {TOTAL_TARGET} ready
           </span>
+          {drafts.length > 0 && (
+            <form action={clearReadyAction}>
+              <SubmitButton
+                icon={<CheckCircle2 size={13} />}
+                pendingLabel="Clearing…"
+                confirm={`Clear all ${drafts.length} pieces from Ready? Do this only after you've downloaded them. They leave this list for good, their stored images are deleted, and the engine starts writing new ones.`}
+                title="You've downloaded these: clear the list so the engine writes new ones"
+                className="flex items-center gap-1.5 rounded-full bg-[var(--accent)] px-3.5 py-1.5 text-[12px] font-medium text-white hover:opacity-90"
+              >
+                Clear all (downloaded)
+              </SubmitButton>
+            </form>
+          )}
         </div>
       </div>
 
