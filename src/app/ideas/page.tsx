@@ -1,12 +1,16 @@
 import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { PageHeader, Pill } from "@/components/ui";
-import { getIdeas, getBusiness } from "@/lib/data/repo";
+import { getIdeas, getBusiness, getSkippedRepeats } from "@/lib/data/repo";
+import { ClosestMatch } from "@/components/closest-match";
 import type { IdeaVM } from "@/lib/data/types";
 import { buildBriefAction, dismissIdeaAction } from "@/app/actions";
 import { GenerateIdeasButton } from "@/components/generate-ideas-button";
-import { Sparkles, FileText, X, Tag, MapPin, BookOpen, SlidersHorizontal } from "lucide-react";
+import { Sparkles, FileText, X, Tag, MapPin, BookOpen, SlidersHorizontal, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { SubmitButton } from "@/components/submit-button";
+import { getLivePosts } from "@/lib/pipeline/live-posts";
+import { hasDatabase, prisma } from "@/lib/db";
+import { ThemeIdeasBox } from "@/components/theme-ideas-box";
 
 export const dynamic = "force-dynamic";
 
@@ -44,10 +48,15 @@ function IdeaCard({ i }: { i: IdeaVM }) {
                 <Tag size={10} className="mr-1 inline" />
                 {i.pillar}
               </Pill>
+              {i.origin === "THEMES" && <Pill tone="accent">From my themes</Pill>}
             </div>
+            {i.targetKeyword && (
+              <p className="mt-0.5 text-[11px] text-[var(--muted)]">Keyword: {i.targetKeyword}</p>
+            )}
             {i.rationale && (
               <p className="mt-1 text-[12px] leading-relaxed text-[var(--muted)]">{i.rationale}</p>
             )}
+            <ClosestMatch closest={i.closest} />
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -110,8 +119,14 @@ function IdeaColumn({
 }
 
 export default async function IdeasPage() {
-  const [ideas, business] = await Promise.all([getIdeas(), getBusiness()]);
+  const [ideas, business, skipped] = await Promise.all([getIdeas(), getBusiness(), getSkippedRepeats()]);
   const localRatio = business.localRatio;
+  const live = hasDatabase ? await getLivePosts(business.id).catch(() => null) : null;
+  const pillars = hasDatabase
+    ? await prisma.pillar
+        .findMany({ where: { businessId: business.id }, select: { id: true, name: true }, orderBy: { createdAt: "asc" } })
+        .catch(() => [])
+    : [];
 
   return (
     <Shell>
@@ -122,6 +137,38 @@ export default async function IdeasPage() {
         />
         <GenerateIdeasButton />
       </div>
+
+      {/* Where the "already on your store" list came from — and a hard stop if it's unreadable */}
+      {live && (
+        <div
+          className={`mb-4 flex items-start gap-2 rounded-xl border px-4 py-2.5 text-[12px] ${
+            live.ok && live.source === "shopify-admin"
+              ? "border-[var(--border)] bg-[var(--surface-1)] text-[var(--muted)]"
+              : "border-[var(--warn)] bg-[var(--surface-1)] text-[var(--text)]"
+          }`}
+        >
+          {live.ok && live.source === "shopify-admin" ? (
+            <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-[var(--success)]" />
+          ) : (
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[var(--warn)]" />
+          )}
+          <span>
+            {live.ok ? (
+              <>
+                Checking against <b className="text-[var(--text)]">{live.posts.length} posts</b> already on your store
+                {live.source === "shopify-admin" ? " (read from Shopify, including hidden and scheduled)" : " (read from the sitemap)"}.
+                {live.warning && <> {live.warning}</>}
+              </>
+            ) : (
+              <>
+                <b>Idea generation is paused.</b> {live.warning}
+              </>
+            )}
+          </span>
+        </div>
+      )}
+
+      {live?.ok && <ThemeIdeasBox pillars={pillars} />}
 
       {/* Content mix — read-only summary; adjust it (and the quality bar) on Strategy */}
       <Link
@@ -171,6 +218,22 @@ export default async function IdeasPage() {
             items={ideas.filter((i) => i.kind === "EVERGREEN")}
           />
         </div>
+      )}
+
+      {skipped.length > 0 && (
+        <details className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] px-4 py-3">
+          <summary className="cursor-pointer text-[13px] font-medium">
+            Skipped as repeats <span className="text-[var(--muted)]">({skipped.length}, last 14 days)</span>
+          </summary>
+          <ul className="mt-2 space-y-2">
+            {skipped.map((i) => (
+              <li key={i.id} className="text-[12px]">
+                <span className="font-medium">{i.title}</span>
+                <ClosestMatch closest={i.closest} />
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </Shell>
   );

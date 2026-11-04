@@ -18,7 +18,7 @@ STRUCTURE:
 ## In this guide
 
 1. Short Reader-Friendly Label
-(up to 6 numbered entries, in article order, one per main content section, leaving out the FAQ, about-the-author and brand sections; plain text only, NO links; each is a short plain name for the section and need not repeat the heading word for word)
+(up to 6 numbered entries, in article order, one per main content section, leaving out the FAQ and brand sections; plain text only, NO links; each is a short plain name for the section and need not repeat the heading word for word)
 
 ## What to know first
 
@@ -30,7 +30,8 @@ STRUCTURE:
 - 2–4 links to authoritative EXTERNAL sources (prefer .gov / recognized institutions), placed inline where a claim needs backing. Only link to a real URL you are confident exists.
 - Do NOT invent internal links to the site's own pages — never write a relative link like [text](/caskets/pricing-guide) or guess the site's URL structure. Internal links to real published pages are added automatically by the system. Do not write in-page jump links either ("In this guide" is plain text).
 - Soft calls-to-action at the top and bottom (never pushy).
-- End with a fenced \`\`\`json block of valid JSON-LD for the required schema types, with complete fields (datePublished/author where applicable). The JSON-LD MUST be complete and valid — never truncate it. If you're running low on room, shorten the prose, never the schema.
+- NO schema or code in the article: do not write JSON-LD, a \`\`\`json block, a <script> tag or any other code block. Schema is handled separately.
+- NO byline, author line or "About the Author" / "Meet the team" / "Reviewed by" section. The byline is added later from the store's real authors.
 
 GEO — BUILT TO BE QUOTED BY AI ANSWER ENGINES (ChatGPT, Perplexity, Google AI Overviews, Gemini). This matters as much as ranking in Google — the goal is for an AI to lift YOUR text as its answer and cite this site:
 - Do NOT write a "Quick answer" block, label or bold answer box. Instead, the intro's first 1–2 sentences answer the exact question the title asks in plain prose: lead with the number/range/verdict, so an AI can quote them as a complete, accurate answer.
@@ -42,12 +43,12 @@ GEO — BUILT TO BE QUOTED BY AI ANSWER ENGINES (ChatGPT, Perplexity, Google AI 
 QUALITY — this is what gets it ranked:
 - Take a clear point of view / thesis. Own the wedge from the brief; don't hedge.
 - Use concrete, verifiable specifics: real price ranges, real timeframes, named standards or regulations — but ONLY ones you are confident are real. NEVER invent a statute, statistic, citation, or source.
-- Author personas / pen names, a first-person voice, quotes, and general experience descriptions ("years in funeral service", "has helped many families") are all allowed and encouraged for warmth and authority. The ONE thing never to fabricate is a verifiable credential NUMBER or ID: no made-up professional license numbers, certification numbers, registration IDs, or membership numbers (e.g. "LFD #4471, California"). This applies in the visible text AND in the JSON-LD author. A persona may describe general background and speak in quotes, but must never cite a specific license/registration/certification number that doesn't exist.
+- NO INVENTED PEOPLE, EVER. Do not create pen names, personas, authors, experts, staff members, customers or families. No "About the Author" section. No made-up staff names ("our engraver Maria"). No quotes attributed to anyone (invented or real) and no testimonials. No customer stories or anecdotes ("one family we helped…", "a widow told us…"). No first-person persona voice ("I've helped hundreds of families", "in my 20 years"). No credentials, licence numbers or job titles for anyone. Write as the store, in plain second person to the reader ("you"), with "we" only for the store itself. Authority comes from accurate, specific facts and real cited sources, never from a person.
 - Real-world PRICING and market facts are ENCOURAGED and valuable: ${ind.productNoun}/service cost ranges, local and regional price estimates, typical fees, and what things generally cost are all welcome — keep them realistic and, where possible, framed as ranges or "typically". What you must NEVER do is fabricate specifics about how THIS business itself operates: ${ind.blogOperationalRule} Presented as fact, invented operational details read as PROMISES about our business and create real liability. When the topic touches our shipping, delivery, or timing, stay BROAD: say timelines vary by destination and carrier, and tell the reader to confirm exact timing and handling with us and the shipping provider directly. Likewise, never assert how a SPECIFIC third-party ${ind.venue} operates (its exact steps, fees, hours, or timelines) as fact — give general industry norms and tell the reader to verify with their chosen ${ind.venue}. (Pricing and general facts are fine; inventing OUR operational process is not.)
 - THE LAW, STATED ACCURATELY: ${ind.legalRule} ${ind.legalDontSay}${ind.primer ? `\n\n${ind.primer}` : ""}
 - Write like an experienced practitioner: specific, plain, reassuring.
 - BAN these AI-slop tells: em-dash overuse, "in conclusion", "it's important to note", "when it comes to", "navigate/navigating", "delve", "in today's world", and reflexive hedging ("generally", "typically", "often") unless genuinely warranted.
-- Write the strongest, COMPLETE version you can using the personas, general experience, and verifiable specifics allowed above. This pipeline is fully automated — there is no human to fill in blanks later. Do NOT insert placeholder callouts, bracketed TODOs, "[add …]" notes, or "> **Add your experience:**" markers. The piece must be finished and publishable exactly as written.
+- Write the strongest, COMPLETE version you can using the verifiable specifics allowed above. This pipeline is fully automated — there is no human to fill in blanks later. Do NOT insert placeholder callouts, bracketed TODOs, "[add …]" notes, or "> **Add your experience:**" markers. The piece must be finished and publishable exactly as written.
 
 TONE — warm and personal: you're talking to a grieving family, not writing a spec sheet. Lead with empathy and reassurance, use plain human language, and be genuinely helpful before anything else. Keep the brand voice below, but never let it get cold, corporate, or salesy.
 
@@ -63,7 +64,7 @@ const localGuidance = (ind: IndustryPack) => `
 THIS IS A LOCAL (geo-targeted) PAGE — optimize hard for local SEO + AEO:
 - Name the specific city/metro AND its state in the H1, the first sentence of the intro, and the meta-worthy opening. The reader (and the AI) must instantly know this page is about THAT place.
 ${ind.blogLocalGuidance}
-- Use LocalBusiness/Article + FAQPage JSON-LD where the required schema allows.`;
+`;
 
 export async function writeDraft(
   brief: BriefSpec,
@@ -76,7 +77,7 @@ export async function writeDraft(
   const ind = opts.industry ?? INDUSTRIES.general;
   const rules = houseRules.trim() ? `\n\n${houseRules.trim()}\n` : "";
   const local = opts.local ? `\n${localGuidance(ind)}\n` : "";
-  const prompt = `BRAND VOICE:\n${brandVoice}\n\nBRIEF:\nTitle: ${brief.title}\nTarget keyword: ${brief.targetKeyword}\nAngle / wedge: ${brief.angle}\nTarget length: ~${brief.wordTarget} words\nRequired schema: ${brief.requiredSchema.join(", ")}\nOutline:\n${brief.outline.map((s) => `- ${s}`).join("\n")}\nQuestions to answer:\n${brief.questions.map((q) => `- ${q}`).join("\n")}\nGap to fill (what competitors miss): ${brief.gap}\n\n${templateGuidance(ind)}${local}${rules}`;
+  const prompt = `BRAND VOICE:\n${brandVoice}\n\nBRIEF:\nTitle: ${brief.title}\nTarget keyword: ${brief.targetKeyword}\nAngle / wedge: ${brief.angle}\nTarget length: ~${brief.wordTarget} words\nOutline:\n${brief.outline.map((s) => `- ${s}`).join("\n")}\nQuestions to answer:\n${brief.questions.map((q) => `- ${q}`).join("\n")}\nGap to fill (what competitors miss): ${brief.gap}\n\n${templateGuidance(ind)}${local}${rules}`;
 
   return completeText({ model: MODELS.writer, prompt, maxTokens: 20000 });
 }
@@ -99,7 +100,9 @@ Rules:
 - Make surgical edits that directly address the feedback. Keep everything that already works.
 - NEVER add length to fix a problem — improve quality by cutting, not padding.
 - If the feedback flags length, bloat, or padding: CUT AGGRESSIVELY toward the target — delete whole redundant passages, merge overlapping sections, remove filler and hedging. A shorter, tighter version that keeps the substance is the goal.
-- Preserve the structure, the "In this guide" and "What to know first" sections (plain-text entries with no links, at most 6; exactly 5 takeaways of at most 15 words), the FAQ, and the JSON-LD block (keep it COMPLETE and valid — never truncate the schema).
+- Preserve the structure, the "In this guide" and "What to know first" sections (plain-text entries with no links, at most 6; exactly 5 takeaways of at most 15 words) and the FAQ.
+- Never add JSON-LD, a \`\`\`json block or any code; remove any that is there.
+- No invented people: remove any byline, "About the Author" section, persona, staff name, quote, testimonial or customer story, and never add one.
 - The piece must be complete and publishable as-is: remove any leftover placeholder callouts, bracketed TODOs, or "> **Add your experience:**" markers.
 - Do not introduce AI-slop tells (em-dash spam, "in conclusion", "it's important to note", reflexive hedging).
 - Return the full revised Markdown (not a diff).

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Shell } from "@/components/shell";
 import { getPolishDraft } from "@/lib/data/repo";
 import { ReviewEditor } from "./ReviewEditor";
+import { CopyPackagePanel } from "@/components/copy-package-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,7 @@ export default async function ReviewDraftPage({
 
   return (
     <Shell>
+      <CopyPackagePanel draftId={draft.id} />
       <ReviewEditor initial={draft} />
     </Shell>
   );

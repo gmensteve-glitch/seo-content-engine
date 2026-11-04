@@ -83,6 +83,7 @@ model Business {
   geo         GeoCitation[]
   recommendations Recommendation[]
   categoryPages CategoryPage[]
+  themeSuggestions ThemeSuggestion[]
 
   @@index([domain])
 }
@@ -356,8 +357,43 @@ model Idea {
   rationale  String?    @db.Text
   kind       IdeaKind   @default(EVERGREEN) // LOCAL (geo-targeted) vs EVERGREEN
   status     IdeaStatus @default(PROPOSED)
+  // The search query the blog targets. For "From my themes" ideas it is the
+  // keyword the operator typed, and it becomes the brief's target keyword.
+  targetKeyword String?
+  // "ENGINE" (auto-generated) or "THEMES" (from the operator's themes & keywords box).
+  origin     String     @default("ENGINE")
+  theme      String? // the theme/keyword line a THEMES idea came from
+  // Closest existing topic (a Shopify post, an idea or a draft) from the
+  // meaning-based duplicate check, with its similarity 0–100.
+  closestTitle      String?
+  closestUrl        String?
+  closestSource     String? // "shopify" | "idea" | "draft" | "theme"
+  closestSimilarity Int?
+  closestCheckedAt  DateTime?
   brief      Brief?
   createdAt  DateTime   @default(now())
+}
+
+/// Every title the "Ideas from my themes & keywords" box suggested, picked or
+/// not, so the same theme is not suggested again and future duplicate checks
+/// know about it.
+model ThemeSuggestion {
+  id                String   @id @default(cuid())
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId        String
+  theme             String // the line the operator typed (theme or keyword)
+  kind              IdeaKind @default(EVERGREEN)
+  pillarId          String?
+  title             String
+  closestTitle      String?
+  closestUrl        String?
+  closestSource     String?
+  closestSimilarity Int?
+  picked            Boolean  @default(false)
+  ideaId            String? // the Idea it became, once picked
+  createdAt         DateTime @default(now())
+
+  @@index([businessId, createdAt])
 }
 
 enum IdeaKind {
@@ -440,6 +476,10 @@ model Draft {
   // Hero image, chosen at write time and swappable on the review page. For an
   // AI-generated image the bytes live in heroImageData (base64) until publish
   // (Shopify then hosts it); for a stock/product photo only heroImageUrl is set.
+  // Copy package: the SEO title (≤60 chars) and meta description (150–160)
+  // written for manual publishing. Null until first generated.
+  seoTitle        String?
+  metaDescription String?  @db.Text
   heroImageUrl    String?
   heroImageAlt    String?  @db.Text
   heroImageData   String?  @db.Text // base64 (AI images), cleared after publish

@@ -1,11 +1,15 @@
 // Auto-finalize a written draft so no mechanical defect ever reaches the Ready
-// list. Runs BEFORE grading, so the score reflects the cleaned piece. Two hard
+// list. Runs BEFORE grading, so the score reflects the cleaned piece. Hard
 // guarantees:
 //   1. No leftover "> **Add your experience:**" placeholder callouts (a template
 //      artifact — in a hands-off pipeline there's no human to fill them).
-//   2. The trailing JSON-LD block always parses as valid JSON. If the writer
-//      truncated it (ran out of tokens mid-schema) or emitted invalid JSON, we
-//      rebuild a clean, valid schema graph from the article itself.
+//   2. No JSON-LD (or any ```json block) in the article body. Schema is kept
+//      separate: buildSchemaJsonLd makes it from the article for the copy
+//      package, where the operator can use it or ignore it.
+//   3. No "About the Author" sections or bylines (no invented people; the
+//      byline comes from the store's real Shopify authors at copy time).
+
+import { stripAuthorSections } from "@/lib/agents/no-invented-people";
 
 export interface FinalizeContext {
   title: string;
@@ -26,14 +30,18 @@ export function stripPlaceholders(md: string): string {
     .trimEnd();
 }
 
-/** Split off the trailing ```json fence (closed OR truncated) from the body. */
-function splitTrailingJsonLd(md: string): { body: string; jsonText: string | null } {
-  const idx = md.lastIndexOf("```json");
-  if (idx === -1) return { body: md, jsonText: null };
-  const after = md.slice(idx + "```json".length);
-  const close = after.indexOf("```");
-  const jsonText = (close === -1 ? after : after.slice(0, close)).trim();
-  return { body: md.slice(0, idx).trimEnd(), jsonText };
+/**
+ * Remove every ```json / ```ld+json fence (closed, or unterminated at the end
+ * because the writer ran out of room) and any raw <script type="application/
+ * ld+json"> block from the body.
+ */
+export function stripJsonLdBlocks(md: string): string {
+  return md
+    .replace(/```(?:json|ld\+json|jsonld|json-ld)\b[\s\S]*?```/gi, "")
+    .replace(/```(?:json|ld\+json|jsonld|json-ld)\b[\s\S]*$/i, "")
+    .replace(/<script[^>]*application\/ld\+json[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
 }
 
 /** Best-effort parse of the article's FAQ section into {q,a} pairs. */
@@ -78,8 +86,9 @@ function parseFaq(body: string): { q: string; a: string }[] {
   return pairs.slice(0, 12);
 }
 
-/** Build a guaranteed-valid JSON-LD graph from the article itself. */
-function buildJsonLd(body: string, ctx: FinalizeContext): string {
+/** A valid JSON-LD graph (Article + FAQPage) built from the article itself, for
+ *  the copy package. Author and publisher are the store, never a person. */
+export function buildSchemaJsonLd(body: string, ctx: FinalizeContext): string {
   const graph: Record<string, unknown>[] = [
     {
       "@type": "Article",
@@ -105,24 +114,10 @@ function buildJsonLd(body: string, ctx: FinalizeContext): string {
   return JSON.stringify({ "@context": "https://schema.org", "@graph": graph }, null, 2);
 }
 
-function isValidJson(s: string): boolean {
-  try {
-    JSON.parse(s);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * Finalize a draft body: strip placeholders and guarantee a valid JSON-LD block.
- * Keeps the writer's own schema when it's valid; rebuilds it when it isn't.
+ * Finalize a draft body: strip placeholders, any JSON-LD block, and author
+ * sections/bylines. Returns the article only.
  */
-export function finalizeDraftBody(md: string, ctx: FinalizeContext): string {
-  const cleaned = stripPlaceholders(md);
-  const { body, jsonText } = splitTrailingJsonLd(cleaned);
-
-  // Keep the writer's schema if it's present and valid; otherwise rebuild.
-  const jsonLd = jsonText && isValidJson(jsonText) ? jsonText : buildJsonLd(body, ctx);
-  return `${body}\n\n\`\`\`json\n${jsonLd}\n\`\`\`\n`;
+export function finalizeDraftBody(md: string): string {
+  return `${stripAuthorSections(stripJsonLdBlocks(stripPlaceholders(md)))}\n`;
 }

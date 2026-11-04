@@ -57,7 +57,7 @@ export default async function RefreshPage() {
           </div>
           <div className="space-y-2">
             {stale.map((p) => (
-              <Card key={p.draftId} className="flex items-center gap-3">
+              <Card key={p.draftId ?? p.url ?? p.title} className="flex items-center gap-3">
                 <span
                   className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
                     p.decaying
@@ -92,6 +92,16 @@ export default async function RefreshPage() {
                     )}
                   </div>
                 </div>
+                {!p.draftId ? (
+                  <span
+                    className="shrink-0 text-right text-[11px] text-[var(--muted)]"
+                    title="This post wasn't written by the engine, so update it by hand in Shopify"
+                  >
+                    Not written by the engine:
+                    <br />
+                    update it in Shopify
+                  </span>
+                ) : (
                 <form action={refreshOnePostAction} className="shrink-0">
                   <input type="hidden" name="draftId" value={p.draftId} />
                   <SubmitButton
@@ -103,6 +113,7 @@ export default async function RefreshPage() {
                     Refresh
                   </SubmitButton>
                 </form>
+                )}
               </Card>
             ))}
           </div>

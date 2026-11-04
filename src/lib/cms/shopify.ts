@@ -4,6 +4,7 @@
 
 import type {
   CmsAdapter,
+  CmsArticle,
   CmsPage,
   PublishInput,
   PublishResult,
@@ -46,7 +47,7 @@ export class ShopifyAdapter implements CmsAdapter {
     let netErr: unknown;
     for (let attempt = 0; attempt < 3 && !res; attempt++) {
       try {
-        res = await fetch(url, { ...init, headers: this.headers() });
+        res = await fetch(url, { ...init, headers: this.headers(), signal: AbortSignal.timeout(30000) });
       } catch (e) {
         netErr = e;
         if (attempt < 2) await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
@@ -169,6 +170,82 @@ export class ShopifyAdapter implements CmsAdapter {
       title: a.title,
       updatedAt: a.updated_at,
     }));
+  }
+
+  /** One GET of an absolute Admin URL, returning the JSON and the next page's
+   *  URL from Shopify's cursor pagination (Link: <…page_info=…>; rel="next"). */
+  private async getPage<T>(url: string): Promise<{ data: T; next: string | null }> {
+    let res: Response | null = null;
+    let netErr: unknown;
+    for (let attempt = 0; attempt < 3 && !res; attempt++) {
+      try {
+        res = await fetch(url, { headers: this.headers(), signal: AbortSignal.timeout(30000) });
+        if (res.status === 429 && attempt < 2) {
+          res = null; // rate limited: back off and retry
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        }
+      } catch (e) {
+        netErr = e;
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      }
+    }
+    if (!res) throw new Error(`couldn't reach ${this.cfg.storeDomain} (${netErr instanceof Error ? netErr.message : "network error"})`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Shopify GET ${url.replace(this.base(), "")} → HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
+    }
+    const link = res.headers.get("link") ?? "";
+    const next = link.split(",").find((part) => /rel="?next"?/.test(part))?.match(/<([^>]+)>/)?.[1] ?? null;
+    return { data: (await res.json()) as T, next };
+  }
+
+  /** Every article in every blog on the store, any status, to the last page.
+   *  Read-only (GET only). Real titles and handles, straight from Shopify. */
+  async listAllArticles(): Promise<CmsArticle[]> {
+    const blogs: Array<{ id: number; handle: string; title: string }> = [];
+    let url: string | null = `${this.base()}/blogs.json?limit=250&fields=id,handle,title`;
+    for (let page = 0; url && page < 20; page++) {
+      const { data, next }: { data: { blogs?: typeof blogs }; next: string | null } = await this.getPage(url);
+      blogs.push(...(data.blogs ?? []));
+      url = next;
+    }
+    const now = Date.now();
+    const out: CmsArticle[] = [];
+    for (const blog of blogs) {
+      type Row = {
+        id: number;
+        title: string;
+        handle: string;
+        published_at: string | null;
+        updated_at: string;
+        author: string | null;
+        tags: string | null;
+      };
+      let next: string | null =
+        `${this.base()}/blogs/${blog.id}/articles.json?limit=250&published_status=any` +
+        `&fields=id,title,handle,published_at,updated_at,author,tags`;
+      for (let page = 0; next && page < 200; page++) {
+        const res: { data: { articles?: Row[] }; next: string | null } = await this.getPage(next);
+        for (const a of res.data.articles ?? []) {
+          const at = a.published_at ? Date.parse(a.published_at) : NaN;
+          out.push({
+            cmsId: String(a.id),
+            title: a.title,
+            handle: a.handle,
+            url: this.articleUrl(blog.handle, a.handle),
+            blogHandle: blog.handle,
+            blogTitle: blog.title,
+            status: !a.published_at ? "hidden" : at > now ? "scheduled" : "published",
+            author: a.author?.trim() || null,
+            tags: (a.tags ?? "").split(",").map((t) => t.trim()).filter(Boolean),
+            publishedAt: a.published_at,
+            updatedAt: a.updated_at,
+          });
+        }
+        next = res.next;
+      }
+    }
+    return out;
   }
 
   async healthCheck(): Promise<{ ok: boolean; message?: string }> {

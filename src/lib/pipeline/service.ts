@@ -21,7 +21,8 @@ import { gradeDraft } from "@/lib/agents/grader";
 import { planLinks, applyLinks, type LinkTarget, type PlannedLink } from "@/lib/agents/linker";
 import { generateIdeaProposals, type IdeationContext } from "@/lib/agents/ideator";
 import { enrichDraft, rewritePassage, hasResources, type EnrichResources } from "@/lib/agents/enricher";
-import { finalizeDraftBody } from "@/lib/agents/finalize";
+import { finalizeDraftBody, stripJsonLdBlocks } from "@/lib/agents/finalize";
+import { stripAuthorSections, inventedPeopleFlags } from "@/lib/agents/no-invented-people";
 import { ensureGuideBlocks, guideIssues, stripGuideBlocks } from "@/lib/agents/guide-blocks";
 import { withCostScope } from "@/lib/ai/cost";
 import { completeText, MODELS } from "@/lib/ai/claude";
@@ -38,12 +39,17 @@ async function trackDraftCost<T>(draftId: string, fn: () => Promise<T>): Promise
 }
 import { serpTop } from "@/lib/connectors/dataforseo";
 import { scrapeMany } from "@/lib/connectors/firecrawl";
-import { fetchGscRows, strikingDistance, decayingPages, gscQuery, searchAnalytics } from "@/lib/connectors/gsc";
+import { fetchGscRows, decayingPages, gscQuery, searchAnalytics } from "@/lib/connectors/gsc";
 import { askAnswerEngine } from "@/lib/connectors/perplexity";
 import { postRecommendationToSlack } from "@/lib/connectors/slack";
 import { clientCredentialsToken } from "@/lib/connectors/shopify-oauth";
+import { freshCmsConfig } from "@/lib/cms/connector-config";
 import { industryFor } from "@/lib/categories/industry";
-import { fetchSitePosts } from "@/lib/connectors/site-posts";
+import { getLivePosts } from "@/lib/pipeline/live-posts";
+import { strikingSplit, blogPath } from "@/lib/pipeline/striking";
+import { pillarCoverage } from "@/lib/pipeline/pillar-coverage";
+import { usedThemes } from "@/lib/pipeline/themes";
+import { checkTopics, closestFields, type TopicMatch } from "@/lib/pipeline/similarity";
 import { findDuplicate } from "@/lib/pipeline/dedupe";
 import { getGoogleAccessToken, GSC_SCOPE, googleServiceAccountEmail } from "@/lib/connectors/google-auth";
 import { dataforseoEnabled, firecrawlEnabled, gscEnabled, geoEnabled, aiEnabled } from "@/lib/env";
@@ -54,7 +60,7 @@ import type { StalePostVM } from "@/lib/data/types";
 import { markdownToHtml } from "@/lib/cms/markdown";
 import { sanitizeLinks } from "@/lib/cms/links";
 import { preflightPublish, metaIssues } from "@/lib/cms/preflight";
-import { decryptJson, encryptJson } from "@/lib/crypto/secrets";
+import { encryptJson } from "@/lib/crypto/secrets";
 import type { ConnectorType } from "@prisma/client";
 
 function requireDb() {
@@ -248,31 +254,33 @@ async function buildGeoOpportunityNote(businessId: string): Promise<string> {
   }
 }
 
-async function buildGscOpportunityNote(businessId: string, existingTitles: string[] = []): Promise<string> {
+async function buildGscOpportunityNote(businessId: string): Promise<string> {
   if (!gscEnabled()) return "";
   try {
-    const [rows, decaying] = await Promise.all([
-      fetchGscRows(businessId, { days: 28, dimensions: ["query"], rowLimit: 1000 }),
+    const [split, decaying] = await Promise.all([
+      strikingSplit(businessId),
       decayingPages(businessId, { window: 28, minPriorClicks: 20, minDropPct: 30 }),
     ]);
-    if (!rows) return "";
-
-    const have = new Set(existingTitles.map((t) => t.toLowerCase()));
-    const striking = strikingDistance(rows)
-      // Skip queries we clearly already have a titled piece for.
-      .filter((r) => !have.has(r.query.toLowerCase()))
-      .slice(0, 12);
+    if (!split.connected) return "";
 
     let note = "";
-    if (striking.length) {
-      const list = striking
+    if (split.newTopics.length) {
+      const list = split.newTopics
+        .slice(0, 12)
         .map((r) => `"${r.query}" (pos ${r.position.toFixed(0)}, ${r.impressions} impressions/mo)`)
         .join("; ");
       note +=
-        `PRIORITY SEARCH OPPORTUNITIES — this site already ranks on PAGE 2 for these real queries; ` +
-        `each has strong monthly impressions but few clicks because it's just off page 1. ` +
-        `At least half your ideas MUST directly target these keywords (or a tightly-focused long-tail of them) ` +
-        `to push them onto page 1 — this is where the traffic and revenue are: ${list}.`;
+        `SEARCH OPPORTUNITIES: the site shows up on PAGE 2 for these real queries and NO existing blog post ranks for them. ` +
+        `Where one fits a genuinely new, useful article, consider it: ${list}.`;
+    }
+    if (split.existing.length) {
+      const list = split.existing
+        .slice(0, 15)
+        .map((r) => `"${r.query}"`)
+        .join("; ");
+      note +=
+        ` ALREADY COVERED: an existing blog post already ranks for these page-2 queries and is being refreshed instead. ` +
+        `Do NOT propose a new article for any of them: ${list}.`;
     }
     if (decaying && decaying.length) {
       const list = decaying
@@ -281,21 +289,17 @@ async function buildGscOpportunityNote(businessId: string, existingTitles: strin
         .join("; ");
       note += ` DECAYING PAGES (losing traffic — propose fresh supporting/cluster content that links to and reinforces these topics): ${list}.`;
     }
-    return note;
+    return note.trim();
   } catch (e) {
     console.error("[gsc] opportunity note failed:", e instanceof Error ? e.message : e);
     return "";
   }
 }
 
-async function buildPerformanceNote(
-  businessId: string,
-  pillars: string[],
-  existingTitles: string[] = [],
-): Promise<string> {
+async function buildPerformanceNote(businessId: string): Promise<string> {
   // Live search-demand + AI-citation gaps come first — the strongest steers.
   const [gscRaw, geoNote] = await Promise.all([
-    buildGscOpportunityNote(businessId, existingTitles),
+    buildGscOpportunityNote(businessId),
     buildGeoOpportunityNote(businessId),
   ]);
   const gscNote = [gscRaw, geoNote].filter(Boolean).join("\n\n");
@@ -308,20 +312,21 @@ async function buildPerformanceNote(
     },
   });
 
-  if (pages.length === 0) {
-    const base = "No content published yet — prioritize breadth: seed each pillar with a strong cornerstone piece.";
-    return gscNote ? `${gscNote}\n\n${base}` : base;
+  // Coverage counts every post already on the store (any blog, written by the
+  // engine or not), sorted into pillars.
+  const cov = await pillarCoverage(businessId).catch((e) => {
+    console.error("[coverage] failed:", e instanceof Error ? e.message : e);
+    return null;
+  });
+  if (!cov || cov.total === 0) {
+    const base = cov
+      ? "No posts found on the store yet: prioritize breadth and seed each pillar with a strong cornerstone piece."
+      : "";
+    return [gscNote, base].filter(Boolean).join("\n\n");
   }
-
-  const counts = new Map<string, number>();
-  for (const p of pillars) counts.set(p, 0);
-  for (const pg of pages) {
-    const name = pg.draft?.brief?.idea?.pillar?.name;
-    if (name) counts.set(name, (counts.get(name) ?? 0) + 1);
-  }
-  const coverage = [...counts.entries()]
-    .sort((a, b) => a[1] - b[1])
-    .map(([name, n]) => `${name}: ${n} live`)
+  const coverage = [...cov.byPillar]
+    .sort((a, b) => a.posts - b.posts)
+    .map((c) => `${c.pillar}: ${c.posts} post${c.posts === 1 ? "" : "s"} on the store`)
     .join("; ");
 
   // Winners/decayers, if we have ranking data.
@@ -342,7 +347,9 @@ async function buildPerformanceNote(
     if (decaying.length) rankNote += ` On the cusp (page 2 — worth supporting with cluster links): ${decaying.join("; ")}.`;
   }
 
-  const coverageNote = `Live-content coverage by pillar (fewest first — favor the thin ones): ${coverage}.${rankNote}`;
+  const coverageNote =
+    `Coverage by pillar across all ${cov.total} posts on the store (fewest first: favor the thin ones): ${coverage}` +
+    `${cov.unassigned ? `; ${cov.unassigned} fit no pillar` : ""}.${rankNote}`;
   return gscNote ? `${gscNote}\n\n${coverageNote}` : coverageNote;
 }
 
@@ -366,6 +373,8 @@ export interface IdeaGenerationReport {
   repeats: { title: string; of: string }[];
   offTopic: number;
   livePosts: number;
+  /** Set when generation was stopped before asking for ideas (live-post list unreadable). */
+  blocked?: string;
 }
 
 /** generateIdeas, plus what happened to each proposal (for the Generate button). */
@@ -386,17 +395,25 @@ export async function generateIdeasReport(
 
   // Everything we already have a title for — ideas (any status), drafts, and the
   // posts already live on the store's blog (read from its public sitemap).
-  const [ideas, drafts, livePosts] = await Promise.all([
+  const [ideas, drafts, live] = await Promise.all([
     prisma.idea.findMany({ where: { businessId }, select: { title: true } }),
     prisma.draft.findMany({ where: { businessId }, select: { title: true } }),
-    fetchSitePosts(business.domain),
+    getLivePosts(businessId),
   ]);
-  const liveTitles = livePosts.map((p) => p.title);
+  // Without the store's live-post list the engine can't tell a new topic from a
+  // repeat, so it doesn't generate at all (never "the store has no posts").
+  if (!live.ok) {
+    console.warn(`[ideas] ${business.name}: generation stopped — ${live.warning}`);
+    return { proposed: 0, added: 0, repeats: [], offTopic: 0, livePosts: 0, blocked: live.warning };
+  }
+  const liveTitles = live.posts.map((p) => p.title);
   const existingTitles = [...ideas.map((i) => i.title), ...drafts.map((d) => d.title)];
   const seen = new Set([...existingTitles, ...liveTitles].map(normTitle));
-  const taken = [...existingTitles, ...liveTitles];
 
-  const performanceNote = await buildPerformanceNote(businessId, pillarNames, existingTitles);
+  const [perfNote, themesDone] = await Promise.all([buildPerformanceNote(businessId), usedThemes(businessId)]);
+  const performanceNote = themesDone.length
+    ? `${perfNote}\n\nTHEMES THE OPERATOR ALREADY HANDLED THEMSELVES (do not propose ideas on these themes): ${themesDone.map((t) => `"${t}"`).join("; ")}.`
+    : perfNote;
 
   // Split the batch by the business's local/evergreen target ratio — unless the
   // caller passes an explicit mix (used by replenish to target the SHORT kind).
@@ -429,6 +446,8 @@ export async function generateIdeasReport(
     offTopic: 0,
     livePosts: liveTitles.length,
   };
+  // Cheap filters first: exact repeats and off-topic proposals.
+  const candidates: typeof proposals = [];
   for (const p of proposals) {
     const key = normTitle(p.title);
     if (!key) continue;
@@ -441,23 +460,47 @@ export async function generateIdeasReport(
       report.offTopic++;
       continue;
     }
-    // Same topic as something live, in flight or already proposed, reworded.
-    const dup = findDuplicate(p.title, taken);
-    if (dup) {
-      report.repeats.push({ title: p.title, of: dup });
+    seen.add(key);
+    candidates.push(p);
+  }
+
+  // Meaning-based check against every Shopify article, idea, draft and theme
+  // suggestion. If the check can't run, add nothing rather than guess.
+  let matches: TopicMatch[];
+  try {
+    matches = await checkTopics(businessId, candidates.map((p) => p.title));
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    console.error(`[ideas] ${business.name}: duplicate check failed, nothing added: ${why}`);
+    return { ...report, blocked: `The duplicate check couldn't run, so no ideas were added: ${why}` };
+  }
+
+  const accepted: string[] = [];
+  for (const [i, p] of candidates.entries()) {
+    const m = matches[i];
+    if (m.duplicate && m.closest) {
+      report.repeats.push({ title: p.title, of: m.closest.title });
       continue;
     }
-    seen.add(key);
-    taken.push(p.title);
+    // Two proposals in the same batch on the same topic: keep the first.
+    const twin = findDuplicate(p.title, accepted);
+    if (twin) {
+      report.repeats.push({ title: p.title, of: twin });
+      continue;
+    }
+    accepted.push(p.title);
     await prisma.idea.create({
       data: {
         businessId,
         pillarId: pillarByName.get(p.pillar.toLowerCase()) ?? null,
         title: p.title,
+        targetKeyword: p.targetKeyword?.trim() || null,
         score: Math.max(0, Math.min(100, Math.round(p.score))),
         rationale: p.rationale,
         kind: p.kind === "LOCAL" ? "LOCAL" : "EVERGREEN",
         status: "PROPOSED",
+        ...closestFields(m),
+        closestCheckedAt: new Date(),
       },
     });
     report.added++;
@@ -763,15 +806,42 @@ function isBriefReady(brief: { targetKeyword: string | null; outline: unknown })
   return Boolean(brief.targetKeyword && brief.targetKeyword.trim().length > 2 && outline.length >= 3);
 }
 
-/** Buffer: skip an idea whose topic already has a draft or a live post (don't repeat work). */
-async function isDuplicateIdea(businessId: string, title: string): Promise<boolean> {
-  if (!slugify(title)) return true;
-  const [business, drafts] = await Promise.all([
-    prisma.business.findUnique({ where: { id: businessId }, select: { domain: true } }),
-    prisma.draft.findMany({ where: { businessId }, select: { title: true } }),
-  ]);
-  const live = business ? await fetchSitePosts(business.domain) : [];
-  return Boolean(findDuplicate(title, [...drafts.map((d) => d.title), ...live.map((p) => p.title)]));
+/** Thrown when an idea turns out to repeat an existing post, idea or draft. */
+export class RepeatTopicError extends Error {}
+
+const SOURCE_LABEL: Record<string, string> = {
+  shopify: "the Shopify post",
+  idea: "the idea",
+  draft: "the blog",
+  theme: "the suggested title",
+};
+
+/**
+ * The meaning-based repeat check for one idea at a later stage (building its
+ * brief, or just before writing). Records the closest match on the idea. If the
+ * idea repeats something, dismisses it with the reason and returns the reason;
+ * returns null when it may go ahead. A "From my themes" idea the operator
+ * picked while seeing that same closest match goes ahead: that was their call.
+ * Throws when the check can't run (the caller retries later; it never guesses).
+ */
+async function stopIfRepeat(ideaId: string, draftId?: string): Promise<string | null> {
+  const idea = await prisma.idea.findUnique({ where: { id: ideaId } });
+  if (!idea) return null;
+  const [m] = await checkTopics(idea.businessId, [idea.title], {
+    excludeIdeaIds: [idea.id],
+    excludeDraftIds: draftId ? [draftId] : [],
+  });
+  const sawThisMatch =
+    idea.origin === "THEMES" &&
+    Boolean(idea.closestTitle && m.closest && normTitle(idea.closestTitle) === normTitle(m.closest.title));
+  await prisma.idea.update({ where: { id: idea.id }, data: { ...closestFields(m), closestCheckedAt: new Date() } });
+  if (!m.duplicate || !m.closest || sawThisMatch) return null;
+  const reason =
+    `Skipped: repeats ${SOURCE_LABEL[m.closest.source] ?? "an existing topic"} “${m.closest.title}” ` +
+    `(${m.similarity}% similar). ${m.reason}`.trim();
+  await prisma.idea.update({ where: { id: idea.id }, data: { status: "DISMISSED", rationale: reason } });
+  console.log(`[repeat] ${idea.title} — ${reason}`);
+  return reason;
 }
 
 /** Per-category Ready targets for a business (LOCAL + EVERGREEN sum to the total). */
@@ -874,11 +944,12 @@ export async function tidyBlogPipeline(businessId: string): Promise<{ ideas: num
       orderBy: [{ score: "desc" }, { createdAt: "asc" }],
     }),
     prisma.draft.findMany({ where: { businessId }, select: { title: true } }),
-    fetchSitePosts(business.domain),
+    getLivePosts(businessId),
   ]);
-  const taken = [...livePosts.map((p) => p.title), ...drafts.map((d) => d.title)];
+  const taken = [...livePosts.posts.map((p) => p.title), ...drafts.map((d) => d.title)];
   const repeatIds: string[] = [];
-  for (const idea of proposed) {
+  // An unreadable live list would make every repeat look new: skip this pass.
+  for (const idea of livePosts.ok ? proposed : []) {
     if (findDuplicate(idea.title, taken)) repeatIds.push(idea.id);
     else taken.push(idea.title);
   }
@@ -926,6 +997,13 @@ export async function autoAdvanceBusiness(businessId: string): Promise<number> {
   };
   let budget = Math.min(AUTO_ADVANCE_PER_TICK, need.LOCAL + need.EVERGREEN);
   if (budget <= 0) return 0;
+  // Every step from here checks topics against the store's live posts. If that
+  // list can't be read, wait: never build or write against an empty list.
+  const live = await getLivePosts(businessId);
+  if (!live.ok) {
+    console.warn(`[auto-advance] paused for ${businessId}: ${live.warning}`);
+    return 0;
+  }
 
   let started = 0;
 
@@ -953,16 +1031,15 @@ export async function autoAdvanceBusiness(businessId: string): Promise<number> {
 
   // 2) Build fresh pieces for whichever category is still short.
   for (const kind of ["LOCAL", "EVERGREEN"] as const) {
-    while (need[kind] > 0 && budget > 0) {
-      const idea = await prisma.idea.findFirst({
-        where: { businessId, status: "PROPOSED", kind },
-        orderBy: { score: "desc" },
-      });
-      if (!idea) break; // no supply of this kind right now — next tick / replenish
-      if (await isDuplicateIdea(businessId, idea.title)) {
-        await prisma.idea.update({ where: { id: idea.id }, data: { status: "DISMISSED" } });
-        continue;
-      }
+    // Best ideas first; each is tried at most once per tick (a failure never
+    // spins on the same idea).
+    const candidates = await prisma.idea.findMany({
+      where: { businessId, status: "PROPOSED", kind },
+      orderBy: { score: "desc" },
+      take: 10,
+    });
+    for (const idea of candidates) {
+      if (need[kind] <= 0 || budget <= 0) break;
       try {
         const briefId = await buildBriefFromIdea(idea.id);
         const brief = await prisma.brief.findUnique({ where: { id: briefId } });
@@ -973,6 +1050,7 @@ export async function autoAdvanceBusiness(businessId: string): Promise<number> {
           need[kind]--;
         }
       } catch (e) {
+        if (e instanceof RepeatTopicError) continue; // dismissed with its reason
         console.error("[auto-advance] build/approve failed:", e instanceof Error ? e.message : e);
       }
     }
@@ -1085,39 +1163,6 @@ export async function connectShopifyWithAppCredentials(
     // connector so the 24h token can be refreshed without the env-wide app.
     ...(own ? { appClientId: own.clientId, appClientSecret: own.clientSecret } : {}),
   });
-}
-
-/**
- * Decrypt a CMS connector's config for API use. For a client-credentials Shopify
- * connection the token only lives ~24h, so refresh it when it's within 10 min of
- * expiry (or already expired) and persist the new one — callers always get a
- * working token without knowing how it was obtained.
- */
-async function freshCmsConfig(connector: {
-  id: string;
-  type: ConnectorType;
-  configEnc: string;
-}): Promise<Record<string, unknown>> {
-  const config = decryptJson(connector.configEnc) as Record<string, unknown>;
-  if (connector.type !== "SHOPIFY" || config.authMode !== "client_credentials") return config;
-
-  const expiresAt = typeof config.tokenExpiresAt === "number" ? config.tokenExpiresAt : 0;
-  if (Date.now() < expiresAt - 10 * 60 * 1000) return config;
-
-  const shop = String(config.storeDomain ?? "");
-  const own =
-    typeof config.appClientId === "string" && typeof config.appClientSecret === "string"
-      ? { clientId: config.appClientId, clientSecret: config.appClientSecret }
-      : null;
-  const { accessToken, expiresAt: nextExpiry } = await clientCredentialsToken(shop, own);
-  const next = { ...config, adminAccessToken: accessToken, tokenExpiresAt: nextExpiry };
-  await prisma.connector
-    .update({
-      where: { id: connector.id },
-      data: { configEnc: encryptJson(next), status: "CONNECTED", lastSyncAt: new Date() },
-    })
-    .catch((e) => console.error("[shopify] failed to persist refreshed token:", e));
-  return next;
 }
 
 /** Remove a connector's stored credentials (Disconnect). Deletes the row so any
@@ -1257,7 +1302,8 @@ export async function listPublishedBlogs(businessId: string): Promise<PublishedB
   if (!connector || connector.status !== "CONNECTED" || !encryptionEnabled()) return [];
   try {
     const adapter = getCmsAdapter(platform, await freshCmsConfig(connector));
-    const pages = await adapter.list({ limit: 250 });
+    // Every blog, every page of results (not just the first 250 of one blog).
+    const pages = adapter.listAllArticles ? await adapter.listAllArticles() : await adapter.list({ limit: 250 });
     return pages
       .map((p) => ({ cmsId: p.cmsId, title: p.title, url: p.url, updatedAt: p.updatedAt }))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -1356,10 +1402,19 @@ export async function buildBriefFromIdea(ideaId: string): Promise<string> {
   if (!idea) throw new Error(`Idea ${ideaId} not found`);
   if (idea.brief) return idea.brief.id; // already briefed — idempotent
 
+  // Re-check for repeats now: posts, ideas and drafts may have appeared since
+  // the idea was proposed.
+  const repeat = await stopIfRepeat(idea.id);
+  if (repeat) throw new RepeatTopicError(repeat);
+
+  // The idea's own keyword when it has one (always for "From my themes": the
+  // keyword the operator typed is the blog's main target keyword).
+  const keyword = idea.targetKeyword?.trim() || slugify(idea.title).replace(/-/g, " ");
   const spec = await buildBrief({
-    targetKeyword: slugify(idea.title).replace(/-/g, " "),
+    targetKeyword: keyword,
     businessContext: idea.business.profileMd ?? idea.business.name,
   });
+  if (idea.origin === "THEMES" && idea.targetKeyword?.trim()) spec.targetKeyword = idea.targetKeyword.trim();
 
   const brief = await prisma.brief.create({
     data: {
@@ -1507,9 +1562,9 @@ export async function processQueuedDrafts(max = 10): Promise<number> {
           // here; FAILED drafts aren't re-claimed, so it never loops.
           const after = await prisma.draft.findUnique({
             where: { id: claimed.id },
-            select: { status: true },
+            select: { status: true, rejectedAt: true },
           });
-          if (after?.status === "FAILED") {
+          if (after?.status === "FAILED" && !after.rejectedAt) {
             // Auto-improve to the piece's ceiling (data boost + keep-best revises).
             await autoImproveDraft(claimed.id).catch((e) => {
               console.error(`[worker] auto-improve failed for ${claimed.id}:`, e instanceof Error ? e.message : e);
@@ -1609,12 +1664,15 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
   const spec = toBriefSpec(brief);
   const brandVoice = brief.business.brandVoice ?? "Clear, warm, and authoritative.";
   const threshold = brief.business.qualityThreshold;
-  const finalizeCtx = {
-    title: draft.title,
-    brandName: brief.business.name,
-    isoDate: new Date().toISOString().slice(0, 10),
-    metaDescription: "",
-  };
+  // Last repeat check before paying for the write: something on the same topic
+  // may have gone live or been written since the brief. Stop the piece if so.
+  const repeat = await stopIfRepeat(brief.ideaId, draft.id);
+  if (repeat) {
+    await prisma.draft.update({ where: { id: draft.id }, data: { status: "FAILED", rejectedAt: new Date() } });
+    await prisma.brief.update({ where: { id: brief.id }, data: { status: "REJECTED" } });
+    await prisma.draftFeedback.create({ data: { draftId: draft.id, verdict: "REJECT", reason: repeat } });
+    return { draftId: draft.id, passed: false, overall: 0, loops: 0 };
+  }
 
   // Write, then auto-finalize (strip placeholders, guarantee valid JSON-LD) so
   // no mechanical defect is ever graded or shipped. House rules from the owner's
@@ -1625,10 +1683,11 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
     local: brief.idea.kind === "LOCAL",
     industry: industryFor(brief.business),
   });
-  finalizeCtx.metaDescription = deriveMetaDescription(rawBody, draft.title);
   // Guarantee the "In this guide" + "What to know first" boxes (rebuilt with one
   // small call if the writer missed the spec) before the grader sees the piece.
-  const body = await ensureGuideBlocks(finalizeDraftBody(rawBody, finalizeCtx), { title: draft.title });
+  const body = await ensureGuideBlocks(await withoutInventedPeople(finalizeDraftBody(rawBody), draft.title), {
+    title: draft.title,
+  });
   draft = await prisma.draft.update({
     where: { id: draft.id },
     data: { bodyMd: body, status: "GRADING" },
@@ -1682,7 +1741,7 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
     // body as the best-so-far; the unproven revision only replaces it if it grades higher.
     const weakest = weakestDimensions(grade.dimensions).slice(0, 3);
     currentDraft = await ensureGuideBlocks(
-      finalizeDraftBody(await reviseDraft(currentDraft, grade.feedback, weakest), finalizeCtx),
+      await withoutInventedPeople(finalizeDraftBody(await reviseDraft(currentDraft, grade.feedback, weakest)), draft.title),
       { title: draft.title },
     );
   }
@@ -1788,30 +1847,41 @@ const FABRICATION_NOTE =
   "facts, and legal/regulatory information — do NOT remove those. Keep the rest intact too: structure, " +
   "headings, table of contents, FAQ, warm tone, and links. Only strip invented operational process details.";
 
-/** Close an unterminated trailing ```json fence so its schema never leaks into
- *  the visible body as text. No-op when the fence is absent or already closed. */
-function ensureJsonLdClosed(md: string): string {
-  const idx = md.lastIndexOf("```json");
-  if (idx === -1) return md;
-  const after = md.slice(idx + "```json".length);
-  if (after.includes("```")) return md; // already closed
-  return `${md.replace(/\s+$/, "")}\n\`\`\`\n`;
+/**
+ * No invented people: author sections and bylines are already stripped by
+ * finalize; if lines still look like an invented quote, customer story,
+ * persona or staff name, one rewrite removes them (only when something is
+ * flagged, so it costs nothing for a clean draft).
+ */
+async function withoutInventedPeople(bodyMd: string, title: string): Promise<string> {
+  const flags = inventedPeopleFlags(bodyMd);
+  if (!flags.length) return bodyMd;
+  const lines = flags.map((f) => `- "${f.line}" (${f.why})`).join("\n");
+  const out = await reviseBodyWithInstruction(
+    bodyMd,
+    title,
+    `Remove every invented person from the article. These lines contain a quote, customer story, persona, ` +
+      `named individual or staff name that must not be there:\n${lines}\n` +
+      `Rewrite each as a plain factual statement in the store's voice (or delete it if it only adds the person). ` +
+      `Keep every fact, figure and link. Do not add any new people, quotes or stories.`,
+  );
+  return finalizeDraftBody(out);
 }
 
-/** Apply a plain-language edit instruction to a blog body, preserving structure
- *  and the trailing JSON-LD. Returns the original body on any failure. */
+/** Apply a plain-language edit instruction to a blog body, preserving structure.
+ *  The result never carries a JSON-LD block or author section (no invented
+ *  people). Returns the original body on any failure. */
 async function reviseBodyWithInstruction(
   bodyMd: string,
   title: string,
   instruction: string,
 ): Promise<string> {
   if (!aiEnabled()) return bodyMd;
-  const jsonFence = bodyMd.match(/```json[\s\S]*?```/i)?.[0];
   try {
     const out = await completeText({
       model: MODELS.writer,
       maxTokens: 20000,
-      prompt: `You are editing a published-quality blog article. Apply the operator's instruction below, changing ONLY what it requires and preserving everything else — the overall structure, headings, table of contents, FAQ, warm empathetic tone, internal/external links, and the trailing \`\`\`json JSON-LD schema block (keep it valid and complete). Return the FULL revised article in Markdown and nothing else.
+      prompt: `You are editing a published-quality blog article. Apply the operator's instruction below, changing ONLY what it requires and preserving everything else — the overall structure, headings, table of contents, FAQ, warm empathetic tone, internal/external links. Never add JSON-LD, a \`\`\`json block or any code, and never add a byline, author section, persona, staff name, quote, testimonial or customer story (remove any that is there). Return the FULL revised article in Markdown and nothing else.
 
 OPERATOR INSTRUCTION:
 ${instruction}
@@ -1829,8 +1899,8 @@ ${bodyMd}`,
     const envelope = cleaned.match(/^```(?:markdown|md)?\s*\n([\s\S]*)\n```$/);
     if (envelope) cleaned = envelope[1].trim();
     if (cleaned.length < bodyMd.length * 0.4) return bodyMd; // guard against a truncated/bad response
-    if (jsonFence && !/```json/i.test(cleaned)) cleaned += `\n\n${jsonFence}`;
-    cleaned = ensureJsonLdClosed(cleaned); // belt-and-suspenders: never emit an open fence
+    // No schema in the body and no invented people, whatever the model returned.
+    cleaned = stripAuthorSections(stripJsonLdBlocks(cleaned));
     // Never let a revision break a post: if the rewritten body wouldn't render
     // to real HTML (empty / raw text), keep the original.
     try {
@@ -2100,7 +2170,15 @@ async function refreshCandidates(
     const dp = await decayingPages(businessId, { window: 28, minPriorClicks: 20, minDropPct: 30 }).catch(() => null);
     if (dp) decayUrls = new Set(dp.map((d) => normalizeUrl(d.page)));
   }
-  const rank = (u: string | undefined) => (u && decayUrls.has(normalizeUrl(u)) ? 0 : 1);
+  // Posts already ranking on page 2 for a search come right after decaying ones.
+  const split = await strikingSplit(businessId).catch(() => null);
+  const pageTwoPaths = new Set((split?.existing ?? []).map((r) => r.path));
+  const rank = (u: string | undefined) => {
+    if (!u) return 2;
+    if (decayUrls.has(normalizeUrl(u))) return 0;
+    const path = blogPath(u);
+    return path && pageTwoPaths.has(path) ? 1 : 2;
+  };
   const sorted = [...published].sort((a, b) => rank(a.page?.url) - rank(b.page?.url));
 
   const left = { ...room };
@@ -2266,7 +2344,6 @@ export async function getStalePosts(businessId: string, max = 12): Promise<Stale
     orderBy: { page: { publishedAt: "asc" } }, // oldest first
     take: 200,
   });
-  if (!published.length) return [];
 
   // GSC decay map (url → drop), best-effort — absent when GSC isn't wired.
   const decayByUrl = new Map<string, { dropPct: number; priorClicks: number }>();
@@ -2311,9 +2388,66 @@ export async function getStalePosts(businessId: string, max = 12): Promise<Stale
     });
   }
 
-  // Decaying first (highest ROI — already ranks, just slipping), then oldest.
+  // Page-2 searches an existing post already ranks for: refresh that post
+  // instead of writing a new one. Covers every post on the store, including
+  // ones the engine didn't write (those get updated by hand).
+  const split = await strikingSplit(businessId).catch(() => null);
+  if (split?.existing.length) {
+    const byPath = new Map<string, StalePostVM>();
+    for (const r of rows) {
+      const path = r.url ? blogPath(r.url) : null;
+      if (path) byPath.set(path, r);
+    }
+    const engineByPath = new Map(
+      published.flatMap((p) => {
+        const path = p.page?.url ? blogPath(p.page.url) : null;
+        return path ? [[path, p] as const] : [];
+      }),
+    );
+    const live = await getLivePosts(businessId).catch(() => null);
+    const liveByPath = new Map(
+      (live?.posts ?? []).flatMap((p) => {
+        const path = blogPath(p.url);
+        return path ? [[path, p] as const] : [];
+      }),
+    );
+    for (const hit of split.existing) {
+      const pageTwo = { query: hit.query, position: hit.position, impressions: hit.impressions };
+      const reason = `ranks #${hit.pagePosition.toFixed(0)} for “${hit.query}” (${hit.impressions} impressions/mo): refresh this post, don't write a new one`;
+      const listed = byPath.get(hit.path);
+      if (listed) {
+        if (!listed.pageTwo) {
+          listed.pageTwo = pageTwo;
+          listed.reason = `${reason} · ${listed.reason}`;
+        }
+        continue;
+      }
+      const engine = engineByPath.get(hit.path);
+      const livePost = liveByPath.get(hit.path);
+      const touched = engine ? engine.refreshedAt ?? engine.page?.publishedAt ?? null : null;
+      const row: StalePostVM = {
+        draftId: engine?.id ?? null,
+        title: engine?.title ?? livePost?.title ?? hit.path.split("/").pop()!.replace(/-+/g, " "),
+        url: livePost?.url ?? hit.page,
+        publishedAt: engine?.page?.publishedAt ? engine.page.publishedAt.toISOString() : null,
+        refreshedAt: engine?.refreshedAt ? engine.refreshedAt.toISOString() : null,
+        ageMonths: monthsSince(touched),
+        dropPct: null,
+        priorClicks: null,
+        decaying: false,
+        reason,
+        pageTwo,
+      };
+      byPath.set(hit.path, row);
+      rows.push(row);
+    }
+  }
+
+  // Decaying first (highest ROI — already ranks, just slipping), then page-2
+  // posts (one push from page 1), then oldest.
   rows.sort((a, b) => {
     if (a.decaying !== b.decaying) return a.decaying ? -1 : 1;
+    if (Boolean(a.pageTwo) !== Boolean(b.pageTwo)) return a.pageTwo ? -1 : 1;
     if (a.decaying && b.decaying) return (b.dropPct ?? 0) - (a.dropPct ?? 0);
     return b.ageMonths - a.ageMonths;
   });
@@ -2427,12 +2561,7 @@ export async function boostDraft(draftId: string): Promise<{
     ? weakestDimensions(draft.grades[0].dimensions as never).slice(0, 3)
     : ["eeat", "depth"];
 
-  const enriched = finalizeDraftBody(await enrichDraft(draft.bodyMd, spec, weakest, res), {
-    title: draft.title,
-    brandName: draft.business.name,
-    isoDate: new Date().toISOString().slice(0, 10),
-    metaDescription: deriveMetaDescription(draft.bodyMd, draft.title),
-  });
+  const enriched = finalizeDraftBody(await enrichDraft(draft.bodyMd, spec, weakest, res));
   await prisma.draft.update({ where: { id: draft.id }, data: { bodyMd: enriched } });
 
   const { overall, passed } = await regradeDraft(draft.id);
@@ -2485,12 +2614,7 @@ export async function autoImproveDraft(draftId: string): Promise<void> {
 
     const spec = toBriefSpec(draft.brief);
     const weakest = weakestDimensions(best.dimensions as never).slice(0, 3);
-    const candidate = finalizeDraftBody(await reviseDraft(draft.bodyMd, best.feedback ?? "", weakest), {
-      title: draft.title,
-      brandName: draft.business.name,
-      isoDate: new Date().toISOString().slice(0, 10),
-      metaDescription: deriveMetaDescription(draft.bodyMd, draft.title),
-    });
+    const candidate = finalizeDraftBody(await reviseDraft(draft.bodyMd, best.feedback ?? "", weakest));
     const grade = await gradeDraft(candidate, JSON.stringify(spec), threshold);
     const nextVersion = (best.version ?? draft.version) + 1;
     await prisma.grade.create({
@@ -2730,9 +2854,9 @@ export async function renderPublishPreview(draftId: string): Promise<{
       guideProblems.push(`guide boxes could not be built: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
-  // Self-heal a stored body left with an unterminated ```json fence by an older
-  // revise pass, so its markdown source is clean too (not just the render).
-  const healed = ensureJsonLdClosed(draft.bodyMd);
+  // Bring an older stored body up to the current rules when it's opened: no
+  // JSON-LD block in the article and no author section or byline.
+  const healed = `${stripAuthorSections(stripJsonLdBlocks(draft.bodyMd))}\n`;
   if (healed !== draft.bodyMd) {
     await prisma.draft.update({ where: { id: draftId }, data: { bodyMd: healed } }).catch(() => {});
   }

@@ -848,6 +848,45 @@ export async function getIdeas(bizId?: string): Promise<IdeaVM[]> {
     pillar: i.pillar?.name ?? "—",
     rationale: i.rationale ?? undefined,
     kind: i.kind === "LOCAL" ? ("LOCAL" as const) : ("EVERGREEN" as const),
+    origin: i.origin === "THEMES" ? ("THEMES" as const) : ("ENGINE" as const),
+    theme: i.theme ?? undefined,
+    targetKeyword: i.targetKeyword ?? undefined,
+    closest: i.closestTitle
+      ? {
+          title: i.closestTitle,
+          url: i.closestUrl ?? undefined,
+          source: i.closestSource ?? "idea",
+          similarity: i.closestSimilarity ?? 0,
+        }
+      : null,
+  }));
+}
+
+/** Ideas the duplicate check dismissed recently, with the reason (newest first). */
+export async function getSkippedRepeats(bizId?: string, limit = 8): Promise<IdeaVM[]> {
+  bizId = bizId ?? (await activeBizId());
+  if (!hasDatabase) return [];
+  const ideas = await prisma.idea.findMany({
+    where: {
+      businessId: bizId,
+      status: "DISMISSED",
+      rationale: { startsWith: "Skipped: repeats" },
+      closestCheckedAt: { gte: new Date(Date.now() - 14 * 86_400_000) },
+    },
+    orderBy: { closestCheckedAt: "desc" },
+    take: limit,
+  });
+  return ideas.map((i) => ({
+    id: i.id,
+    title: i.title,
+    score: i.score ?? 0,
+    pillar: "—",
+    rationale: i.rationale ?? undefined,
+    kind: i.kind === "LOCAL" ? ("LOCAL" as const) : ("EVERGREEN" as const),
+    origin: i.origin === "THEMES" ? ("THEMES" as const) : ("ENGINE" as const),
+    closest: i.closestTitle
+      ? { title: i.closestTitle, url: i.closestUrl ?? undefined, source: i.closestSource ?? "idea", similarity: i.closestSimilarity ?? 0 }
+      : null,
   }));
 }
 

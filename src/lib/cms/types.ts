@@ -34,6 +34,22 @@ export interface PublishResult {
   url: string;
 }
 
+/** One article on the store, any status (read-only listing). */
+export interface CmsArticle {
+  cmsId: string;
+  title: string;
+  handle: string;
+  url: string;
+  blogHandle: string;
+  blogTitle: string;
+  /** published = live; hidden = no publish date; scheduled = publish date in the future. */
+  status: "published" | "hidden" | "scheduled";
+  author: string | null;
+  tags: string[];
+  publishedAt: string | null;
+  updatedAt: string;
+}
+
 export interface CmsPage {
   cmsId: string;
   url: string;
@@ -56,6 +72,10 @@ export interface CmsAdapter {
 
   /** List existing pages (for reconciliation + internal-link targets). */
   list(opts?: { limit?: number; cursor?: string }): Promise<CmsPage[]>;
+
+  /** Optional: EVERY article in EVERY blog, any status (published, hidden,
+   *  scheduled), paginated to the end. Read-only. */
+  listAllArticles?(): Promise<CmsArticle[]>;
 
   /** Verify the connector credentials work. */
   healthCheck(): Promise<{ ok: boolean; message?: string }>;

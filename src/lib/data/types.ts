@@ -120,7 +120,8 @@ export interface GeoVisibilityVM {
 
 /** A published post the engine judges worth refreshing, with the reason why. */
 export interface StalePostVM {
-  draftId: string;
+  /** The engine's draft for this post; null for a Shopify post the engine didn't write. */
+  draftId: string | null;
   title: string;
   url: string | null;
   publishedAt: string | null; // ISO
@@ -130,6 +131,8 @@ export interface StalePostVM {
   priorClicks: number | null; // clicks in the prior window, for weighting
   decaying: boolean; // GSC flagged it as losing traffic
   reason: string; // human one-liner, e.g. "↓55% traffic (28d)"
+  /** A page-2 search this post already ranks for: refresh it rather than write a new post. */
+  pageTwo?: { query: string; position: number; impressions: number } | null;
 }
 
 /** Live Search Console opportunities for the Overview panel. */
@@ -187,6 +190,12 @@ export interface IdeaVM {
   pillar: string;
   rationale?: string;
   kind: "LOCAL" | "EVERGREEN";
+  /** "THEMES" when it came from the operator's themes & keywords box. */
+  origin?: "ENGINE" | "THEMES";
+  theme?: string;
+  targetKeyword?: string;
+  /** Closest existing topic from the duplicate check (null when never checked). */
+  closest?: { title: string; url?: string; source: string; similarity: number } | null;
 }
 
 export interface BriefVM {

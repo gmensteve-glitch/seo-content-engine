@@ -47,10 +47,10 @@ Ideas ──► Brief ──► [approve] ──► Write ──► Grade ──
 |---|---|---|---|
 | Ideas | `agents/ideator.ts`, `generateIdeas` in `pipeline/service.ts` | Opus | Proposes titled ideas against the store's pillars, split LOCAL (geo) / EVERGREEN by the store's `localRatio`. Local angles come from the industry pack. Sees every idea, draft and live post on the store; proposals that repeat one (`pipeline/dedupe.ts`) or are off-topic for the pack are dropped. `tidyBlogPipeline` re-applies both rules before each auto-advance. |
 | Brief | `agents/research.ts` | Opus | Angle, outline, questions, gap. SERP + competitor scrape only if DataForSEO/Firecrawl are on (they're off; it degrades). |
-| Write | `agents/writer.ts` | Opus | Markdown draft in the SEO/AEO template: quick answer, H2s, FAQ, JSON-LD. Industry pack supplies the legal rule and what must never be invented about our own operations. |
+| Write | `agents/writer.ts` | Opus | Markdown draft in the SEO/AEO template: answer-first intro, guide boxes, H2s, FAQ. No JSON-LD and no invented people (see RESUME). Industry pack supplies the legal rule and what must never be invented about our own operations. |
 | Grade | `agents/grader.ts`, `grader/rubric.ts` | Sonnet | 0–100 across eight dimensions; `writer.reviseDraft` fixes the weakest; loops until it passes the store's `qualityThreshold` or runs out of loops. |
 | Guide boxes | `agents/guide-blocks.ts` | Sonnet (only when off-spec) | "In this guide" (≤6 plain-text section labels, no links) + "What to know first" (exactly 5 takeaways, ≤15 words each) after the intro; no Quick answer. Enforced after write/revise and by the `sweepGuideBlocks` tick for everything in Ready/review. |
-| Finalize | `agents/finalize.ts`, `agents/linker.ts` | — | Strips placeholders, guarantees valid JSON-LD, adds internal links to real published pages. |
+| Finalize | `agents/finalize.ts`, `agents/no-invented-people.ts`, `agents/linker.ts` | — | Strips placeholders, any JSON-LD block, author sections and bylines; internal links to real published pages. |
 | Boost | `boostDraft` in `pipeline/service.ts` | Sonnet/Opus | A near-miss gets real product facts (from Shopify) woven in and is re-graded. |
 | Publish | `publishNow` in `pipeline/service.ts`, `cms/shopify.ts` | — | Creates a **hidden** article in the store's Shopify blog. Throws on failure (never pretends). |
 | Refresh | `autoRefreshAll`, `relocalizePost` | Opus | Live posts past 90 days are rewritten into Ready again. |
@@ -119,7 +119,7 @@ The legal facts encoded there are the ones most likely to be gotten wrong; they 
 
 - **Shopify:** client-credentials grant against a Dev Dashboard app installed on the store. Token ~24h, refreshed by `freshCmsConfig` before every CMS call. Env `SHOPIFY_APP_CLIENT_ID/SECRET` = Overnight's app; a store in another Shopify organization stores its own app's credentials on its connector ("This store has its own app"). Used only for blog publishing and product facts.
 - **Google Search Console:** one shared service account (`GOOGLE_SERVICE_ACCOUNT_JSON`), one property per store, resolved by `gscSiteFor` (`connectors/gsc.ts`): the store's GSC connector, else `GSC_SITE_URL` only if it is the store's own domain. Feeds the ideator's page-2 opportunities, rank sync, decay-driven refresh and the Overview panel, always for that store only.
-- **Store blog sitemap:** `connectors/site-posts.ts` reads every live article from the store's public sitemap; the ideator and `findDuplicate` (`pipeline/dedupe.ts`) use it so the engine never re-writes a post already on the site.
+- **Store's live posts:** `pipeline/live-posts.ts` reads every article from the Shopify Admin API (read-only, all blogs, any status), falling back to the public sitemap (`connectors/site-posts.ts`, `sitemap_articles*`). The meaning-based duplicate check (`pipeline/similarity.ts`) and pillar coverage use it; an unreadable list stops idea generation.
 - **GA4 / Maps:** optional.
 - **Firecrawl:** page scraping for brand intake (and competitor pages when DataForSEO is on).
 - **DataForSEO:** SERP and keyword volume. Off by owner decision; every call site degrades.

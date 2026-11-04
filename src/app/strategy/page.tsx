@@ -1,6 +1,8 @@
 import { Shell } from "@/components/shell";
 import { PageHeader, Card, Pill } from "@/components/ui";
 import { getBusiness, getScoreCalibration, getPillars } from "@/lib/data/repo";
+import { pillarCoverage } from "@/lib/pipeline/pillar-coverage";
+import { hasDatabase } from "@/lib/db";
 import { setLocalRatioAction, setQualityThresholdAction } from "@/app/actions";
 import { SliderForm } from "@/app/ideas/SliderForm";
 import { Gauge, SlidersHorizontal } from "lucide-react";
@@ -13,6 +15,8 @@ export default async function StrategyPage() {
     getScoreCalibration(),
     getPillars(),
   ]);
+  const coverage = hasDatabase ? await pillarCoverage(business.id).catch(() => null) : null;
+  const postsIn = (name: string) => coverage?.byPillar.find((c) => c.pillar === name)?.posts;
   const localRatio = business.localRatio;
   const qualityThreshold = business.qualityThreshold;
 
@@ -104,8 +108,15 @@ export default async function StrategyPage() {
       </Card>
 
       {/* Pillars — the themes ideas rotate through */}
-      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--subtle)]">
+      <div className="mb-2 flex items-baseline gap-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--subtle)]">
         Content pillars
+        {coverage && (
+          <span className="font-normal normal-case tracking-normal text-[var(--muted)]">
+            {coverage.source === "store"
+              ? `${coverage.total} published posts on your store, sorted into pillars${coverage.unassigned ? ` (${coverage.unassigned} fit none)` : ""}`
+              : "Couldn't read your store's posts; counting only what the engine published"}
+          </span>
+        )}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {pillars.map((p) => (
@@ -113,6 +124,11 @@ export default async function StrategyPage() {
             <div className="flex items-center gap-2">
               <span className="text-[14px] font-medium">{p.name}</span>
               <Pill tone="accent">pillar</Pill>
+              {postsIn(p.name) !== undefined && (
+                <span className="ml-auto text-[11px] text-[var(--muted)]">
+                  {postsIn(p.name)} post{postsIn(p.name) === 1 ? "" : "s"} on the store
+                </span>
+              )}
             </div>
             <p className="mt-1 text-[12.5px] text-[var(--muted)]">{p.desc}</p>
           </Card>

@@ -13,6 +13,7 @@ import {
   scheduleDraft,
   unscheduleDraft,
   publishNow,
+  RepeatTopicError,
   generateIdeas,
   generateIdeasReport,
   setLocalRatio,
@@ -219,8 +220,13 @@ export async function deleteRecommendationAction(formData: FormData): Promise<vo
 export async function buildBriefAction(formData: FormData): Promise<void> {
   const ideaId = String(formData.get("ideaId"));
   if (!ideaId) return;
-  const briefId = await buildBriefFromIdea(ideaId);
-  await approveBrief(briefId);
+  try {
+    const briefId = await buildBriefFromIdea(ideaId);
+    await approveBrief(briefId);
+  } catch (e) {
+    // A repeat is dismissed with its reason and shown under "Skipped as repeats".
+    if (!(e instanceof RepeatTopicError)) throw e;
+  }
   revalidatePath("/ideas");
   revalidatePath("/briefs");
   revalidatePath("/pipeline");
@@ -273,6 +279,7 @@ export async function generateIdeasAction(_prev: GenerateIdeasResult, formData: 
   const bizId = bizFromForm ? String(bizFromForm) : (await getBusiness()).id;
   try {
     const r = await generateIdeasReport(bizId, 6);
+    if (r.blocked) return { ok: false, message: r.blocked };
     revalidatePath("/ideas");
     revalidatePath("/pipeline");
     revalidatePath("/");
