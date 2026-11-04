@@ -49,7 +49,7 @@ import { getGoogleAccessToken, GSC_SCOPE, googleServiceAccountEmail } from "@/li
 import { dataforseoEnabled, firecrawlEnabled, gscEnabled, geoEnabled, aiEnabled } from "@/lib/env";
 import { sourceHeroImage } from "@/lib/media/imager";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
-import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
+import { BLOG_PUBLISHING_OFF, blogPublishingEnabled, getCmsAdapter, type CmsPlatform } from "@/lib/cms";
 import type { StalePostVM } from "@/lib/data/types";
 import { markdownToHtml } from "@/lib/cms/markdown";
 import { sanitizeLinks } from "@/lib/cms/links";
@@ -1930,6 +1930,7 @@ export async function scrubAllReadyFabrication(
  */
 export async function fixPublishedPost(draftId: string): Promise<{ updated: boolean }> {
   requireDb();
+  if (!blogPublishingEnabled()) return { updated: false }; // can't push the fix to Shopify
   const draft = await prisma.draft.findUnique({
     where: { id: draftId },
     include: { business: true, page: true },
@@ -1985,6 +1986,7 @@ export async function fixAllPublishedPosts(
   businessId?: string,
 ): Promise<{ scanned: number; updated: number }> {
   requireDb();
+  if (!blogPublishingEnabled()) return { scanned: 0, updated: 0 }; // can't push fixes to Shopify
   const drafts = await prisma.draft.findMany({
     where: { status: "PUBLISHED", page: { isNot: null }, ...(businessId ? { businessId } : {}) },
     select: { id: true, businessId: true },
@@ -2926,6 +2928,7 @@ export async function unscheduleDraft(draftId: string): Promise<void> {
  *  by the scheduler (Inngest cron) or a manual trigger. */
 export async function publishScheduled(now: Date = new Date()): Promise<{ published: string[] }> {
   requireDb();
+  if (!blogPublishingEnabled()) return { published: [] }; // never auto-publish while off
   const due = await prisma.draft.findMany({
     where: { status: "PASSED", scheduledFor: { not: null, lte: now } },
     orderBy: { scheduledFor: "asc" },
@@ -3224,6 +3227,7 @@ export async function publishNow(
   publishState: "published" | "draft" = "published",
 ): Promise<{ url: string; adminUrl: string | null; live: boolean }> {
   requireDb();
+  if (!blogPublishingEnabled()) throw new Error(BLOG_PUBLISHING_OFF);
 
   // Internal links go into the body BEFORE it hits the CMS.
   const planned = await applyForwardLinks(draftId);

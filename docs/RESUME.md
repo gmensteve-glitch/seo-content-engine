@@ -2,7 +2,7 @@
 
 > New operator or new Claude session: paste **"Read docs/RESUME.md and docs/OPERATING-SOP.md, then tell me the current state and wait for instructions."** Do not start changing code until you have read both.
 
-Last updated: 2026-10-06. Keep this file current: when you ship something that changes how the system works, update the section it belongs to in the same commit.
+Last updated: 2026-11-04. Keep this file current: when you ship something that changes how the system works, update the section it belongs to in the same commit.
 
 ## What this is
 
@@ -43,6 +43,9 @@ Two facts that must stay correct:
 A pack can also name `offTopic` subjects (headstones: caskets/coffins). For such a store, `tidyBlogPipeline` (runs before every auto-advance and replenish) deletes matching unpublished drafts (in progress, Ready or scheduled), rejects matching pending briefs and dismisses matching proposed ideas; the ideator drops matching proposals. Published posts are never touched. `industryFor` decides on the store's name and domain first; the profile only breaks a tie.
 
 To add a new store in a new industry: add a pack, done.
+
+## Blog publishing to Shopify is OFF (owner decision 2026-11-04)
+The engine must not create or edit any Shopify blog article: the operator downloads blogs and publishes them by hand. `src/lib/cms/publishing.ts` (`blogPublishingEnabled`) is false unless the env var `BLOG_PUBLISHING` is exactly `on`. While off, `getCmsAdapter` returns an adapter whose `publish`/`update` throw before any request is sent (reads such as list, health check and product facts still work), so every path is covered: the review page's Publish button and calendar publish (`publishNow` refuses up front with a plain message), scheduled auto-publish (`publishScheduled` no-ops), "fix published posts" (no-ops before its AI rewrite), and the backlink push after a publish. Do not turn it back on without the owner's say-so.
 
 ## Shopify connection
 Client-credentials grant against a Dev Dashboard app installed on the store (`src/lib/connectors/shopify-oauth.ts`, `connectShopifyWithAppCredentials` in `pipeline/service.ts`). Tokens last ~24h and are refreshed automatically (`freshCmsConfig`). Env `SHOPIFY_APP_CLIENT_ID/SECRET` is Overnight's app. **Signature Headstones is a separate Shopify organization**, so it has its own app; its credentials are stored encrypted on its connector (entered via "This store has its own app" on Connectors). The connection is only needed for blog publishing; category pages read the public storefront.
