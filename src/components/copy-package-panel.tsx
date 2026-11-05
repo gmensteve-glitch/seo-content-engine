@@ -156,7 +156,9 @@ export function CopyPackagePanel({ draftId }: { draftId: string }) {
                   <Download size={12} /> Download WebP (1200px, under 200 KB)
                 </a>
               ) : (
-                <p className="text-[11.5px] text-[var(--muted)]">No hero image on this blog.</p>
+                <p className="text-[11.5px] text-[var(--muted)]">
+                  No hero image on this blog (image generation is off). Upload one below, or add it in Shopify.
+                </p>
               )}
             </div>
           </div>

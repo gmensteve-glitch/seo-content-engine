@@ -8,6 +8,7 @@
 // when any source is configured, so a piece never ships imageless.
 
 import { searchPhoto } from "@/lib/connectors/unsplash";
+import { HERO_IMAGES_OFF, heroImagesEnabled } from "@/lib/media/hero-images";
 import { generateImage } from "@/lib/connectors/gemini-image";
 import { completeText, MODELS } from "@/lib/ai/claude";
 import { aiEnabled, geminiImageEnabled } from "@/lib/env";
@@ -48,6 +49,11 @@ export async function sourceHeroImage(
   req: ImageRequest,
   opts?: { prefer?: "ai" | "stock"; aiOnly?: boolean },
 ): Promise<HeroImage | null> {
+  // Images are off: no AI, no stock photo, no product photo.
+  if (!heroImagesEnabled()) {
+    if (opts?.aiOnly) throw new Error(HERO_IMAGES_OFF);
+    return null;
+  }
   const preferStock = opts?.prefer === "stock";
 
   // Strict AI: an explicit "generate a new AI image" request. Do NOT fall back

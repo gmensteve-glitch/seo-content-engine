@@ -249,7 +249,6 @@ export async function buildCopyPackage(draftId: string, opts: { refreshSeo?: boo
     { label: "No schema or code in the body", ok: !/<script|```|"@context"/i.test(bodyHtml) },
     { label: `SEO title ≤ ${SEO_TITLE_MAX} characters (${seoTitle.length})`, ok: seoTitleOk(seoTitle) },
     { label: `Meta description ${META_MIN}–${META_MAX} characters (${metaDescription.length})`, ok: metaOk(metaDescription, draft.bodyMd) },
-    { label: "Hero image available", ok: Boolean(draft.heroImageData || draft.heroImageUrl) },
   ];
 
   return {

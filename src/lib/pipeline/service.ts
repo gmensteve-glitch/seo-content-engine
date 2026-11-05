@@ -54,6 +54,7 @@ import { findDuplicate } from "@/lib/pipeline/dedupe";
 import { getGoogleAccessToken, GSC_SCOPE, googleServiceAccountEmail } from "@/lib/connectors/google-auth";
 import { dataforseoEnabled, firecrawlEnabled, gscEnabled, geoEnabled, aiEnabled } from "@/lib/env";
 import { sourceHeroImage } from "@/lib/media/imager";
+import { HERO_IMAGES_OFF, heroImagesEnabled } from "@/lib/media/hero-images";
 import { weakestDimensions, MAX_REVISION_LOOPS } from "@/lib/grader/rubric";
 import { BLOG_PUBLISHING_OFF, blogPublishingEnabled, getCmsAdapter, type CmsPlatform } from "@/lib/cms";
 import type { StalePostVM } from "@/lib/data/types";
@@ -3303,6 +3304,12 @@ export async function ensureHeroImage(
 
   if (!opts?.force && (draft.heroImageData || draft.heroImageUrl)) {
     return { hasImage: true, source: draft.heroImageSource, alt: draft.heroImageAlt ?? "" };
+  }
+  // Images are off: the auto path quietly leaves the blog without one; an
+  // explicit "generate / stock photo" request from the review page says why.
+  if (!heroImagesEnabled()) {
+    if (opts?.force) throw new Error(HERO_IMAGES_OFF);
+    return { hasImage: false, source: null, alt: "" };
   }
 
   const platform = draft.business.cmsPlatform.toLowerCase() as CmsPlatform;
