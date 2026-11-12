@@ -45,6 +45,7 @@ import { postRecommendationToSlack } from "@/lib/connectors/slack";
 import { clientCredentialsToken } from "@/lib/connectors/shopify-oauth";
 import { freshCmsConfig } from "@/lib/cms/connector-config";
 import { adminIntakeCorpus } from "@/lib/connectors/shopify-admin-read";
+import { getManualCatalog, manualIntakeCorpus, manualProductFacts } from "@/lib/catalog/manual-catalog";
 import { industryFor, type IndustryPack } from "@/lib/categories/industry";
 import { packClaimFlags, stripDisallowedLinks } from "@/lib/agents/pack-rules";
 import { getLivePosts } from "@/lib/pipeline/live-posts";
@@ -180,7 +181,13 @@ export async function runAndSaveIntake(
   const profile = await runIntake(
     business.domain,
     ["/", "/pages/about", "/pages/about-us", "/collections/all"],
-    () => adminIntakeCorpus(businessId),
+    async () => {
+      // The store's Shopify data; with no Shopify connection, the uploaded product list.
+      const fromShopify = await adminIntakeCorpus(businessId);
+      if (fromShopify) return fromShopify;
+      const manual = await getManualCatalog(businessId);
+      return manual ? manualIntakeCorpus(manual) : "";
+    },
   );
 
   await prisma.business.update({
@@ -2527,6 +2534,11 @@ async function gatherResources(
         /* no product data available */
       }
     }
+  }
+  // No Shopify connection: the product list uploaded on Connectors.
+  if (!products.length) {
+    const manual = await getManualCatalog(businessId).catch(() => null);
+    if (manual) products.push(...manualProductFacts(manual, keyword));
   }
 
   // Authoritative web facts (real, citable).

@@ -17,6 +17,7 @@ import { encryptionEnabled } from "@/lib/env";
 import { getCmsAdapter, type CmsPlatform } from "@/lib/cms";
 import { freshCmsConfig } from "@/lib/cms/connector-config";
 import { fetchSitePosts } from "@/lib/connectors/site-posts";
+import { getManualPosts } from "@/lib/catalog/manual-catalog";
 import type { ConnectorType } from "@prisma/client";
 
 export interface LivePost {
@@ -31,7 +32,7 @@ export interface LivePost {
 export interface LivePostList {
   /** False when no posts could be read from either source. Callers must stop. */
   ok: boolean;
-  source: "shopify-admin" | "sitemap" | "none";
+  source: "shopify-admin" | "sitemap" | "manual" | "none";
   posts: LivePost[];
   /** Real author names on the store's articles (for bylines). Admin source only. */
   authors: string[];
@@ -128,6 +129,34 @@ export async function getLivePosts(businessId: string, opts: { fresh?: boolean }
     };
     cache.set(businessId, { at: Date.now(), list });
     return list;
+  }
+
+  // "No Shopify connection" mode: the titles pasted on Connectors ([] = the
+  // store has no posts yet), used only when the store has no Shopify connector.
+  if (!connector) {
+    const pasted = await getManualPosts(businessId);
+    if (pasted) {
+      const host = business.domain.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+      const list: LivePostList = {
+        ok: true,
+        source: "manual",
+        posts: pasted.map((title) => ({
+          title,
+          handle: title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+          url: "",
+          status: "published" as const,
+          author: null,
+          tags: [],
+        })),
+        authors: [],
+        warning: pasted.length
+          ? undefined
+          : `No Shopify connection: using the post list pasted on Connectors (none yet), so ${host} is treated as having no blog posts.`,
+        readAt,
+      };
+      cache.set(businessId, { at: Date.now(), list });
+      return list;
+    }
   }
 
   const list: LivePostList = {

@@ -65,6 +65,14 @@ model Business {
   // the ONLY source category copy may cite for shipping/returns claims.
   policyMd         String?  @db.Text
   policyFetchedAt  DateTime?
+  // "No Shopify connection" mode: a product list the operator uploaded/pasted
+  // (parsed ManualProduct[]), used for product facts, collections and brand
+  // intake when the store has no Shopify connector. Null = not uploaded.
+  manualCatalog    Json?
+  manualCatalogAt  DateTime?
+  // Blog post titles already on the store, pasted by the operator (string[]).
+  // [] = "this store has no posts yet". Null = not set (no manual mode).
+  manualPosts      Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

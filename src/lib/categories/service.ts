@@ -10,6 +10,7 @@ import { discoverCollections, localityFor } from "@/lib/categories/discover";
 import { fetchCatalogFacts, type CatalogFacts } from "@/lib/categories/facts";
 import { fetchStorePolicies } from "@/lib/categories/policies";
 import { adminReaderFor, adminPolicyText } from "@/lib/connectors/shopify-admin-read";
+import { getManualCatalog, manualCollections, manualCollectionProducts } from "@/lib/catalog/manual-catalog";
 import { industryFor } from "@/lib/categories/industry";
 import {
   buildCategoryBrief,
@@ -174,10 +175,14 @@ export async function rescanCategoryPages(
   const biz = await prisma.business.findUnique({ where: { id: businessId } });
   if (!biz) throw new Error("Business not found");
 
-  // Public site first; behind a password page, the store's Shopify connection (read-only).
+  // Public site first; behind a password page, the store's Shopify connection
+  // (read-only); with no Shopify connection, the product list uploaded on
+  // Connectors.
   const found = await discoverCollections(biz.domain, industryFor(biz), async () => {
     const reader = await adminReaderFor(biz.id);
-    return (await reader?.listCollectionsRead?.()) ?? [];
+    if (reader?.listCollectionsRead) return reader.listCollectionsRead();
+    const manual = await getManualCatalog(biz.id);
+    return manual ? manualCollections(manual) : [];
   });
   if (found.length === 0) return { found: 0, added: 0, removed: 0, readable: false };
 
@@ -389,7 +394,9 @@ async function contextFor(row: Row, note?: string): Promise<CategoryContext> {
   // last known facts if the site is momentarily unreadable.
   let facts = await fetchCatalogFacts(biz.domain, row.handle, industry, async () => {
     const reader = await adminReaderFor(biz.id);
-    return (await reader?.listCollectionProductsRead?.(row.handle)) ?? null;
+    if (reader?.listCollectionProductsRead) return reader.listCollectionProductsRead(row.handle);
+    const manual = await getManualCatalog(biz.id);
+    return manual ? manualCollectionProducts(manual, row.handle) : null;
   });
   if (!facts && row.factsJson) {
     try {

@@ -156,7 +156,11 @@ export default async function IdeasPage() {
             {live.ok ? (
               <>
                 Checking against <b className="text-[var(--text)]">{live.posts.length} posts</b> already on your store
-                {live.source === "shopify-admin" ? " (read from Shopify, including hidden and scheduled)" : " (read from the sitemap)"}.
+                {live.source === "shopify-admin"
+                  ? " (read from Shopify, including hidden and scheduled)"
+                  : live.source === "manual"
+                    ? " (the post titles pasted on Connectors)"
+                    : " (read from the sitemap)"}.
                 {live.warning && <> {live.warning}</>}
               </>
             ) : (

@@ -4,7 +4,10 @@ import { getConnectors, getBusiness } from "@/lib/data/repo";
 import { ConnectorControls } from "@/components/connect-modal";
 import { ShopifyOAuthConnect } from "@/components/shopify-oauth-connect";
 import { shopifyOAuthEnabled } from "@/lib/connectors/shopify-oauth";
-import { CheckCircle2, Circle, AlertTriangle, ShoppingBag } from "lucide-react";
+import { CheckCircle2, Circle, AlertTriangle, ShoppingBag, PackageOpen } from "lucide-react";
+import { ManualCatalogBox } from "@/components/manual-catalog-box";
+import { prisma, hasDatabase } from "@/lib/db";
+import { manualCollections, type ManualProduct } from "@/lib/catalog/manual-catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +29,22 @@ export default async function ConnectorsPage({
   const [connectors, biz] = await Promise.all([getConnectors(), getBusiness()]);
   const oauth = shopifyOAuthEnabled();
   const shopifyConnected = connectors.find((c) => c.type === "SHOPIFY")?.status === "connected";
+  // "No Shopify connection" mode: what's uploaded for this store, if anything.
+  const manualRow =
+    hasDatabase && !shopifyConnected
+      ? await prisma.business
+          .findUnique({ where: { id: biz.id }, select: { manualCatalog: true, manualCatalogAt: true, manualPosts: true } })
+          .catch(() => null)
+      : null;
+  const manualList = Array.isArray(manualRow?.manualCatalog) ? (manualRow!.manualCatalog as unknown as ManualProduct[]) : null;
+  const manualCurrent = manualList?.length
+    ? {
+        products: manualList.length,
+        collections: manualCollections(manualList).map((c) => c.title),
+        savedAt: manualRow?.manualCatalogAt ? manualRow.manualCatalogAt.toISOString() : null,
+      }
+    : null;
+  const manualPosts = Array.isArray(manualRow?.manualPosts) ? (manualRow!.manualPosts as unknown[]).map(String) : null;
 
   return (
     <Shell>
@@ -64,6 +83,21 @@ export default async function ConnectorsPage({
             this store&apos;s blog.
           </p>
           <ShopifyOAuthConnect />
+        </Card>
+      )}
+
+      {/* No Shopify connection: upload the product list instead. */}
+      {hasDatabase && !shopifyConnected && (
+        <Card className="mb-4">
+          <div className="mb-2 flex items-center gap-2">
+            <PackageOpen size={16} className="text-[var(--accent)]" />
+            <h2 className="text-[15px] font-medium">No Shopify connection? Upload {biz.name}&apos;s products</h2>
+          </div>
+          <p className="mb-3 text-[12px] text-[var(--muted)]">
+            The engine uses this list for product facts, collections (category pages) and brand intake when it can&apos;t
+            read Shopify or the public site. Connecting Shopify later takes over automatically.
+          </p>
+          <ManualCatalogBox storeName={biz.name} current={manualCurrent} postTitles={manualPosts} />
         </Card>
       )}
 
