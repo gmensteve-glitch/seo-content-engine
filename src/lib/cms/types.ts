@@ -34,6 +34,27 @@ export interface PublishResult {
   url: string;
 }
 
+/** A collection as the Admin API sees it (read-only). */
+export interface AdminCollection {
+  id: number;
+  handle: string;
+  title: string;
+  body_html: string | null;
+  published_at: string | null;
+  products_count: number | null;
+}
+
+/** A product in the shape the storefront's products.json uses (read-only). */
+export interface AdminProduct {
+  title: string;
+  handle: string;
+  product_type: string;
+  tags: string;
+  body_html: string;
+  variants: { price: string; compare_at_price: string | null }[];
+  options: { name: string; values: string[] }[];
+}
+
 /** One article on the store, any status (read-only listing). */
 export interface CmsArticle {
   cmsId: string;
@@ -76,6 +97,13 @@ export interface CmsAdapter {
   /** Optional: EVERY article in EVERY blog, any status (published, hidden,
    *  scheduled), paginated to the end. Read-only. */
   listAllArticles?(): Promise<CmsArticle[]>;
+
+  /** Optional read-only catalog/content readers for a store whose public site
+   *  can't be read (password page before launch). GET only. */
+  listCollectionsRead?(): Promise<AdminCollection[]>;
+  listCollectionProductsRead?(handle: string): Promise<AdminProduct[] | null>;
+  listPoliciesRead?(): Promise<{ title: string; body: string; handle: string }[]>;
+  listPagesRead?(): Promise<{ title: string; handle: string; body: string }[]>;
 
   /** Verify the connector credentials work. */
   healthCheck(): Promise<{ ok: boolean; message?: string }>;

@@ -7,6 +7,9 @@ import { markdownToHtml } from "@/lib/cms/markdown";
 import type { CategoryDraftJson, LinkTarget } from "@/lib/agents/category-writer";
 import type { CatalogFacts } from "@/lib/categories/facts";
 
+import type { IndustryPack } from "@/lib/categories/industry";
+import { packClaimFlags } from "@/lib/agents/pack-rules";
+
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -184,6 +187,7 @@ export function factCheck(
   domain: string,
   minFaqs: number,
   authorityLinks: { url: string }[] = [],
+  pack?: IndustryPack,
 ): string[] {
   const issues: string[] = [];
   const text = [draft.h1, draft.intro, visibleText(bodyHtml), draft.seoTitle, draft.metaDescription].join("\n");
@@ -266,6 +270,17 @@ export function factCheck(
   const prose = [draft.intro, ...draft.sections.map((s) => s.bodyMarkdown), draft.whyUs, ...draft.faqs.map((f) => f.answer)].join("\n");
   const cents = [...prose.matchAll(/\$[\d,]+\.\d{2}\b/g)].map((m) => m[0]);
   if (cents.length) issues.push(`prices in prose should be whole dollars (found ${[...new Set(cents)].slice(0, 4).join(", ")})`);
+
+  // The store's own hard rules (pets: where a product is made / who makes it,
+  // engraving, free shipping on urns or jewelry, the Funeral Rule).
+  if (pack) {
+    const seen = new Set<string>();
+    for (const f of packClaimFlags(text, pack, 12)) {
+      const msg = `breaks a store rule (${f.why}): “${f.line}”`;
+      if (!seen.has(msg)) issues.push(msg);
+      seen.add(msg);
+    }
+  }
 
   // Invented expertise claims.
   if (/\b(cross-?checks?|reviewed by (our|a) |our (licensed|certified) |years? (of|in) (the )?(funeral|industry)|funeral[- ]service advisor)\b/i.test(prose)) {

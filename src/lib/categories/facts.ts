@@ -1,12 +1,15 @@
 // Catalog facts for a collection — the ONLY source of prices, product names,
 // sizes, materials and colours the category writer may state. Pulled from the
-// store's public /collections/<handle>/products.json, so it's always the live
-// catalog and never a guess. Everything here is deterministic (no LLM). Which
+// store's public /collections/<handle>/products.json (or, behind a password
+// page, the same data read-only from the Shopify Admin API), so it's always the
+// live catalog and never a guess. Everything here is deterministic (no LLM). Which
 // attributes are worth mining (steel gauges for caskets, W x D x H sizes and
 // base widths for headstones) comes from the industry pack.
 
 import { siteBase } from "@/lib/categories/discover";
 import { INDUSTRIES, type IndustryPack } from "@/lib/categories/industry";
+import { packClaimFlags } from "@/lib/agents/pack-rules";
+import type { AdminProduct } from "@/lib/cms/types";
 
 export interface CatalogProduct {
   title: string;
@@ -77,6 +80,9 @@ export async function fetchCatalogFacts(
   domain: string,
   handle: string,
   pack: IndustryPack = INDUSTRIES.general,
+  /** Read-only Shopify Admin products for this collection, used ONLY when the
+   *  public products.json returns nothing (password page before launch). */
+  adminProducts?: () => Promise<AdminProduct[] | null>,
 ): Promise<CatalogFacts | null> {
   const base = siteBase(domain);
   const products: ShopifyProduct[] = [];
@@ -106,6 +112,13 @@ export async function fetchCatalogFacts(
     if (batch.length === 0) break;
     products.push(...batch);
   }
+  if (products.length === 0 && adminProducts) {
+    const fromAdmin = await adminProducts().catch((e) => {
+      console.error("[facts] Admin products failed:", e instanceof Error ? e.message : e);
+      return null;
+    });
+    if (fromAdmin?.length) products.push(...fromAdmin);
+  }
   if (products.length === 0 && !(await siteReachable(base))) return null;
 
   const prices: number[] = [];
@@ -116,7 +129,11 @@ export async function fetchCatalogFacts(
     const variantPrices = (p.variants ?? []).map((v) => num(v.price)).filter((n): n is number => n != null);
     prices.push(...variantPrices);
     const tags = Array.isArray(p.tags) ? p.tags : String(p.tags ?? "").split(",");
-    const blurb = strip(String(p.body_html ?? "")).slice(0, 220);
+    // A sentence that breaks a store rule (pets: "Made in the USA", a maker's
+    // name, engraving) never reaches the writer.
+    const desc = strip(String(p.body_html ?? ""));
+    const banned = new Set(packClaimFlags(desc, pack, 50).map((f) => f.line));
+    const blurb = (banned.size ? desc.split(/(?<=[.!?])\s+/).filter((x) => !banned.has(x.trim())).join(" ") : desc).slice(0, 220);
     const title = strip(String(p.title ?? ""));
     const h = String(p.handle ?? "").trim();
     corpus.push(`${title} ${tags.join(" ")} ${strip(String(p.body_html ?? ""))}`.toLowerCase());

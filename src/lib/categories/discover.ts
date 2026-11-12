@@ -1,9 +1,12 @@
 // Collection-page discovery — crawls the store's PUBLIC site so every category
-// page is known to the dashboard before anyone types a URL. Reads only public
-// endpoints (Shopify's storefront /collections.json and the sitemap); needs no
-// Shopify permission and never writes anything.
+// page is known to the dashboard before anyone types a URL. Reads public
+// endpoints (Shopify's storefront /collections.json and the sitemap); when the
+// public site returns nothing (a store behind its password page before launch)
+// it falls back to the store's Shopify Admin connection, read-only. Never
+// writes anything.
 
 import { INDUSTRIES, type IndustryPack } from "@/lib/categories/industry";
+import type { AdminCollection } from "@/lib/cms/types";
 
 const UA = "Mozilla/5.0 (compatible; ContentEngineBot/1.0)";
 
@@ -178,6 +181,28 @@ async function fromCollectionsJson(base: string): Promise<Found[]> {
   return out;
 }
 
+/** Collections from the Admin API, filtered like the storefront list. */
+function fromAdmin(base: string, cols: AdminCollection[]): Found[] {
+  const out: Found[] = [];
+  for (const c of cols) {
+    const handle = String(c.handle ?? "").trim();
+    if (!handle || SYSTEM_HANDLES.has(handle)) continue;
+    if (c.published_at === null) continue; // not on the online store
+    if (typeof c.products_count === "number" && c.products_count === 0) continue;
+    const title = String(c.title ?? handle).trim();
+    const desc = stripHtml(String(c.body_html ?? ""));
+    out.push({
+      handle,
+      url: `${base}/collections/${handle}`,
+      title,
+      productCount: typeof c.products_count === "number" ? c.products_count : null,
+      hasContent: desc.length >= 200,
+      keyword: keywordFor(handle, title),
+    });
+  }
+  return out;
+}
+
 /** Sitemap fallback/supplement: sitemap.xml → sitemap_collections_*.xml → <loc>s. */
 async function fromSitemap(base: string): Promise<Found[]> {
   const index = await getText(`${base}/sitemap.xml`);
@@ -218,12 +243,25 @@ async function fromSitemap(base: string): Promise<Found[]> {
  * misses. Tiers are assigned against the whole roster (so "biggest collections"
  * means biggest on THIS store). Returns [] if the site can't be read.
  */
-export async function discoverCollections(domain: string, pack: IndustryPack = INDUSTRIES.general): Promise<DiscoveredCollection[]> {
+export async function discoverCollections(
+  domain: string,
+  pack: IndustryPack = INDUSTRIES.general,
+  /** Read-only Shopify Admin collections, used ONLY when the public site
+   *  returns nothing (a store still behind its password page). */
+  adminCollections?: () => Promise<AdminCollection[]>,
+): Promise<DiscoveredCollection[]> {
   const base = siteBase(domain);
   const [primary, extra] = await Promise.all([fromCollectionsJson(base), fromSitemap(base)]);
   const byHandle = new Map<string, Found>();
   for (const c of primary) byHandle.set(c.handle, c);
   for (const c of extra) if (!byHandle.has(c.handle)) byHandle.set(c.handle, c);
+  if (byHandle.size === 0 && adminCollections) {
+    const cols = await adminCollections().catch((e) => {
+      console.error("[discover] Admin collections failed:", e instanceof Error ? e.message : e);
+      return [] as AdminCollection[];
+    });
+    for (const c of fromAdmin(base, cols)) byHandle.set(c.handle, c);
+  }
   const all = [...byHandle.values()];
   const big = biggestHandles(all, pack);
   return all

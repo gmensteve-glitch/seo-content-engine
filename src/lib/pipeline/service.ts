@@ -44,7 +44,9 @@ import { askAnswerEngine } from "@/lib/connectors/perplexity";
 import { postRecommendationToSlack } from "@/lib/connectors/slack";
 import { clientCredentialsToken } from "@/lib/connectors/shopify-oauth";
 import { freshCmsConfig } from "@/lib/cms/connector-config";
-import { industryFor } from "@/lib/categories/industry";
+import { adminIntakeCorpus } from "@/lib/connectors/shopify-admin-read";
+import { industryFor, type IndustryPack } from "@/lib/categories/industry";
+import { packClaimFlags, stripDisallowedLinks } from "@/lib/agents/pack-rules";
 import { getLivePosts } from "@/lib/pipeline/live-posts";
 import { strikingSplit, blogPath } from "@/lib/pipeline/striking";
 import { pillarCoverage } from "@/lib/pipeline/pillar-coverage";
@@ -175,12 +177,11 @@ export async function runAndSaveIntake(
   const business = await prisma.business.findUnique({ where: { id: businessId } });
   if (!business) throw new Error(`Business ${businessId} not found`);
 
-  const profile = await runIntake(business.domain, [
-    "/",
-    "/pages/about",
-    "/pages/about-us",
-    "/collections/all",
-  ]);
+  const profile = await runIntake(
+    business.domain,
+    ["/", "/pages/about", "/pages/about-us", "/collections/all"],
+    () => adminIntakeCorpus(businessId),
+  );
 
   await prisma.business.update({
     where: { id: businessId },
@@ -1686,7 +1687,8 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
   });
   // Guarantee the "In this guide" + "What to know first" boxes (rebuilt with one
   // small call if the writer missed the spec) before the grader sees the piece.
-  const body = await ensureGuideBlocks(await withoutInventedPeople(finalizeDraftBody(rawBody), draft.title), {
+  const pack = industryFor(brief.business);
+  const body = await ensureGuideBlocks(await withoutInventedPeople(finalizeDraftBody(rawBody), draft.title, pack, brief.business.domain), {
     title: draft.title,
   });
   draft = await prisma.draft.update({
@@ -1742,7 +1744,12 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
     // body as the best-so-far; the unproven revision only replaces it if it grades higher.
     const weakest = weakestDimensions(grade.dimensions).slice(0, 3);
     currentDraft = await ensureGuideBlocks(
-      await withoutInventedPeople(finalizeDraftBody(await reviseDraft(currentDraft, grade.feedback, weakest)), draft.title),
+      await withoutInventedPeople(
+        finalizeDraftBody(await reviseDraft(currentDraft, grade.feedback, weakest)),
+        draft.title,
+        pack,
+        brief.business.domain,
+      ),
       { title: draft.title },
     );
   }
@@ -1849,24 +1856,35 @@ const FABRICATION_NOTE =
   "headings, table of contents, FAQ, warm tone, and links. Only strip invented operational process details.";
 
 /**
- * No invented people: author sections and bylines are already stripped by
- * finalize; if lines still look like an invented quote, customer story,
- * persona or staff name, one rewrite removes them (only when something is
- * flagged, so it costs nothing for a clean draft).
+ * House rules every blog must meet, enforced after writing and after each
+ * revision. No invented people: author sections and bylines are already
+ * stripped by finalize; lines that still look like an invented quote, story,
+ * persona or staff name are flagged. The store's pack may add forbidden claims
+ * (pets: where a product is made / who makes it, engraving, free shipping on
+ * urns or jewelry) and may limit outside links to its authority sites (other
+ * links are unlinked, words kept). One rewrite fixes everything flagged; it
+ * costs nothing for a clean draft, and stores whose pack sets no extra rules
+ * get exactly the invented-people check.
  */
-async function withoutInventedPeople(bodyMd: string, title: string): Promise<string> {
-  const flags = inventedPeopleFlags(bodyMd);
-  if (!flags.length) return bodyMd;
+async function withoutInventedPeople(
+  bodyMd: string,
+  title: string,
+  pack?: IndustryPack,
+  domain = "",
+): Promise<string> {
+  const linked = pack ? stripDisallowedLinks(bodyMd, pack, domain) : bodyMd;
+  const flags = [...inventedPeopleFlags(linked), ...(pack ? packClaimFlags(linked, pack) : [])];
+  if (!flags.length) return linked;
   const lines = flags.map((f) => `- "${f.line}" (${f.why})`).join("\n");
   const out = await reviseBodyWithInstruction(
-    bodyMd,
+    linked,
     title,
-    `Remove every invented person from the article. These lines contain a quote, customer story, persona, ` +
-      `named individual or staff name that must not be there:\n${lines}\n` +
-      `Rewrite each as a plain factual statement in the store's voice (or delete it if it only adds the person). ` +
-      `Keep every fact, figure and link. Do not add any new people, quotes or stories.`,
+    `Fix these lines; each breaks a house rule (the reason is in brackets):\n${lines}\n` +
+      `Rewrite each as a plain factual statement in the store's voice that no longer breaks the rule, or delete it ` +
+      `if nothing useful is left. Keep every other fact, figure and link. Do not add any people, quotes, stories, ` +
+      `claims about where products are made or who makes them, engraving offers or free-shipping promises.`,
   );
-  return finalizeDraftBody(out);
+  return finalizeDraftBody(pack ? stripDisallowedLinks(out, pack, domain) : out);
 }
 
 /** Apply a plain-language edit instruction to a blog body, preserving structure.

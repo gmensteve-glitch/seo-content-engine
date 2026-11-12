@@ -2,7 +2,7 @@
 
 > New operator or new Claude session: paste **"Read docs/RESUME.md and docs/OPERATING-SOP.md, then tell me the current state and wait for instructions."** Do not start changing code until you have read both.
 
-Last updated: 2026-11-05. Keep this file current: when you ship something that changes how the system works, update the section it belongs to in the same commit.
+Last updated: 2026-11-12. Keep this file current: when you ship something that changes how the system works, update the section it belongs to in the same commit.
 
 ## What this is
 
@@ -13,6 +13,7 @@ A multi-store SEO content engine: a Next.js 16 dashboard plus Claude agents that
 | Overnight Caskets | overnightcaskets.com (`overnight-casket.myshopify.com`) | The money-maker. Caskets. |
 | Signature Headstones | signatureheadstones.com (`signatureheadstones.myshopify.com`) | Second store. Headstones and grave markers. A different line of business, see "Industry packs". |
 | Trusted Caskets | trustedcaskets.com | Sandbox / seed data. |
+| Overnight Caskets Pets | pets.overnightcaskets.com (`overnight-caskets-pets.myshopify.com`) | New (Nov 2026). Pet caskets, pet urns, pet cremation jewelry. Shopify Plus expansion store in Overnight's organization; password-protected until launch. Uses the "pets" industry pack. |
 
 - **Live dashboard:** https://seo-content-engine-production-22cc.up.railway.app (logins in `docs/OPERATING-SOP.md` §9)
 - **Repo branch that deploys:** `claude/project-onboarding-w8hlg2`. Railway builds and deploys every push to it. Never push to any other branch.
@@ -42,7 +43,13 @@ Two facts that must stay correct:
 
 A pack can also name `offTopic` subjects (headstones: caskets/coffins). For such a store, `tidyBlogPipeline` (runs before every auto-advance and replenish) deletes matching unpublished drafts (in progress, Ready or scheduled), rejects matching pending briefs and dismisses matching proposed ideas; the ideator drops matching proposals. Published posts are never touched. `industryFor` decides on the store's name and domain first; the profile only breaks a tie.
 
+**Pets** (`PETS`, 2026-11-12): chosen FIRST by `isPetStore` whenever the store's name or domain has "pet"/"pets" as a word or domain part (so "Overnight Caskets Pets" is not caskets; "carpet" doesn't count). Legal statement: home pet burial rules differ by city and county, check local rules first; no FTC Funeral Rule, funeral homes, cemetery fees or statutes. Outside links only AVMA, ASPCA, AKC (`blogLinksOnlyToAuthorities`: other links are unlinked in blogs; category fact-check already limits to authority hosts). `offTopic`: human caskets/funerals (or any casket/coffin/funeral/burial title that names no pet or animal), funeral homes, headstones, pre-planning. Pillars, buyer questions and product facts (caskets 20"/24"/28"/32"/40"/52" by pet length; paper heart, brass, chrome/enamel, wood urns; 5 stainless steel cremation necklaces) live in the pack. **Hard rules for every post** (`forbiddenClaims`, checked per sentence by `src/lib/agents/pack-rules.ts`): never where products are made or who makes them, no engraving, no free shipping on urns or jewelry (also no FTC/funeral homes). Blogs: flagged lines get one rewrite (`withoutInventedPeople` in the pipeline, which now takes the pack); category pages: the fact-check reports them so the revise loop fixes them; product blurbs drop such sentences before the writer sees them; the copy package lists any left. Packs without these fields behave exactly as before.
+
 To add a new store in a new industry: add a pack, done.
+
+## Stores behind a password page (pre-launch)
+When the public storefront can't be read (Shopify's password page), each public reader falls back to the store's Shopify connection, read-only (`src/lib/connectors/shopify-admin-read.ts`, `ShopifyAdapter.list*Read`, GET only): collection scan (`discoverCollections` → custom + smart collections with product counts, only when the public scan finds nothing), catalog facts (`fetchCatalogFacts` → active products of the collection, only when public products.json is empty), store policies (public policy pages skip a password page; then Shopify policies + shipping/FAQ/returns pages), and brand intake (`runIntake` ignores scraped password pages and uses shop pages, collections, a product sample and policies). Live posts: when the Admin API answers with zero articles, that's a real empty list (`ok: true`), so a brand-new store can generate ideas; an unreadable list still pauses generation. Stores whose public site is readable never hit the fallbacks.
+
 
 ## Blog publishing to Shopify is OFF (owner decision 2026-11-04)
 The engine must not create or edit any Shopify blog article: the operator downloads blogs and publishes them by hand. `src/lib/cms/publishing.ts` (`blogPublishingEnabled`) is false unless the env var `BLOG_PUBLISHING` is exactly `on`. While off, `getCmsAdapter` returns an adapter whose `publish`/`update` throw before any request is sent (reads such as list, health check and product facts still work), so every path is covered: the review page's Publish button and calendar publish (`publishNow` refuses up front with a plain message), scheduled auto-publish (`publishScheduled` no-ops), "fix published posts" (no-ops before its AI rewrite), and the backlink push after a publish. Do not turn it back on without the owner's say-so.
@@ -51,6 +58,8 @@ The engine must not create or edit any Shopify blog article: the operator downlo
 Gemini credits are used up and the owner wants no stock-photo fallback. `src/lib/media/hero-images.ts` (`heroImagesEnabled`) is false unless env `HERO_IMAGES` is exactly `on`. While off, `sourceHeroImage` returns nothing (no Gemini, no Unsplash, no store product photo) and `ensureHeroImage` leaves the blog without an image, so blogs are still written, graded and reach Ready normally. The review page's generate / stock-photo buttons say images are off; uploading your own image and picking one already in the gallery still work. The copy package shows "no hero image" and the WebP download only works for a blog that has one.
 
 ## Shopify connection
+**Overnight Caskets Pets** is in the same Shopify organization as Overnight, so it uses Overnight's env app: Connectors → "Connect with Shopify" with `overnight-caskets-pets.myshopify.com`, NOT "This store has its own app". The app must be installed on the pet store, and the app version must include the read scopes the engine uses: `read_content` (blogs, articles, pages), `read_products` (products, collections), `read_legal_policies` (shop policies). A client-credentials token carries every scope the installation granted, so the same app's existing scopes apply to the pet store too; publishing stays off in the engine regardless (`BLOG_PUBLISHING`).
+
 Client-credentials grant against a Dev Dashboard app installed on the store (`src/lib/connectors/shopify-oauth.ts`, `connectShopifyWithAppCredentials` in `pipeline/service.ts`). Tokens last ~24h and are refreshed automatically (`freshCmsConfig`). Env `SHOPIFY_APP_CLIENT_ID/SECRET` is Overnight's app. **Signature Headstones is a separate Shopify organization**, so it has its own app; its credentials are stored encrypted on its connector (entered via "This store has its own app" on Connectors). The connection is only needed for blog publishing; category pages read the public storefront.
 
 ## Search Console (per store)

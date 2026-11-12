@@ -109,7 +109,7 @@ export function CopyPackagePanel({ draftId }: { draftId: string }) {
           {pkg.flags.length > 0 && (
             <div className="rounded-lg border border-[var(--warn)] p-2.5 text-[12px]">
               <div className="mb-1 flex items-center gap-1.5 font-medium text-[var(--warn)]">
-                <AlertTriangle size={13} /> Check these lines: they may describe an invented person, quote or story
+                <AlertTriangle size={13} /> Check these lines: they may describe an invented person, quote or story, or break a store rule
               </div>
               <ul className="space-y-1 text-[var(--muted)]">
                 {pkg.flags.map((f) => (

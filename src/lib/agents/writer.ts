@@ -27,7 +27,7 @@ STRUCTURE:
 - Clear H2/H3 sections; a step-by-step "how-to" where the topic calls for it.
 - Self-contained passages of ~130–170 words under key headings so AI answer engines can quote them verbatim.
 - An FAQ section near the end (each answer self-contained, ~40–70 words).
-- 2–4 links to authoritative EXTERNAL sources (prefer .gov / recognized institutions), placed inline where a claim needs backing. Only link to a real URL you are confident exists.
+${ind.blogLinksOnlyToAuthorities ? `- 1–3 links to outside sources, and ONLY to these sites: ${ind.authorityLinks.map((l) => `${l.title} (${l.url})`).join("; ")}. Link the homepage unless you are certain a deeper page exists. No other outside links.` : "- 2–4 links to authoritative EXTERNAL sources (prefer .gov / recognized institutions), placed inline where a claim needs backing. Only link to a real URL you are confident exists."}
 - Do NOT invent internal links to the site's own pages — never write a relative link like [text](/caskets/pricing-guide) or guess the site's URL structure. Internal links to real published pages are added automatically by the system. Do not write in-page jump links either ("In this guide" is plain text).
 - Soft calls-to-action at the top and bottom (never pushy).
 - NO schema or code in the article: do not write JSON-LD, a \`\`\`json block, a <script> tag or any other code block. Schema is handled separately.
@@ -36,7 +36,7 @@ STRUCTURE:
 GEO — BUILT TO BE QUOTED BY AI ANSWER ENGINES (ChatGPT, Perplexity, Google AI Overviews, Gemini). This matters as much as ranking in Google — the goal is for an AI to lift YOUR text as its answer and cite this site:
 - Do NOT write a "Quick answer" block, label or bold answer box. Instead, the intro's first 1–2 sentences answer the exact question the title asks in plain prose: lead with the number/range/verdict, so an AI can quote them as a complete, accurate answer.
 - Under EVERY H2, the first 1–2 sentences must directly and completely answer that section's implied question — no "as mentioned above", no pronouns pointing elsewhere, no setup. Every passage must stand on its own when pulled out of context.
-- State key facts as clean, standalone, attributable sentences with concrete numbers, ranges, or named standards (e.g. ${ind.key === "headstones" ? '"A standard single flat grave marker is 24 inches wide, 12 inches deep and 4 inches thick."' : '"A standard adult casket is about 84 inches long and 28 inches wide."'}). Specific, quotable facts beat vague prose.
+- State key facts as clean, standalone, attributable sentences with concrete numbers, ranges, or named standards (e.g. ${ind.exampleFact ? `"${ind.exampleFact}"` : ind.key === "headstones" ? '"A standard single flat grave marker is 24 inches wide, 12 inches deep and 4 inches thick."' : '"A standard adult casket is about 84 inches long and 28 inches wide."'}). Specific, quotable facts beat vague prose.
 - Mention the brand naturally where it fits so the source is attributable (never spammy).
 - Make the FAQ answers fully self-contained — they are prime AI-answer real estate.
 

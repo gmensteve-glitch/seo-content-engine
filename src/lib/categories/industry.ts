@@ -9,7 +9,7 @@
 // local angles, default pillars) reads from the pack instead of assuming
 // caskets. Add a new line of business by adding a pack here.
 
-export type IndustryKey = "caskets" | "headstones" | "general";
+export type IndustryKey = "caskets" | "headstones" | "pets" | "general";
 
 export interface IndustryPack {
   key: IndustryKey;
@@ -65,6 +65,15 @@ export interface IndustryPack {
   /** Topics that belong to a different line of business. Blog ideas, briefs and
    *  unpublished drafts whose title matches are removed from this store. */
   offTopic?: RegExp;
+  /** Claims no post may make for this store (checked sentence by sentence in
+   *  blogs and category pages). A sentence matches when `re` matches and, if
+   *  `onlyIf` is set, `onlyIf` matches too and `unless` (if set) doesn't. */
+  forbiddenClaims?: { re: RegExp; onlyIf?: RegExp; unless?: RegExp; why: string }[];
+  /** Blogs may link outside the store ONLY to `authorityLinks` hosts; any
+   *  other outside link is unlinked (the words stay). */
+  blogLinksOnlyToAuthorities?: boolean;
+  /** An example of a clean, quotable fact for the blog writer's prompt. */
+  exampleFact?: string;
 }
 
 // ── Caskets ────────────────────────────────────────────────────
@@ -309,6 +318,128 @@ const HEADSTONES: IndustryPack = {
     "our production or shipping PROCESS, turnaround or delivery timelines beyond what our policy pages state, how or when a stone is quarried/cut/carved/crated/handed off, named carriers or freight routes, installation promises, or guarantees. Do NOT invent day-by-day production or shipping schedules or a step-by-step \"how a headstone travels from order to the cemetery\" process.",
 };
 
+// ── Pet caskets, pet urns & pet cremation jewelry ──────────────
+
+const PETS: IndustryPack = {
+  key: "pets",
+  label: "pet caskets, pet urns and pet cremation jewelry",
+  productNoun: "pet casket",
+  productPlural: "pet caskets",
+  venue: "local authority",
+  hubHandles: new Set([
+    "pet-caskets",
+    "all-pet-caskets",
+    "pet-urns",
+    "pet-cremation-urns",
+    "pet-cremation-jewelry",
+    "cremation-jewelry",
+    "cremation-necklaces",
+    "pet-memorials",
+  ]),
+  hubPattern: /^(all-)?(pet-caskets|pet-coffins|pet-urns|pet-cremation-urns|pet-cremation-jewelry|cremation-jewelry|cremation-necklaces|pet-memorials|pet-products)$/,
+  colourPattern: CASKET_COLOUR,
+  authorityLinks: [
+    { title: "American Veterinary Medical Association (AVMA)", url: "https://www.avma.org/" },
+    { title: "ASPCA", url: "https://www.aspca.org/" },
+    { title: "American Kennel Club (AKC)", url: "https://www.akc.org/" },
+  ],
+  authorityNames: "AVMA, ASPCA, AKC",
+  legalRule:
+    "HOME PET BURIAL (the honest version): whether you may bury a pet at home depends on where you live. Rules differ from city to city and county to county (and leases or HOA rules can add their own), so tell the reader to check their local rules first, with their city or county. Make no other legal claims.",
+  legalDontSay:
+    "Never mention the FTC Funeral Rule, funeral homes, cemetery fees or any statute or ordinance by number, and never state a specific city's or county's rule as fact.",
+  rulesSectionName: "check your local rules",
+  requiredSections:
+    'a "prices" section using the live range, a "sizes" section (pet caskets are chosen by the pet\'s length; urns by capacity; only sizes from the catalog), and a "shipping & returns" section (from STORE POLICY only)',
+  tableHint: "casket sizes (20\" to 52\") by pet length, or urn materials (paper heart, brass, chrome/enamel, wood), compared — only values from the catalog",
+  promiseRule:
+    "Shipping, delivery and return claims come ONLY from STORE POLICY. Never promise free shipping on urns or jewelry. Never say where a product is made or who makes it, and never offer engraving.",
+  localRules: (place, name) => `THIS IS A LOCAL PAGE FOR ${place.toUpperCase()}: name ${place} in the H1, intro, SEO title and two headings; keep it short and link to the hub. Home pet burial rules in ${place} depend on the city and county: tell the reader to check with their city or county first, and never state a local rule, fee or business as fact. ${name} ships nationwide.`,
+  offlineSections: (tier, name, biz) =>
+    tier === 3
+      ? [
+          { heading: `${name}: what's available`, purpose: "the sizes or materials in this collection" },
+          { heading: `${name} prices at ${biz}`, purpose: "live price range" },
+        ]
+      : [
+          { heading: `How to choose the right size`, purpose: "pet caskets by the pet's length; urns by capacity" },
+          { heading: `${name} prices at ${biz}`, purpose: "live price range" },
+          { heading: `Home burial: check your local rules`, purpose: "rules differ by city and county" },
+          { heading: `Shipping and returns`, purpose: "from STORE POLICY only" },
+        ],
+  offlineQuestions: (kw) => [
+    `What size casket do I need for my dog or cat?`,
+    `How deep should I bury my pet?`,
+    `Can I bury my pet in my backyard?`,
+    `What size urn do I need for my dog?`,
+    `How much do ${kw} cost?`,
+    `How do cremation necklaces work?`,
+  ],
+  primer: `INDUSTRY PRIMER — PET CASKETS, PET URNS & PET CREMATION JEWELRY (sold online, shipped to the family)
+- Buyers: a family whose dog, cat or other pet has just died, often deciding within a day between burying at home and cremation, or planning a keepsake after cremation. Grief is fresh: be gentle and practical.
+- PET CASKETS come in 20", 24", 28", 32", 40" and 52" sizes, chosen by the pet's length: measure the pet and pick a casket longer than the pet. Only state sizes that are in the catalog.
+- PET URNS: paper heart urns, brass urns, chrome/enamel urns and wood urns. Rule of thumb widely used for sizing: about 1 cubic inch of urn capacity per pound of the pet's healthy weight (frame it as a rule of thumb).
+- PET CREMATION JEWELRY: 5 stainless steel cremation necklaces. A cremation necklace holds a small pinch of ashes in a sealed chamber inside the pendant (frame filling and sealing in general terms; never promise waterproofing).
+- HOME BURIAL: allowed or not depends on the city and county (leases and HOA rules can add limits), so the reader should check local rules first. Common general guidance (frame as commonly recommended, not law): bury deep enough that animals can't disturb the grave, often cited as at least about 3 feet of soil above the pet, away from water sources and buried utility lines; call the utility locator (811) before digging.
+- CREMATION: communal vs private (individual) cremation; cost varies by the pet's weight, the provider and the region. Frame any figure as "typically" and never quote a named provider's price.
+- PET LOSS & GRIEF: normal grief, memorial ideas, helping children; point to AVMA / ASPCA / AKC for authoritative pet-care and pet-loss information.
+- NEVER: say where any product is made or who makes it ("Made in the USA", a maker's, supplier's or factory's name, "handcrafted by…"); offer or mention engraving; promise free shipping on urns or jewelry; mention the FTC Funeral Rule, funeral homes, human caskets or funerals, headstones, cemetery fees, pre-planning, or any statute or ordinance by number.`,
+  materialWords: ["stainless steel", "brass", "chrome", "enamel", "wood", "pine", "paper", "cardboard", "fabric", "velvet", "satin", "plastic", "metal"],
+  colourWords: ["black", "white", "silver", "gold", "blue", "pink", "purple", "red", "green", "brown", "grey", "gray", "rose gold", "natural"],
+  styleWords: ["heart", "paw", "bone", "cylinder", "bar", "pendant", "necklace", "keepsake", "photo frame"],
+  attributeExtractors: [
+    {
+      label: "Casket sizes (by pet length)",
+      regex: /\b(20|24|28|32|40|52)\s*(?:"|”|″|-?\s?in(?:ch(?:es)?)?\b)/gi,
+      format: (m) => `${m[1]}"`,
+    },
+    {
+      label: "Urn capacities",
+      regex: /\b(\d{1,3})\s*(?:cubic\s*inch(?:es)?|cu\.?\s*in\.?)/gi,
+      format: (m) => `${m[1]} cu in`,
+    },
+  ],
+  pillars: [
+    { name: "Home pet burial", description: "Burying a pet at home: local rules, depth, where and how." },
+    { name: "Choosing a pet casket", description: "Picking the right size by the pet's length; materials and options." },
+    { name: "Pet cremation & urns", description: "Cremation options and costs; choosing and sizing an urn." },
+    { name: "Pet cremation jewelry", description: "How cremation necklaces work and how to choose one." },
+    { name: "Pet memorial ideas", description: "Ways to remember a pet at home and outdoors." },
+    { name: "Pet loss & grief", description: "Grieving a pet, helping children and other pets cope." },
+  ],
+  blogLocalAngles: `    1. HOME BURIAL BY CITY/COUNTY: "Can You Bury a Pet in Your Backyard in {City}? What to Check First" — the honest answer: it depends on the city and county, so the page explains what to check and where (the city or county code, animal services), never stating the local rule as fact unless the page can link a real official source.
+    2. PET CREMATION IN {City/State}: options (communal vs private) and how costs are usually set, in general terms — never a named provider's prices.
+  Keep local pages genuinely useful; never a thin "we ship to {City}" template.`,
+  blogLocalGuidance: `- Name the city/county and state in the H1 and the intro's first sentence.
+- The honest local answer: whether you can bury a pet at home in {City} depends on the city and county rules (and any lease or HOA rules); tell the reader to check with the city or county first. Never state the local rule, fine or ordinance number as fact.
+- General guidance (depth, distance from water and utility lines, calling 811 before digging) is fine, framed as commonly recommended.
+- We ship nationwide and have no local storefront or service; never imply one.
+- Outside links only to AVMA, ASPCA or AKC.`,
+  // Human caskets/funerals (said outright, or a casket/coffin/funeral/burial
+  // title that never names a pet or animal), funeral homes, headstones,
+  // pre-planning.
+  offTopic:
+    /\bhuman (?:caskets?|coffins?|funerals?|burials?)\b|\bfuneral homes?\b|\bhead ?stones?\b|\bgravestones?\b|\bpre-?(?:plan|planning|planned|need)\b|^(?!.*\b(?:pets?|dogs?|cats?|pupp(?:y|ies)|kittens?|animals?|birds?|rabbits?|bunn(?:y|ies)|hamsters?|guinea pigs?|ferrets?|horses?|reptiles?|fish)\b).*\b(?:caskets?|coffins?|funerals?|burials?)\b/i,
+  blogOperationalRule:
+    "where or by whom our products are made or sourced, our production, shipping or delivery PROCESS or timelines beyond STORE POLICY, engraving or personalization services, or free shipping on urns or jewelry. Never write \"Made in the USA\" or name a maker, supplier or factory.",
+  forbiddenClaims: [
+    { re: /\bmade in\b/i, why: "says where a product is made" },
+    { re: /\b(?:american|usa|u\.s\.a?\.?)[- ]made\b/i, why: "says where a product is made" },
+    { re: /\b(?:hand)?(?:made|crafted|built|manufactured|produced|sourced) (?:by|at|from) (?:our |a |an |the )?(?:[A-Z][\w&'-]+|partner|supplier|factory|workshop|artisans?|makers?)/, why: "names who makes a product" },
+    { re: /\b(?:manufacturer|manufactured|supplier|factory|vendor|artisans?)\b/i, why: "mentions who makes or supplies a product" },
+    { re: /\bengrav(?:e|ed|es|ing|able)\b/i, why: "offers or mentions engraving" },
+    {
+      re: /\bfree (?:standard |ground |express )?(?:shipping|delivery)\b|\bships? (?:for )?free\b/i,
+      onlyIf: /\b(?:urns?|jewel(?:le)?ry|necklaces?|pendants?|keepsakes?|all orders|every order|everything|sitewide|store-?wide)\b/i,
+      why: "promises free shipping on urns or jewelry",
+    },
+    { re: /\bFTC\b|\bfuneral rule\b/i, why: "mentions the FTC Funeral Rule" },
+    { re: /\bfuneral homes?\b/i, why: "mentions funeral homes" },
+  ],
+  blogLinksOnlyToAuthorities: true,
+  exampleFact: "Pet caskets are chosen by the pet's length, so measure your pet from nose to tail before choosing a size.",
+};
+
 // ── General (anything else) ────────────────────────────────────
 
 const GENERAL: IndustryPack = {
@@ -350,9 +481,18 @@ const GENERAL: IndustryPack = {
   offTopic: undefined,
 };
 
-export const INDUSTRIES: Record<IndustryKey, IndustryPack> = { caskets: CASKETS, headstones: HEADSTONES, general: GENERAL };
+export const INDUSTRIES: Record<IndustryKey, IndustryPack> = { caskets: CASKETS, headstones: HEADSTONES, pets: PETS, general: GENERAL };
 
-/** Which line of business a store is in, from its name, domain and profile. */
+/** True when a store's own name or domain names pets ("pet"/"pets" as a word or
+ *  a domain/handle part: "Overnight Caskets Pets", pets.example.com,
+ *  my-pet-store). "carpet" or "competition" don't count. */
+export function isPetStore(biz: { name?: string | null; domain?: string | null }): boolean {
+  const words = `${biz.name ?? ""} ${biz.domain ?? ""}`.toLowerCase().split(/[^a-z0-9]+/);
+  return words.some((w) => w === "pet" || w === "pets");
+}
+
+/** Which line of business a store is in, from its name, domain and profile.
+ *  A store whose name or domain names pets is always the pets pack. */
 export function industryFor(biz: { name?: string | null; domain?: string | null; profileMd?: string | null }): IndustryPack {
   const STONES = ["headstone", "grave marker", "gravestone", "monument", "memorial", "tombstone"];
   const BOXES = ["casket", "coffin", "urn"];
@@ -364,6 +504,8 @@ export function industryFor(biz: { name?: string | null; domain?: string | null;
     if (boxes > stones && boxes > 0) return CASKETS;
     return null;
   };
+  // Pets first: "Overnight Caskets Pets" names caskets too, but it's a pet store.
+  if (isPetStore(biz)) return PETS;
   // The store's own name and domain decide first; a profile (which may have been
   // copied from a sister store) only breaks a tie.
   return (

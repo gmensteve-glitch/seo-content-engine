@@ -52,6 +52,8 @@ export async function fetchStorePolicies(domain: string): Promise<string> {
       const text = textOf(await res.text());
       // A policy page has real body text; a 200 that's just chrome is skipped.
       if (text.length < 200) continue;
+      // A store behind its password page answers every URL with that page.
+      if (res.url.includes("/password") || /enter (?:the )?store using password|this store is password protected/i.test(text)) continue;
       // Shopify's stock FAQ template ships with a fake phone number and
       // boilerplate refund terms. Never let that masquerade as store policy.
       if (/555-1234|lorem ipsum|\[insert|your company name/i.test(text)) {

@@ -3,6 +3,8 @@
 // STUB: method bodies are outlined with the exact Admin API calls to wire once deps are installed.
 
 import type {
+  AdminCollection,
+  AdminProduct,
   CmsAdapter,
   CmsArticle,
   CmsPage,
@@ -246,6 +248,83 @@ export class ShopifyAdapter implements CmsAdapter {
       }
     }
     return out;
+  }
+
+  /** Every page of a GET listing, following cursor pagination. */
+  private async getAll<T>(firstUrl: string, key: string, maxPages = 40): Promise<T[]> {
+    const out: T[] = [];
+    let url: string | null = firstUrl;
+    for (let page = 0; url && page < maxPages; page++) {
+      const res: { data: Record<string, T[] | undefined>; next: string | null } = await this.getPage(url);
+      out.push(...(res.data[key] ?? []));
+      url = res.next;
+    }
+    return out;
+  }
+
+  private collectionsCache: AdminCollection[] | null = null;
+
+  /** Every collection (custom + smart), with live product counts. Read-only. */
+  async listCollectionsRead(): Promise<AdminCollection[]> {
+    if (this.collectionsCache) return this.collectionsCache;
+    type Row = { id: number; handle: string; title: string; body_html: string | null; published_at: string | null };
+    const fields = "fields=id,handle,title,body_html,published_at";
+    const [custom, smart] = await Promise.all([
+      this.getAll<Row>(`${this.base()}/custom_collections.json?limit=250&${fields}`, "custom_collections"),
+      this.getAll<Row>(`${this.base()}/smart_collections.json?limit=250&${fields}`, "smart_collections"),
+    ]);
+    const out: AdminCollection[] = [];
+    for (const c of [...custom, ...smart].slice(0, 150)) {
+      let count: number | null = null;
+      try {
+        const r = await this.getPage<{ count?: number }>(`${this.base()}/products/count.json?collection_id=${c.id}&status=active`);
+        count = typeof r.data.count === "number" ? r.data.count : null;
+      } catch {
+        count = null;
+      }
+      out.push({ ...c, products_count: count });
+    }
+    this.collectionsCache = out;
+    return out;
+  }
+
+  /** Active products in one collection, in the storefront products.json shape. Read-only. */
+  async listCollectionProductsRead(handle: string): Promise<AdminProduct[] | null> {
+    const col = (await this.listCollectionsRead()).find((c) => c.handle === handle);
+    if (!col) return null;
+    const rows = await this.getAll<AdminProduct & { tags: string | null; product_type: string | null }>(
+      `${this.base()}/products.json?collection_id=${col.id}&status=active&limit=250` +
+        `&fields=title,handle,product_type,tags,body_html,variants,options`,
+      "products",
+      4,
+    );
+    return rows.map((p) => ({
+      title: p.title ?? "",
+      handle: p.handle ?? "",
+      product_type: p.product_type ?? "",
+      tags: p.tags ?? "",
+      body_html: p.body_html ?? "",
+      variants: (p.variants ?? []).map((v) => ({ price: String(v.price ?? ""), compare_at_price: v.compare_at_price ?? null })),
+      options: (p.options ?? []).map((o) => ({ name: o.name, values: o.values ?? [] })),
+    }));
+  }
+
+  /** The shop's legal policies (refund, shipping, privacy, terms). Read-only. */
+  async listPoliciesRead(): Promise<{ title: string; body: string; handle: string }[]> {
+    const r = await this.getPage<{ policies?: { title?: string; body?: string; handle?: string }[] }>(`${this.base()}/policies.json`);
+    return (r.data.policies ?? []).map((p) => ({ title: p.title ?? "", body: p.body ?? "", handle: p.handle ?? "" }));
+  }
+
+  /** Published online-store pages (About, FAQ, Shipping…). Read-only. */
+  async listPagesRead(): Promise<{ title: string; handle: string; body: string }[]> {
+    const rows = await this.getAll<{ title?: string; handle?: string; body_html?: string; published_at?: string | null }>(
+      `${this.base()}/pages.json?limit=250&fields=title,handle,body_html,published_at`,
+      "pages",
+      4,
+    );
+    return rows
+      .filter((p) => p.published_at)
+      .map((p) => ({ title: p.title ?? "", handle: p.handle ?? "", body: p.body_html ?? "" }));
   }
 
   async healthCheck(): Promise<{ ok: boolean; message?: string }> {

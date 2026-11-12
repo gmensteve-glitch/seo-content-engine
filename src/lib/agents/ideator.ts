@@ -104,6 +104,18 @@ function localTemplates(ind: IndustryPack): { state: (s: string) => { title: str
       }),
     };
   }
+  if (ind.key === "pets") {
+    return {
+      state: (st) => ({
+        title: `Can You Bury a Pet at Home in ${st}? What to Check First`,
+        kw: `bury pet at home ${st.toLowerCase()}`,
+      }),
+      city: (c) => ({
+        title: `Pet Burial at Home in ${c}: Local Rules to Check Before You Dig`,
+        kw: `${c.toLowerCase()} pet burial rules`,
+      }),
+    };
+  }
   if (ind.key === "caskets") {
     return {
       state: (s) => ({

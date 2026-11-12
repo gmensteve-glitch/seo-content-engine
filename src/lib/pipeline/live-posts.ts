@@ -7,9 +7,10 @@
 // 2. Public sitemap (fallback): sitemap_articles*.xml (and the older
 //    sitemap_blogs*.xml). Published articles only; titles rebuilt from handles.
 //
-// An empty result is NEVER "this store has no posts": it means the list could
-// not be read. `ok` is false then, and callers must stop (idea generation pauses
-// and shows the warning) instead of carrying on as if nothing exists.
+// An empty result is "this store has no posts" ONLY when the Shopify Admin API
+// answered with zero articles (a new store). If Shopify couldn't be read and
+// the sitemap is empty, the list is unknown: `ok` is false, and callers must
+// stop (idea generation pauses and shows the warning).
 
 import { prisma } from "@/lib/db";
 import { encryptionEnabled } from "@/lib/env";
@@ -97,7 +98,11 @@ export async function getLivePosts(businessId: string, opts: { fresh?: boolean }
         cache.set(businessId, { at: Date.now(), list });
         return list;
       }
-      adminProblem = "Shopify returned 0 articles";
+      // Shopify answered and the store has no articles yet (a new store): that's
+      // a real, correct empty list, not a failed read. Ideas may go ahead.
+      const list: LivePostList = { ok: true, source: "shopify-admin", posts: [], authors: [], readAt };
+      cache.set(businessId, { at: Date.now(), list });
+      return list;
     } catch (e) {
       adminProblem = `Shopify Admin API failed: ${e instanceof Error ? e.message : String(e)}`;
       console.error(`[live-posts] ${business.name}: ${adminProblem}`);

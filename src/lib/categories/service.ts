@@ -9,6 +9,7 @@ import { activeBizId } from "@/lib/active-business";
 import { discoverCollections, localityFor } from "@/lib/categories/discover";
 import { fetchCatalogFacts, type CatalogFacts } from "@/lib/categories/facts";
 import { fetchStorePolicies } from "@/lib/categories/policies";
+import { adminReaderFor, adminPolicyText } from "@/lib/connectors/shopify-admin-read";
 import { industryFor } from "@/lib/categories/industry";
 import {
   buildCategoryBrief,
@@ -173,7 +174,11 @@ export async function rescanCategoryPages(
   const biz = await prisma.business.findUnique({ where: { id: businessId } });
   if (!biz) throw new Error("Business not found");
 
-  const found = await discoverCollections(biz.domain, industryFor(biz));
+  // Public site first; behind a password page, the store's Shopify connection (read-only).
+  const found = await discoverCollections(biz.domain, industryFor(biz), async () => {
+    const reader = await adminReaderFor(biz.id);
+    return (await reader?.listCollectionsRead?.()) ?? [];
+  });
   if (found.length === 0) return { found: 0, added: 0, removed: 0, readable: false };
 
   const now = new Date();
@@ -325,7 +330,10 @@ async function storePolicies(businessId: string, domain: string): Promise<string
   });
   const fresh = biz?.policyFetchedAt && Date.now() - biz.policyFetchedAt.getTime() < POLICY_TTL_DAYS * 86400000;
   if (biz?.policyMd && fresh) return biz.policyMd;
-  const text = await fetchStorePolicies(domain).catch(() => "");
+  // Public policy pages first; behind a password page, the store's Shopify
+  // policies and pages (read-only).
+  const text =
+    (await fetchStorePolicies(domain).catch(() => "")) || (await adminPolicyText(businessId).catch(() => ""));
   if (text) {
     await prisma.business
       .update({ where: { id: businessId }, data: { policyMd: text, policyFetchedAt: new Date() } })
@@ -379,7 +387,10 @@ async function contextFor(row: Row, note?: string): Promise<CategoryContext> {
   const industry = industryFor(biz);
   // Fresh catalog facts every draft — prices must be current. Fall back to the
   // last known facts if the site is momentarily unreadable.
-  let facts = await fetchCatalogFacts(biz.domain, row.handle, industry);
+  let facts = await fetchCatalogFacts(biz.domain, row.handle, industry, async () => {
+    const reader = await adminReaderFor(biz.id);
+    return (await reader?.listCollectionProductsRead?.(row.handle)) ?? null;
+  });
   if (!facts && row.factsJson) {
     try {
       facts = JSON.parse(row.factsJson) as CatalogFacts;
@@ -430,7 +441,7 @@ async function assembleAndCheck(
 ): Promise<Assembled> {
   const bodyHtml = assembleBodyHtml(draft, ctx.businessName, ctx.domain);
   const spec = tierSpec(ctx.collection.tier);
-  const issues = factCheck(draft, bodyHtml, ctx.facts, ctx.links, ctx.domain, spec.faqs[0], ctx.industry.authorityLinks);
+  const issues = factCheck(draft, bodyHtml, ctx.facts, ctx.links, ctx.domain, spec.faqs[0], ctx.industry.authorityLinks, ctx.industry);
   const grade = await gradeDraft(
     draftAsMarkdown(draft, ctx.businessName),
     JSON.stringify({

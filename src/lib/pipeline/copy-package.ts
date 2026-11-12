@@ -19,6 +19,8 @@ import { readGuideBlocks, stripGuideBlocks } from "@/lib/agents/guide-blocks";
 import { stripJsonLdBlocks, buildSchemaJsonLd } from "@/lib/agents/finalize";
 import { stripAuthorSections, inventedPeopleFlags } from "@/lib/agents/no-invented-people";
 import { getLivePosts } from "@/lib/pipeline/live-posts";
+import { industryFor } from "@/lib/categories/industry";
+import { packClaimFlags } from "@/lib/agents/pack-rules";
 
 export const SEO_TITLE_MAX = 60;
 export const META_MIN = 150;
@@ -212,7 +214,7 @@ export async function buildCopyPackage(draftId: string, opts: { refreshSeo?: boo
       metaDescription: true,
       heroImageData: true,
       heroImageUrl: true,
-      business: { select: { name: true } },
+      business: { select: { name: true, domain: true, profileMd: true } },
     },
   });
   if (!draft) throw new Error(`Draft ${draftId} not found`);
@@ -264,7 +266,10 @@ export async function buildCopyPackage(draftId: string, opts: { refreshSeo?: boo
     schemaJsonLd,
     hasHero: Boolean(draft.heroImageData || draft.heroImageUrl),
     checks,
-    flags: inventedPeopleFlags(copyBodyMarkdown(draft.bodyMd)),
+    flags: [
+      ...inventedPeopleFlags(copyBodyMarkdown(draft.bodyMd)),
+      ...packClaimFlags(copyBodyMarkdown(draft.bodyMd), industryFor(draft.business)),
+    ],
   };
 }
 
