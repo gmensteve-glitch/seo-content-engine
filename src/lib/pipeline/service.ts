@@ -815,6 +815,20 @@ function isBriefReady(brief: { targetKeyword: string | null; outline: unknown })
   return Boolean(brief.targetKeyword && brief.targetKeyword.trim().length > 2 && outline.length >= 3);
 }
 
+/** True when blog writing is on hold for this store (Business.blogPaused). */
+async function blogPausedFor(businessId: string): Promise<boolean> {
+  const b = await prisma.business.findUnique({ where: { id: businessId }, select: { blogPaused: true } }).catch(() => null);
+  return Boolean(b?.blogPaused);
+}
+
+/** True when the draft's store has blog writing on hold. */
+async function draftPaused(draftId: string): Promise<boolean> {
+  const d = await prisma.draft
+    .findUnique({ where: { id: draftId }, select: { business: { select: { blogPaused: true } } } })
+    .catch(() => null);
+  return Boolean(d?.business.blogPaused);
+}
+
 /** Thrown when an idea turns out to repeat an existing post, idea or draft. */
 export class RepeatTopicError extends Error {}
 
@@ -982,6 +996,7 @@ export async function tidyBlogPipeline(businessId: string): Promise<{ ideas: num
  */
 export async function autoAdvanceBusiness(businessId: string): Promise<number> {
   requireDb();
+  if (await blogPausedFor(businessId)) return 0; // paused: approve and build nothing
   await tidyBlogPipeline(businessId).catch((e) => {
     console.error("[tidy] failed:", e instanceof Error ? e.message : e);
   });
@@ -1410,6 +1425,7 @@ export async function buildBriefFromIdea(ideaId: string): Promise<string> {
   });
   if (!idea) throw new Error(`Idea ${ideaId} not found`);
   if (idea.brief) return idea.brief.id; // already briefed — idempotent
+  if (idea.business.blogPaused) throw new Error("Blog writing is paused for this store.");
 
   // Re-check for repeats now: posts, ideas and drafts may have appeared since
   // the idea was proposed.
@@ -1460,6 +1476,10 @@ export async function approveBrief(briefId: string): Promise<void> {
     include: { idea: true, draft: true },
   });
   if (!brief) throw new Error(`Brief ${briefId} not found`);
+  if (await blogPausedFor(brief.businessId)) {
+    console.warn(`[approve] blog writing is paused for this store — brief left pending`);
+    return;
+  }
 
   await prisma.brief.update({ where: { id: briefId }, data: { status: "APPROVED" } });
 
@@ -1530,6 +1550,7 @@ async function claimNextDraft(): Promise<{ id: string; briefId: string } | null>
       status: { in: IN_PROGRESS },
       attempts: { lt: WORKER_MAX_ATTEMPTS },
       brief: { status: "APPROVED" },
+      business: { blogPaused: false }, // a paused store's drafts wait
       OR: [{ processingStartedAt: null }, { processingStartedAt: { lt: staleBefore } }],
     },
     orderBy: { createdAt: "asc" },
@@ -1655,6 +1676,14 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
     include: { idea: true, business: true, draft: true },
   });
   if (!brief) throw new Error(`Brief ${briefId} not found`);
+  // Blog writing paused for this store: write nothing, release any claim.
+  if (brief.business.blogPaused) {
+    if (brief.draft) {
+      await prisma.draft.update({ where: { id: brief.draft.id }, data: { processingStartedAt: null } }).catch(() => {});
+    }
+    console.warn(`[worker] ${brief.business.name}: blog writing is paused — skipped “${brief.idea.title}”`);
+    return { draftId: brief.draft?.id ?? "", passed: false, overall: 0, loops: 0 };
+  }
 
   // Ensure a draft exists.
   let draft =
@@ -1819,6 +1848,7 @@ export async function sweepGuideBlocks(max = 4): Promise<number> {
       page: { is: null },
       processingStartedAt: null,
       boostRequestedAt: null,
+      business: { blogPaused: false },
     },
     select: { id: true, title: true, bodyMd: true },
     orderBy: { updatedAt: "desc" },
@@ -2121,6 +2151,7 @@ const REFRESH_COOLDOWN_DAYS = 90;
  */
 export async function refreshPublishedPost(draftId: string): Promise<{ refreshed: boolean }> {
   requireDb();
+  if (await draftPaused(draftId)) return { refreshed: false };
   const draft = await prisma.draft.findUnique({
     where: { id: draftId },
     select: { id: true, bodyMd: true, title: true },
@@ -2224,6 +2255,7 @@ async function refreshCandidates(
  *  5+5 target or skew the local/evergreen balance. */
 export async function autoRefreshBusiness(businessId: string, max = 2): Promise<number> {
   requireDb();
+  if (await blogPausedFor(businessId)) return 0;
   const capacity = await readyCapacity(businessId);
   const room = {
     LOCAL: Math.min(capacity.LOCAL, max),
@@ -2569,6 +2601,7 @@ export async function boostDraft(draftId: string): Promise<{
   usedSources: number;
 }> {
   requireDb();
+  if (await draftPaused(draftId)) throw new Error("Blog writing is paused for this store.");
   const draft = await prisma.draft.findUnique({
     where: { id: draftId },
     include: {
@@ -2607,6 +2640,7 @@ export async function boostDraft(draftId: string): Promise<{
  */
 export async function autoImproveDraft(draftId: string): Promise<void> {
   requireDb();
+  if (await draftPaused(draftId)) return;
 
   // Cheap pre-check: skip pieces that already pass, or are too far below the bar
   // to be worth the (expensive) boost + revise. Only "close" near-misses qualify.
@@ -2705,7 +2739,7 @@ export async function processBoostRequests(max = 5): Promise<number> {
   try {
     for (let i = 0; i < max; i++) {
       const d = await prisma.draft.findFirst({
-        where: { boostRequestedAt: { not: null } },
+        where: { boostRequestedAt: { not: null }, business: { blogPaused: false } },
         orderBy: { boostRequestedAt: "asc" },
         select: { id: true },
       });
@@ -2808,7 +2842,7 @@ export async function regradeStaleNearMisses(max = 3): Promise<number> {
         page: { is: null },
         processingStartedAt: null,
         boostRequestedAt: null,
-        business: { domain: { contains: "signatureheadstones.com", mode: "insensitive" } },
+        business: { domain: { contains: "signatureheadstones.com", mode: "insensitive" }, blogPaused: false },
         // Has grades, and none of them is newer than the cutoff.
         grades: { some: {}, none: { createdAt: { gte: REGRADE_CUTOFF } } },
       },

@@ -73,6 +73,10 @@ model Business {
   // Blog post titles already on the store, pasted by the operator (string[]).
   // [] = "this store has no posts yet". Null = not set (no manual mode).
   manualPosts      Json?
+  // Blog writing on hold for this store: the worker, auto-advance, approvals,
+  // boosts, refreshes and the guide/regrade sweeps skip it. Briefs and drafts
+  // are kept as they are.
+  blogPaused       Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
