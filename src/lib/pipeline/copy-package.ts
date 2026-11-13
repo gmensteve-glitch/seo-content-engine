@@ -227,7 +227,10 @@ export async function buildCopyPackage(draftId: string, opts: { refreshSeo?: boo
   }
 
   const guide = readGuideBlocks(draft.bodyMd);
-  const bodyHtml = copyBodyHtml(draft.bodyMd);
+  // Brand-neutral store: no links in the body, even in an older blog.
+  const bodyHtml = industryFor(draft.business).blogGenericOnly
+    ? copyBodyHtml(draft.bodyMd).replace(/<a\b[^>]*>([\s\S]*?)<\/a>/gi, "$1")
+    : copyBodyHtml(draft.bodyMd);
   const live = await getLivePosts(draft.businessId).catch(() => null);
   const authors = live?.authors ?? [];
   const byline = {
@@ -249,6 +252,9 @@ export async function buildCopyPackage(draftId: string, opts: { refreshSeo?: boo
     { label: "No H1 in the body", ok: !/<h1\b/i.test(bodyHtml) },
     { label: "No “In this guide” / “What to know first” in the body", ok: !/in this guide|what to know first/i.test(bodyHtml.replace(/<[^>]+>/g, " ").slice(0, 4000)) },
     { label: "No schema or code in the body", ok: !/<script|```|"@context"/i.test(bodyHtml) },
+    ...(industryFor(draft.business).blogGenericOnly
+      ? [{ label: "No links in the body (brand-neutral store)", ok: !/<a\b/i.test(bodyHtml) }]
+      : []),
     { label: `SEO title ≤ ${SEO_TITLE_MAX} characters (${seoTitle.length})`, ok: seoTitleOk(seoTitle) },
     { label: `Meta description ${META_MIN}–${META_MAX} characters (${metaDescription.length})`, ok: metaOk(metaDescription, draft.bodyMd) },
   ];

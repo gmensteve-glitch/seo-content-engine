@@ -74,6 +74,13 @@ export interface IndustryPack {
   blogLinksOnlyToAuthorities?: boolean;
   /** An example of a clean, quotable fact for the blog writer's prompt. */
   exampleFact?: string;
+  /** Blogs are brand-neutral guides (src/lib/agents/generic-blog.ts): nothing
+   *  about the store, its products, prices, sizes or shipping, no other brands,
+   *  no links at all; product facts never reach blog writing. Category pages
+   *  are unaffected. */
+  blogGenericOnly?: boolean;
+  /** The primer the BLOG brief and writer get when blogGenericOnly (no product facts). */
+  blogGenericPrimer?: string;
 }
 
 // ── Caskets ────────────────────────────────────────────────────
@@ -437,7 +444,18 @@ const PETS: IndustryPack = {
     { re: /\bfuneral homes?\b/i, why: "mentions funeral homes" },
   ],
   blogLinksOnlyToAuthorities: true,
-  exampleFact: "Pet caskets are chosen by the pet's length, so measure your pet from nose to tail before choosing a size.",
+  exampleFact: "Measure your pet from the tip of the nose to the base of the tail before you choose a casket.",
+  // Owner decision 2026-11-13: pet blogs are brand-neutral guides with no links.
+  blogGenericOnly: true,
+  blogGenericPrimer: `TOPIC PRIMER — PET LOSS, PET BURIAL AND PET CREMATION (general knowledge for a brand-neutral guide)
+- Readers: a family whose dog, cat or other pet has just died, or is about to, often deciding within a day between burying at home and cremation, or planning a keepsake after cremation. Grief is fresh: be gentle and practical.
+- PET CASKETS (in general): chosen by the pet's length; measure from the tip of the nose to the base of the tail with the pet lying on its side and allow a few inches of room. Materials vary (wood, cardboard, fabric-lined, plastic). Say nothing about any particular seller's sizes or prices.
+- URNS (in general): a widely used rule of thumb is about 1 cubic inch of urn capacity per pound of the pet's healthy weight (frame it as a rule of thumb). Common materials: wood, metal, ceramic, paper/biodegradable.
+- CREMATION JEWELRY (in general): a cremation necklace holds a small pinch of ashes in a sealed chamber inside the pendant (frame filling and sealing in general terms; never promise waterproofing).
+- HOME BURIAL: allowed or not depends on the city and county (leases and HOA rules can add limits), so the reader should check local rules first. Common general guidance (frame as commonly recommended, not law): bury deep enough that animals can't disturb the grave, often cited as at least about 3 feet of soil above the pet, away from water sources and buried utility lines; call 811 before digging.
+- CREMATION: communal vs private (individual) cremation; cost varies by the pet's weight, the provider and the region. Frame any figure as "typically" and never name or quote a provider.
+- PET LOSS & GRIEF: normal grief, memorial ideas, helping children and other pets cope.
+- NEVER: mention any store, brand, company or product line; link anything; invent people or quotes; say where products are made; mention engraving or free shipping; mention the FTC Funeral Rule, funeral homes, human funerals, headstones or statutes.`,
 };
 
 // ── General (anything else) ────────────────────────────────────

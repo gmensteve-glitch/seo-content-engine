@@ -48,6 +48,7 @@ import { adminIntakeCorpus } from "@/lib/connectors/shopify-admin-read";
 import { getManualCatalog, manualIntakeCorpus, manualProductFacts } from "@/lib/catalog/manual-catalog";
 import { industryFor, type IndustryPack } from "@/lib/categories/industry";
 import { packClaimFlags, stripDisallowedLinks } from "@/lib/agents/pack-rules";
+import { GENERIC_BLOG_RULES, genericProblems, hasLinks, stripAllLinks } from "@/lib/agents/generic-blog";
 import { getLivePosts } from "@/lib/pipeline/live-posts";
 import { strikingSplit, blogPath } from "@/lib/pipeline/striking";
 import { pillarCoverage } from "@/lib/pipeline/pillar-coverage";
@@ -419,7 +420,10 @@ export async function generateIdeasReport(
   const existingTitles = [...ideas.map((i) => i.title), ...drafts.map((d) => d.title)];
   const seen = new Set([...existingTitles, ...liveTitles].map(normTitle));
 
-  const [perfNote, themesDone] = await Promise.all([buildPerformanceNote(businessId), usedThemes(businessId)]);
+  const [perfNote0, themesDone] = await Promise.all([buildPerformanceNote(businessId), usedThemes(businessId)]);
+  const perfNote = industry.blogGenericOnly
+    ? `${perfNote0}\n\nBLOG STYLE FOR THIS STORE: every blog is a brand-neutral, generic guide for pet owners. Propose helpful topics; no titles about a store, a brand, specific products, prices, sizes or shipping.`
+    : perfNote0;
   const performanceNote = themesDone.length
     ? `${perfNote}\n\nTHEMES THE OPERATOR ALREADY HANDLED THEMSELVES (do not propose ideas on these themes): ${themesDone.map((t) => `"${t}"`).join("; ")}.`
     : perfNote;
@@ -814,6 +818,9 @@ function isBriefReady(brief: { targetKeyword: string | null; outline: unknown })
   const outline = Array.isArray(brief.outline) ? brief.outline : [];
   return Boolean(brief.targetKeyword && brief.targetKeyword.trim().length > 2 && outline.length >= 3);
 }
+
+/** When the brand-neutral blog rules took effect; older briefs for such a store are rebuilt before writing. */
+const GENERIC_RULES_SINCE = new Date("2026-11-14T00:00:00Z");
 
 /** True when blog writing is on hold for this store (Business.blogPaused). */
 async function blogPausedFor(businessId: string): Promise<boolean> {
@@ -1437,7 +1444,10 @@ export async function buildBriefFromIdea(ideaId: string): Promise<string> {
   const keyword = idea.targetKeyword?.trim() || slugify(idea.title).replace(/-/g, " ");
   const spec = await buildBrief({
     targetKeyword: keyword,
-    businessContext: idea.business.profileMd ?? idea.business.name,
+    // Brand-neutral stores: the brief knows the audience, never the store or its products.
+    businessContext: industryFor(idea.business).blogGenericOnly
+      ? `AUDIENCE: pet owners. This is a brand-neutral, generic guide that does not mention any store, brand, company, product line, price or link.\n\n${GENERIC_BLOG_RULES}\n\n${industryFor(idea.business).blogGenericPrimer ?? ""}`
+      : idea.business.profileMd ?? idea.business.name,
   });
   if (idea.origin === "THEMES" && idea.targetKeyword?.trim()) spec.targetKeyword = idea.targetKeyword.trim();
 
@@ -1699,8 +1709,39 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
       },
     }));
 
+  const pack = industryFor(brief.business);
+  // Brand-neutral store: a brief made before its rules (before 2026-11-14) may lean
+  // on the store's products. Rebuild it brand-neutral before writing.
+  if (pack.blogGenericOnly && brief.createdAt < GENERIC_RULES_SINCE) {
+    const fresh = await buildBrief({
+      targetKeyword: brief.targetKeyword,
+      businessContext:
+        `AUDIENCE: pet owners. This is a brand-neutral, generic guide that does not mention any store, brand, company, product line, price or link.\n\n${GENERIC_BLOG_RULES}\n\n${pack.blogGenericPrimer ?? ""}`,
+    });
+    Object.assign(
+      brief,
+      await prisma.brief.update({
+        where: { id: brief.id },
+        data: {
+          angle: fresh.angle,
+          wordTarget: fresh.wordTarget,
+          outline: fresh.outline,
+          questions: fresh.questions,
+          requiredSchema: fresh.requiredSchema,
+          gapMap: { gap: fresh.gap },
+          createdAt: new Date(),
+        },
+      }),
+    );
+    console.log(`[worker] rebuilt a brand-neutral brief for “${brief.idea.title}”`);
+  }
   const spec = toBriefSpec(brief);
-  const brandVoice = brief.business.brandVoice ?? "Clear, warm, and authoritative.";
+  const brands = brandNamesFor(brief.business);
+  // Brand-neutral stores: the store's brand voice can name the store and its
+  // offer, so the writer gets only the tone.
+  const brandVoice = pack.blogGenericOnly
+    ? "Warm, plain and reassuring, written for grieving pet owners; practical and kind, never salesy."
+    : brief.business.brandVoice ?? "Clear, warm, and authoritative.";
   const threshold = brief.business.qualityThreshold;
   // Last repeat check before paying for the write: something on the same topic
   // may have gone live or been written since the brief. Stop the piece if so.
@@ -1719,12 +1760,11 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
   const houseRules = await buildContentGuidance(brief.businessId);
   const rawBody = await writeDraft(spec, brandVoice, houseRules, {
     local: brief.idea.kind === "LOCAL",
-    industry: industryFor(brief.business),
+    industry: pack,
   });
   // Guarantee the "In this guide" + "What to know first" boxes (rebuilt with one
   // small call if the writer missed the spec) before the grader sees the piece.
-  const pack = industryFor(brief.business);
-  const body = await ensureGuideBlocks(await withoutInventedPeople(finalizeDraftBody(rawBody), draft.title, pack, brief.business.domain), {
+  const body = await ensureGuideBlocks(await withoutInventedPeople(finalizeDraftBody(rawBody), draft.title, pack, brief.business.domain, brands), {
     title: draft.title,
   });
   draft = await prisma.draft.update({
@@ -1742,7 +1782,7 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
   let bestOverall = -1;
 
   for (loop = 1; loop <= MAX_REVISION_LOOPS; loop++) {
-    const grade = await gradeDraft(currentDraft, briefContext, threshold);
+    const grade = await gradeForStore(currentDraft, briefContext, threshold, pack, brands);
 
     await prisma.grade.create({
       data: {
@@ -1781,10 +1821,11 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
     const weakest = weakestDimensions(grade.dimensions).slice(0, 3);
     currentDraft = await ensureGuideBlocks(
       await withoutInventedPeople(
-        finalizeDraftBody(await reviseDraft(currentDraft, grade.feedback, weakest)),
+        finalizeDraftBody(await reviseDraft(currentDraft, grade.feedback, weakest, pack.blogGenericOnly ? GENERIC_BLOG_RULES : "")),
         draft.title,
         pack,
         brief.business.domain,
+        brands,
       ),
       { title: draft.title },
     );
@@ -1908,9 +1949,16 @@ async function withoutInventedPeople(
   title: string,
   pack?: IndustryPack,
   domain = "",
+  brands: string[] = [],
 ): Promise<string> {
-  const linked = pack ? stripDisallowedLinks(bodyMd, pack, domain) : bodyMd;
-  const flags = [...inventedPeopleFlags(linked), ...(pack ? packClaimFlags(linked, pack) : [])];
+  // Brand-neutral stores: no links at all; otherwise only the pack's allowed ones.
+  const unlink = (md: string) => (pack?.blogGenericOnly ? stripAllLinks(md) : pack ? stripDisallowedLinks(md, pack, domain) : md);
+  const linked = unlink(bodyMd);
+  const flags = [
+    ...inventedPeopleFlags(linked),
+    ...(pack ? packClaimFlags(linked, pack) : []),
+    ...(pack?.blogGenericOnly ? await genericProblems(linked, brands) : []),
+  ];
   if (!flags.length) return linked;
   const lines = flags.map((f) => `- "${f.line}" (${f.why})`).join("\n");
   const out = await reviseBodyWithInstruction(
@@ -1920,8 +1968,66 @@ async function withoutInventedPeople(
       `Rewrite each as a plain factual statement in the store's voice that no longer breaks the rule, or delete it ` +
       `if nothing useful is left. Keep every other fact, figure and link. Do not add any people, quotes, stories, ` +
       `claims about where products are made or who makes them, engraving offers or free-shipping promises.`,
+    { generic: Boolean(pack?.blogGenericOnly) },
   );
-  return finalizeDraftBody(pack ? stripDisallowedLinks(out, pack, domain) : out);
+  return finalizeDraftBody(unlink(out));
+}
+
+/** The store's own names (name, domain, domain stem) that a brand-neutral blog must not mention. */
+function brandNamesFor(biz: { name: string; domain: string }): string[] {
+  const host = biz.domain.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./, "");
+  const parts = host.split(".");
+  const stems = parts.filter((p) => p.length >= 6 && !/^(?:com|net|org|shop|store|pets?)$/.test(p));
+  const nameStem = biz.name.replace(/\s+pets?$/i, "");
+  return [...new Set([biz.name, nameStem, host, ...stems])].filter((x) => x.trim().length >= 4);
+}
+
+/**
+ * Grade a blog, then apply the store's hard rules: in brand-neutral mode a draft
+ * that names our store/brand, any brand or company, our products/prices/sizes/
+ * shipping, or contains any link FAILS (its score is capped below the pass mark
+ * and the problems lead the feedback, so the revise loop fixes them).
+ */
+async function gradeForStore(
+  body: string,
+  briefContext: string,
+  threshold: number,
+  pack: IndustryPack,
+  brands: string[],
+): Promise<Awaited<ReturnType<typeof gradeDraft>>> {
+  if (!pack.blogGenericOnly) return gradeDraft(body, briefContext, threshold);
+  // Tell the grader the rules, so it doesn't mark the blog down for having no
+  // links or citations (they're forbidden here).
+  let ctx = briefContext;
+  try {
+    ctx = JSON.stringify({
+      ...(JSON.parse(briefContext) as object),
+      storeRules:
+        "This store's blogs are brand-neutral guides with NO links at all (no external, no internal) and no brand, " +
+        "store or product mentions. Do NOT penalize the absence of links, citations or calls to action; score internal " +
+        "linking and E-E-A-T on clear structure and accurate, specific facts instead. DO penalize any link, any brand or " +
+        "company name, and any mention of the store's products, prices, sizes or shipping.",
+    });
+  } catch {
+    /* briefContext not JSON — grade as is */
+  }
+  const grade = await gradeDraft(body, ctx, threshold);
+  const problems = [
+    ...(hasLinks(body) ? [{ line: "(the article contains a link)", why: "contains a link" }] : []),
+    ...(await genericProblems(body, brands)),
+    ...packClaimFlags(body, pack),
+  ];
+  if (!problems.length) return grade;
+  const list = problems.slice(0, 12).map((p) => `- "${p.line}" (${p.why})`).join("\n");
+  console.warn(`[grade] store rules broken (${problems.length}) — capped below the pass mark`);
+  return {
+    ...grade,
+    overall: Math.min(grade.overall, threshold - 1),
+    passed: false,
+    feedback:
+      `STORE RULES BROKEN — this blog must be a brand-neutral guide with no links. Fix these first:\n${list}\n\n` +
+      (grade.feedback ?? ""),
+  };
 }
 
 /** Apply a plain-language edit instruction to a blog body, preserving structure.
@@ -1931,8 +2037,16 @@ async function reviseBodyWithInstruction(
   bodyMd: string,
   title: string,
   instruction: string,
+  /** The store, so a brand-neutral store's rules ride along (no brand, products or links). */
+  store: { businessId?: string; generic?: boolean } = {},
 ): Promise<string> {
   if (!aiEnabled()) return bodyMd;
+  let generic = store.generic ?? false;
+  if (store.generic === undefined && store.businessId) {
+    const biz = await prisma.business.findUnique({ where: { id: store.businessId } }).catch(() => null);
+    generic = Boolean(biz && industryFor(biz).blogGenericOnly);
+  }
+  if (generic) instruction = `${instruction}\n\n${GENERIC_BLOG_RULES}`;
   try {
     const out = await completeText({
       model: MODELS.writer,
@@ -1957,6 +2071,7 @@ ${bodyMd}`,
     if (cleaned.length < bodyMd.length * 0.4) return bodyMd; // guard against a truncated/bad response
     // No schema in the body and no invented people, whatever the model returned.
     cleaned = stripAuthorSections(stripJsonLdBlocks(cleaned));
+    if (generic) cleaned = stripAllLinks(cleaned);
     // Never let a revision break a post: if the rewritten body wouldn't render
     // to real HTML (empty / raw text), keep the original.
     try {
@@ -2003,7 +2118,7 @@ export async function applyBlogFeedback(
 
   // Fix the current blog.
   const revised = await trackDraftCost(draftId, () =>
-    reviseBodyWithInstruction(draft.bodyMd, draft.title, clean),
+    reviseBodyWithInstruction(draft.bodyMd, draft.title, clean, { businessId: draft.businessId }),
   );
   if (revised !== draft.bodyMd) {
     await prisma.draft.update({ where: { id: draftId }, data: { bodyMd: revised } });
@@ -2035,7 +2150,7 @@ export async function scrubAllReadyFabrication(
           .catch(() => {});
       }
       const revised = await trackDraftCost(d.id, () =>
-        reviseBodyWithInstruction(d.bodyMd, d.title, FABRICATION_NOTE),
+        reviseBodyWithInstruction(d.bodyMd, d.title, FABRICATION_NOTE, { businessId: d.businessId }),
       );
       if (revised !== d.bodyMd) {
         await prisma.draft.update({ where: { id: d.id }, data: { bodyMd: revised } });
@@ -2065,7 +2180,7 @@ export async function fixPublishedPost(draftId: string): Promise<{ updated: bool
 
   // 1. Scrub fabricated operations from the body (keep pricing/facts/structure).
   const scrubbed = await trackDraftCost(draftId, () =>
-    reviseBodyWithInstruction(draft.bodyMd, draft.title, FABRICATION_NOTE),
+    reviseBodyWithInstruction(draft.bodyMd, draft.title, FABRICATION_NOTE, { businessId: draft.businessId }),
   );
   if (scrubbed !== draft.bodyMd) {
     await prisma.draft.update({ where: { id: draftId }, data: { bodyMd: scrubbed } });
@@ -2154,7 +2269,7 @@ export async function refreshPublishedPost(draftId: string): Promise<{ refreshed
   if (await draftPaused(draftId)) return { refreshed: false };
   const draft = await prisma.draft.findUnique({
     where: { id: draftId },
-    select: { id: true, bodyMd: true, title: true },
+    select: { id: true, businessId: true, bodyMd: true, title: true },
   });
   if (!draft) throw new Error(`Draft ${draftId} not found`);
 
@@ -2167,7 +2282,7 @@ export async function refreshPublishedPost(draftId: string): Promise<{ refreshed
     `numbers or business-operations details. Preserve the structure, tone, links, and the JSON-LD schema.`;
 
   const revised = await trackDraftCost(draftId, () =>
-    reviseBodyWithInstruction(draft.bodyMd, draft.title, note),
+    reviseBodyWithInstruction(draft.bodyMd, draft.title, note, { businessId: draft.businessId }),
   );
   const changed = revised !== draft.bodyMd;
   if (changed) {
@@ -2335,7 +2450,9 @@ export async function relocalizePost(draftId: string): Promise<{ rebuilt: boolea
   if (draft.brief?.idea?.kind !== "LOCAL") return { rebuilt: false };
 
   const revised = await trackDraftCost(draftId, () =>
-    reviseBodyWithInstruction(draft.bodyMd, draft.title, relocalizeNote(draft.business)),
+    reviseBodyWithInstruction(draft.bodyMd, draft.title, relocalizeNote(draft.business), {
+      generic: Boolean(industryFor(draft.business).blogGenericOnly),
+    }),
   );
   const changed = revised !== draft.bodyMd;
   if (changed) {
@@ -2552,6 +2669,8 @@ async function gatherResources(
 
   // Product facts from the business's CMS catalog.
   const business = await prisma.business.findUnique({ where: { id: businessId } });
+  // Brand-neutral blogs never get product facts (or linkable web sources).
+  if (business && industryFor(business).blogGenericOnly) return { products, sources };
   if (business && encryptionEnabled()) {
     const platform = business.cmsPlatform.toLowerCase() as CmsPlatform;
     const connector = await prisma.connector.findUnique({
@@ -2679,8 +2798,16 @@ export async function autoImproveDraft(draftId: string): Promise<void> {
 
     const spec = toBriefSpec(draft.brief);
     const weakest = weakestDimensions(best.dimensions as never).slice(0, 3);
-    const candidate = finalizeDraftBody(await reviseDraft(draft.bodyMd, best.feedback ?? "", weakest));
-    const grade = await gradeDraft(candidate, JSON.stringify(spec), threshold);
+    const pack = industryFor(draft.business);
+    const brands = brandNamesFor(draft.business);
+    const candidate = await withoutInventedPeople(
+      finalizeDraftBody(await reviseDraft(draft.bodyMd, best.feedback ?? "", weakest, pack.blogGenericOnly ? GENERIC_BLOG_RULES : "")),
+      draft.title,
+      pack,
+      draft.business.domain,
+      brands,
+    );
+    const grade = await gradeForStore(candidate, JSON.stringify(spec), threshold, pack, brands);
     const nextVersion = (best.version ?? draft.version) + 1;
     await prisma.grade.create({
       data: {
@@ -2803,7 +2930,13 @@ export async function regradeDraft(draftId: string): Promise<{ overall: number; 
 
   const spec = toBriefSpec(draft.brief);
   const threshold = draft.business.qualityThreshold;
-  const grade = await gradeDraft(draft.bodyMd, JSON.stringify(spec), threshold);
+  const grade = await gradeForStore(
+    draft.bodyMd,
+    JSON.stringify(spec),
+    threshold,
+    industryFor(draft.business),
+    brandNamesFor(draft.business),
+  );
   const nextVersion = (draft.grades[0]?.version ?? draft.version) + 1;
 
   await prisma.grade.create({

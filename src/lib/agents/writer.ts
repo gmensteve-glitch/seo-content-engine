@@ -6,6 +6,7 @@ import type { BriefSpec } from "@/lib/agents/research";
 import { aiEnabled } from "@/lib/env";
 import { offlineDraft, offlineRevise } from "@/lib/ai/offline";
 import { INDUSTRIES, type IndustryPack } from "@/lib/categories/industry";
+import { GENERIC_BLOG_RULES } from "@/lib/agents/generic-blog";
 
 const templateGuidance = (ind: IndustryPack) => `Write the page as Markdown.
 
@@ -27,9 +28,9 @@ STRUCTURE:
 - Clear H2/H3 sections; a step-by-step "how-to" where the topic calls for it.
 - Self-contained passages of ~130–170 words under key headings so AI answer engines can quote them verbatim.
 - An FAQ section near the end (each answer self-contained, ~40–70 words).
-${ind.blogLinksOnlyToAuthorities ? `- 1–3 links to outside sources, and ONLY to these sites: ${ind.authorityLinks.map((l) => `${l.title} (${l.url})`).join("; ")}. Link the homepage unless you are certain a deeper page exists. No other outside links.` : "- 2–4 links to authoritative EXTERNAL sources (prefer .gov / recognized institutions), placed inline where a claim needs backing. Only link to a real URL you are confident exists."}
+${ind.blogGenericOnly ? "- NO links of any kind: no external and no internal links. Plain text only." : ind.blogLinksOnlyToAuthorities ? `- 1–3 links to outside sources, and ONLY to these sites: ${ind.authorityLinks.map((l) => `${l.title} (${l.url})`).join("; ")}. Link the homepage unless you are certain a deeper page exists. No other outside links.` : "- 2–4 links to authoritative EXTERNAL sources (prefer .gov / recognized institutions), placed inline where a claim needs backing. Only link to a real URL you are confident exists."}
 - Do NOT invent internal links to the site's own pages — never write a relative link like [text](/caskets/pricing-guide) or guess the site's URL structure. Internal links to real published pages are added automatically by the system. Do not write in-page jump links either ("In this guide" is plain text).
-- Soft calls-to-action at the top and bottom (never pushy).
+${ind.blogGenericOnly ? "- No calls to action of any kind." : "- Soft calls-to-action at the top and bottom (never pushy)."}
 - NO schema or code in the article: do not write JSON-LD, a \`\`\`json block, a <script> tag or any other code block. Schema is handled separately.
 - NO byline, author line or "About the Author" / "Meet the team" / "Reviewed by" section. The byline is added later from the store's real authors.
 
@@ -37,7 +38,7 @@ GEO — BUILT TO BE QUOTED BY AI ANSWER ENGINES (ChatGPT, Perplexity, Google AI 
 - Do NOT write a "Quick answer" block, label or bold answer box. Instead, the intro's first 1–2 sentences answer the exact question the title asks in plain prose: lead with the number/range/verdict, so an AI can quote them as a complete, accurate answer.
 - Under EVERY H2, the first 1–2 sentences must directly and completely answer that section's implied question — no "as mentioned above", no pronouns pointing elsewhere, no setup. Every passage must stand on its own when pulled out of context.
 - State key facts as clean, standalone, attributable sentences with concrete numbers, ranges, or named standards (e.g. ${ind.exampleFact ? `"${ind.exampleFact}"` : ind.key === "headstones" ? '"A standard single flat grave marker is 24 inches wide, 12 inches deep and 4 inches thick."' : '"A standard adult casket is about 84 inches long and 28 inches wide."'}). Specific, quotable facts beat vague prose.
-- Mention the brand naturally where it fits so the source is attributable (never spammy).
+${ind.blogGenericOnly ? "- Never mention any store, brand or company." : "- Mention the brand naturally where it fits so the source is attributable (never spammy)."}
 - Make the FAQ answers fully self-contained — they are prime AI-answer real estate.
 
 QUALITY — this is what gets it ranked:
@@ -45,14 +46,14 @@ QUALITY — this is what gets it ranked:
 - Use concrete, verifiable specifics: real price ranges, real timeframes, named standards or regulations — but ONLY ones you are confident are real. NEVER invent a statute, statistic, citation, or source.
 - NO INVENTED PEOPLE, EVER. Do not create pen names, personas, authors, experts, staff members, customers or families. No "About the Author" section. No made-up staff names ("our engraver Maria"). No quotes attributed to anyone (invented or real) and no testimonials. No customer stories or anecdotes ("one family we helped…", "a widow told us…"). No first-person persona voice ("I've helped hundreds of families", "in my 20 years"). No credentials, licence numbers or job titles for anyone. Write as the store, in plain second person to the reader ("you"), with "we" only for the store itself. Authority comes from accurate, specific facts and real cited sources, never from a person.
 - Real-world PRICING and market facts are ENCOURAGED and valuable: ${ind.productNoun}/service cost ranges, local and regional price estimates, typical fees, and what things generally cost are all welcome — keep them realistic and, where possible, framed as ranges or "typically". What you must NEVER do is fabricate specifics about how THIS business itself operates: ${ind.blogOperationalRule} Presented as fact, invented operational details read as PROMISES about our business and create real liability. When the topic touches our shipping, delivery, or timing, stay BROAD: say timelines vary by destination and carrier, and tell the reader to confirm exact timing and handling with us and the shipping provider directly. Likewise, never assert how a SPECIFIC third-party ${ind.venue} operates (its exact steps, fees, hours, or timelines) as fact — give general industry norms and tell the reader to verify with their chosen ${ind.venue}. (Pricing and general facts are fine; inventing OUR operational process is not.)
-- THE LAW, STATED ACCURATELY: ${ind.legalRule} ${ind.legalDontSay}${ind.primer ? `\n\n${ind.primer}` : ""}
+- THE LAW, STATED ACCURATELY: ${ind.legalRule} ${ind.legalDontSay}${(ind.blogGenericOnly ? ind.blogGenericPrimer : ind.primer) ? `\n\n${ind.blogGenericOnly ? ind.blogGenericPrimer : ind.primer}` : ""}
 - Write like an experienced practitioner: specific, plain, reassuring.
 - BAN these AI-slop tells: em-dash overuse, "in conclusion", "it's important to note", "when it comes to", "navigate/navigating", "delve", "in today's world", and reflexive hedging ("generally", "typically", "often") unless genuinely warranted.
 - Write the strongest, COMPLETE version you can using the verifiable specifics allowed above. This pipeline is fully automated — there is no human to fill in blanks later. Do NOT insert placeholder callouts, bracketed TODOs, "[add …]" notes, or "> **Add your experience:**" markers. The piece must be finished and publishable exactly as written.
 
 TONE — warm and personal: you're talking to a grieving family, not writing a spec sheet. Lead with empathy and reassurance, use plain human language, and be genuinely helpful before anything else. Keep the brand voice below, but never let it get cold, corporate, or salesy.
 
-Write in the brand voice provided.`;
+Write in the brand voice provided.${ind.blogGenericOnly ? `\n\n${GENERIC_BLOG_RULES}` : ""}`;
 
 // Extra guidance for LOCAL (geo-targeted) pages. Nationwide shipping means the
 // win is being the CITED local authority — so lead with the place-named,
@@ -85,7 +86,9 @@ export async function writeDraft(
 export async function reviseDraft(
   draft: string,
   feedback: string,
-  weakest: string[]
+  weakest: string[],
+  /** Store rules that every revision must keep (e.g. the brand-neutral rules). */
+  extraRules = "",
 ): Promise<string> {
   if (!aiEnabled()) return offlineRevise(draft);
 
@@ -106,7 +109,7 @@ Rules:
 - The piece must be complete and publishable as-is: remove any leftover placeholder callouts, bracketed TODOs, or "> **Add your experience:**" markers.
 - Do not introduce AI-slop tells (em-dash spam, "in conclusion", "it's important to note", reflexive hedging).
 - Return the full revised Markdown (not a diff).
-
+${extraRules ? `\n${extraRules}\n` : ""}
 DRAFT:
 ${draft}`;
 
