@@ -81,6 +81,8 @@ export interface IndustryPack {
   blogGenericOnly?: boolean;
   /** The primer the BLOG brief and writer get when blogGenericOnly (no product facts). */
   blogGenericPrimer?: string;
+  /** The store makes its own blog images: the engine never generates or sources a hero. */
+  noBlogHeroImages?: boolean;
 }
 
 // ── Caskets ────────────────────────────────────────────────────
@@ -447,6 +449,7 @@ const PETS: IndustryPack = {
   exampleFact: "Measure your pet from the tip of the nose to the base of the tail before you choose a casket.",
   // Owner decision 2026-11-13: pet blogs are brand-neutral guides with no links.
   blogGenericOnly: true,
+  noBlogHeroImages: true, // owner 2026-11-13: "we make our own"
   blogGenericPrimer: `TOPIC PRIMER — PET LOSS, PET BURIAL AND PET CREMATION (general knowledge for a brand-neutral guide)
 - Readers: a family whose dog, cat or other pet has just died, or is about to, often deciding within a day between burying at home and cremation, or planning a keepsake after cremation. Grief is fresh: be gentle and practical.
 - PET CASKETS (in general): chosen by the pet's length; measure from the tip of the nose to the base of the tail with the pet lying on its side and allow a few inches of room. Materials vary (wood, cardboard, fabric-lined, plastic). Say nothing about any particular seller's sizes or prices.

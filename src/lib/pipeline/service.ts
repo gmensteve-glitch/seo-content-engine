@@ -819,8 +819,10 @@ function isBriefReady(brief: { targetKeyword: string | null; outline: unknown })
   return Boolean(brief.targetKeyword && brief.targetKeyword.trim().length > 2 && outline.length >= 3);
 }
 
-/** When the brand-neutral blog rules took effect; older briefs for such a store are rebuilt before writing. */
-const GENERIC_RULES_SINCE = new Date("2026-11-14T00:00:00Z");
+/** A brief built under the brand-neutral rules carries gapMap.generic = true. */
+function isGenericBrief(gapMap: unknown): boolean {
+  return Boolean(gapMap && typeof gapMap === "object" && (gapMap as { generic?: unknown }).generic === true);
+}
 
 /** True when blog writing is on hold for this store (Business.blogPaused). */
 async function blogPausedFor(businessId: string): Promise<boolean> {
@@ -1461,7 +1463,7 @@ export async function buildBriefFromIdea(ideaId: string): Promise<string> {
       outline: spec.outline,
       questions: spec.questions,
       requiredSchema: spec.requiredSchema,
-      gapMap: { gap: spec.gap },
+      gapMap: industryFor(idea.business).blogGenericOnly ? { gap: spec.gap, generic: true } : { gap: spec.gap },
       contentType: "BLOG",
       status: "PENDING_APPROVAL",
     },
@@ -1586,66 +1588,89 @@ async function claimNextDraft(): Promise<{ id: string; briefId: string } | null>
  * the workerRunning guard. Stranded drafts (crash/restart/timeout) are healed
  * here because their stale lock makes them claimable again.
  */
+/** Parallel lanes for the in-process worker (env WORKER_CONCURRENCY, default 1, max 8). */
+function workerConcurrency(): number {
+  const n = Number(process.env.WORKER_CONCURRENCY);
+  return Number.isFinite(n) && n >= 1 ? Math.min(8, Math.floor(n)) : 1;
+}
+
+/** Run one claimed draft end to end (pipeline, auto-improve, hero image), then release its lock. */
+async function runClaimedDraft(claimed: { id: string; briefId: string }): Promise<void> {
+  try {
+    await trackDraftCost(claimed.id, async () => {
+      await runPipelineForBrief(claimed.briefId);
+      // Auto-boost a near-miss with our own data (no human needed). Runs once
+      // here; FAILED drafts aren't re-claimed, so it never loops.
+      const after = await prisma.draft.findUnique({
+        where: { id: claimed.id },
+        select: { status: true, rejectedAt: true },
+      });
+      if (after?.status === "FAILED" && !after.rejectedAt) {
+        // Auto-improve to the piece's ceiling (data boost + keep-best revises).
+        await autoImproveDraft(claimed.id).catch((e) => {
+          console.error(`[worker] auto-improve failed for ${claimed.id}:`, e instanceof Error ? e.message : e);
+        });
+      }
+      // Give a passed piece a hero image now, so the Ready stack is complete
+      // (swappable later on the review page). Best-effort — never block a pass.
+      const final = await prisma.draft.findUnique({
+        where: { id: claimed.id },
+        select: { status: true },
+      });
+      if (final?.status === "PASSED") {
+        await ensureHeroImage(claimed.id).catch((e) => {
+          console.error(`[worker] hero image failed for ${claimed.id}:`, e instanceof Error ? e.message : e);
+        });
+      }
+    });
+  } catch (e) {
+    console.error(
+      `[worker] pipeline failed for draft ${claimed.id}:`,
+      e instanceof Error ? e.message : e,
+    );
+    // If it has exhausted its attempts, stop retrying — flag for a human.
+    const d = await prisma.draft.findUnique({
+      where: { id: claimed.id },
+      select: { attempts: true, status: true },
+    });
+    if (d && d.attempts >= WORKER_MAX_ATTEMPTS && IN_PROGRESS.includes(d.status as DraftStatus)) {
+      await prisma.draft
+        .update({ where: { id: claimed.id }, data: { status: "FAILED" } })
+        .catch(() => {});
+    }
+  } finally {
+    // Release the lock so terminal drafts don't hold it (and a still-in-progress
+    // one becomes reclaimable if this run didn't finish it).
+    await prisma.draft
+      .update({ where: { id: claimed.id }, data: { processingStartedAt: null } })
+      .catch(() => {});
+  }
+}
+
 export async function processQueuedDrafts(max = 10): Promise<number> {
   requireDb();
   if (workerRunning) return 0;
   workerRunning = true;
   let processed = 0;
-  try {
-    for (let i = 0; i < max; i++) {
+  // WORKER_CONCURRENCY lanes claim drafts in parallel; the claim is an
+  // optimistic lock on processingStartedAt, so two lanes never run the same
+  // draft. A lane that loses a claim race tries again before deciding the
+  // queue is empty. `max` is the total across lanes.
+  const lane = async () => {
+    let misses = 0;
+    while (processed < max) {
       const claimed = await claimNextDraft();
-      if (!claimed) break;
-      try {
-        await trackDraftCost(claimed.id, async () => {
-          await runPipelineForBrief(claimed.briefId);
-          // Auto-boost a near-miss with our own data (no human needed). Runs once
-          // here; FAILED drafts aren't re-claimed, so it never loops.
-          const after = await prisma.draft.findUnique({
-            where: { id: claimed.id },
-            select: { status: true, rejectedAt: true },
-          });
-          if (after?.status === "FAILED" && !after.rejectedAt) {
-            // Auto-improve to the piece's ceiling (data boost + keep-best revises).
-            await autoImproveDraft(claimed.id).catch((e) => {
-              console.error(`[worker] auto-improve failed for ${claimed.id}:`, e instanceof Error ? e.message : e);
-            });
-          }
-          // Give a passed piece a hero image now, so the Ready stack is complete
-          // (swappable later on the review page). Best-effort — never block a pass.
-          const final = await prisma.draft.findUnique({
-            where: { id: claimed.id },
-            select: { status: true },
-          });
-          if (final?.status === "PASSED") {
-            await ensureHeroImage(claimed.id).catch((e) => {
-              console.error(`[worker] hero image failed for ${claimed.id}:`, e instanceof Error ? e.message : e);
-            });
-          }
-        });
-      } catch (e) {
-        console.error(
-          `[worker] pipeline failed for draft ${claimed.id}:`,
-          e instanceof Error ? e.message : e,
-        );
-        // If it has exhausted its attempts, stop retrying — flag for a human.
-        const d = await prisma.draft.findUnique({
-          where: { id: claimed.id },
-          select: { attempts: true, status: true },
-        });
-        if (d && d.attempts >= WORKER_MAX_ATTEMPTS && IN_PROGRESS.includes(d.status as DraftStatus)) {
-          await prisma.draft
-            .update({ where: { id: claimed.id }, data: { status: "FAILED" } })
-            .catch(() => {});
-        }
-      } finally {
-        // Release the lock so terminal drafts don't hold it (and a still-in-progress
-        // one becomes reclaimable if this run didn't finish it).
-        await prisma.draft
-          .update({ where: { id: claimed.id }, data: { processingStartedAt: null } })
-          .catch(() => {});
+      if (!claimed) {
+        if (++misses >= 3) return;
+        continue;
       }
+      misses = 0;
       processed++;
+      await runClaimedDraft(claimed);
     }
+  };
+  try {
+    await Promise.all(Array.from({ length: workerConcurrency() }, () => lane()));
   } finally {
     workerRunning = false;
   }
@@ -1710,9 +1735,9 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
     }));
 
   const pack = industryFor(brief.business);
-  // Brand-neutral store: a brief made before its rules (before 2026-11-14) may lean
-  // on the store's products. Rebuild it brand-neutral before writing.
-  if (pack.blogGenericOnly && brief.createdAt < GENERIC_RULES_SINCE) {
+  // Brand-neutral store: a brief not built under its rules (no "generic" marker
+  // on gapMap) may lean on the store's products. Rebuild it brand-neutral once.
+  if (pack.blogGenericOnly && !isGenericBrief(brief.gapMap)) {
     const fresh = await buildBrief({
       targetKeyword: brief.targetKeyword,
       businessContext:
@@ -1728,7 +1753,7 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
           outline: fresh.outline,
           questions: fresh.questions,
           requiredSchema: fresh.requiredSchema,
-          gapMap: { gap: fresh.gap },
+          gapMap: { gap: fresh.gap, generic: true },
           createdAt: new Date(),
         },
       }),
@@ -1745,7 +1770,9 @@ export async function runPipelineForBrief(briefId: string): Promise<PipelineOutc
   const threshold = brief.business.qualityThreshold;
   // Last repeat check before paying for the write: something on the same topic
   // may have gone live or been written since the brief. Stop the piece if so.
-  const repeat = await stopIfRepeat(brief.ideaId, draft.id);
+  // A rewrite of an existing article (refreshedAt set) keeps its title on
+  // purpose, so it would always look like a repeat of itself.
+  const repeat = draft.refreshedAt ? null : await stopIfRepeat(brief.ideaId, draft.id);
   if (repeat) {
     await prisma.draft.update({ where: { id: draft.id }, data: { status: "FAILED", rejectedAt: new Date() } });
     await prisma.brief.update({ where: { id: brief.id }, data: { status: "REJECTED" } });
@@ -3501,6 +3528,11 @@ export async function ensureHeroImage(
 
   if (!opts?.force && (draft.heroImageData || draft.heroImageUrl)) {
     return { hasImage: true, source: draft.heroImageSource, alt: draft.heroImageAlt ?? "" };
+  }
+  // This store makes its own images: never generate or source one.
+  if (industryFor(draft.business).noBlogHeroImages) {
+    if (opts?.force) throw new Error("This store makes its own blog images, so the engine doesn't create them. Upload yours.");
+    return { hasImage: false, source: null, alt: "" };
   }
   // Images are off: the auto path quietly leaves the blog without one; an
   // explicit "generate / stock photo" request from the review page says why.
